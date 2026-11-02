@@ -1,0 +1,13 @@
+# What was said before a comment on a GitLab issue: `to` is project#iid, and `at`
+# the comment.
+flow: gitlab-history
+input: { to: string, at: "any?", site: string }
+stages:
+  read:
+    job:
+      script: ./gitlab.js
+      files: [.rook/blocks/thread.js]
+      input: { do: history, to: "${input.to}", at: "${input.at}", site: "${input.site}" }
+      allow: ["net:${input.site}", "secret:GITLAB_TOKEN@net:${input.site}"]
+      timeout: 20s
+output: ${stages.read.output}

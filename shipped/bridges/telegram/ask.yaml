@@ -1,0 +1,10 @@
+# Asks people on Telegram, with a button for each choice.
+flow: telegram-ask
+input: { to: list, text: string, choices: list, question: string }
+stages:
+  question:
+    job:
+      script: ./telegram.js
+      input: { do: ask, token: TELEGRAM_TOKEN, to: "${input.to}", text: "${input.text}", choices: "${input.choices}", question: "${input.question}" }
+      allow: [net:api.telegram.org, "secret:TELEGRAM_TOKEN@net:api.telegram.org"]
+      restart: { limit: 2 }          # Telegram sometimes drops a connection; a resend can repeat a message, never lose one

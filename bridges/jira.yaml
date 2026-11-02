@@ -1,0 +1,11 @@
+# The Jira issues bridge runs while this file is here. Delete it to stop the
+# bridge. Set your Jira's host, the account its token belongs to, and the projects
+# the bot watches.
+flow: jira-bridge
+limits: { depth: 16 }   # every conversation counts its levels from here
+stages:
+  listen:
+    job:
+      machine: .rook/bridges/jira/listen.yaml
+      restart: { when: always }
+      input: { dir: "${run.context}", site: example.atlassian.net, email: bot@example.com, projects: [OPS] }

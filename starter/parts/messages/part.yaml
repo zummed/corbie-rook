@@ -1,0 +1,8 @@
+# The messages part: a message to someone in people.yaml, which waits for a yes.
+does: Messages to the people this bot knows.
+ask: { machine: .rook/blocks/approval.yaml, input: { part: messages, asker: "${input.asker}", request: "${input.said}" } }
+tools:
+  tell:
+    does: Say a text to a person, by their name in people.yaml.
+    args: { person: string, text: string }
+    job: { machine: .rook/blocks/tell.yaml, input: { person: "${args.person}", text: "${args.text}" }, approve: true }

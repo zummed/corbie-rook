@@ -1,0 +1,61 @@
+# One conversation with the bot, on any bridge: a chat, a thread or an issue. A
+# bridge's listener sends each message here under a key of its own. Its messages
+# are answered one at a time, each by a new agent given the conversation so far and
+# the message's address, and with no conversation yet, what the service's thread
+# already holds. An empty reply says nothing. Anyone with no agent is told
+# the bot is not theirs, and a question the agent fails on is told so and ends the
+# conversation, so one the model cannot take does not stop the chat. A chat quiet
+# for a day ends, and its next message starts a new conversation with the machines
+# as they are then.
+statechart: chat
+initial: waiting
+states:
+  waiting:
+    timers: { quiet: 1d }
+    on: { message: answering, quiet: over }
+  answering:
+    defer: [message]
+    job:
+      input:
+        event: "${event.data.event}"
+        dir: "${event.data.dir}"
+        last: "${states.answering.output}"
+        address: "${ { bridge: event.data.event.bridge, id: event.data.event.chat, answers: event.data.event.answers, at: event.data.event.at, settings: event.data.event.settings } }"
+      machine:
+        flow: message
+        input: { event: any, dir: string, address: map, last: "any?" }
+        stages:
+          who:
+            job:
+              machine: ./who.yaml
+              input: { bridge: "${input.event.bridge}", id: "${input.event.from}", place: "${input.event.place}" }
+          history:
+            job:
+              machine: ./history.yaml
+              input: { address: "${input.address}", wanted: "${!!stages.who.output.agent && !(input.last && input.last.conversation)}" }
+          refuse:
+            when: "${!stages.who.output.agent}"
+            job: { machine: ./say.yaml, input: { address: "${input.address}", text: This bot answers only the people it belongs to. } }
+          answer:
+            when: "${stages.who.output.agent}"
+            job:
+              machine: answer.yaml
+              input:
+                agent: "${stages.who.output.agent}"
+                message:
+                  said: "${input.event.text}"
+                  asker: "${stages.who.output.person}"
+                  home: "${input.dir}"
+                  address: "${input.address}"
+                  history: "${stages.history.output}"
+                  conversation: "${input.last ? input.last.conversation : null}"
+          say:
+            when: "${(stages.answer.output || {}).reply}"
+            job: { machine: ./say.yaml, input: { address: "${input.address}", text: "${stages.answer.output.reply}" } }
+          sorry:
+            when: "${stages.answer.failed}"
+            job: { machine: ./say.yaml, input: { address: "${input.address}", text: That could not be answered. Ask again in a while. } }
+        output:
+          conversation: "${stages.answer.failed ? null : stages.answer.skipped ? (input.last ? input.last.conversation : null) : (stages.answer.output || {}).conversation}"
+    on: { done: waiting, failed: waiting }
+  over: { end: done }

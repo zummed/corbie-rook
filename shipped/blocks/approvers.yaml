@@ -1,0 +1,9 @@
+# Where to reach everyone who may approve a part's calls.
+flow: approvers
+input: { part: string }
+stages:
+  names:
+    job: { script: ./approvers.js, files: [rules.yaml], input: { part: "${input.part}" } }
+  reach:
+    job: { machine: lookup.yaml, input: { do: reach, names: "${stages.names.output}" } }
+output: ${stages.reach.output}

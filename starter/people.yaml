@@ -1,0 +1,7 @@
+# Who people are: where each is found on each bridge, and their groups. Change
+# lookup.yaml to take this from elsewhere.
+people:
+  alice: { telegram: "1" }
+  bob: { telegram: "2" }
+groups:
+  family: [alice, bob]

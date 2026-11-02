@@ -1,0 +1,11 @@
+# Says a text on Slack: `to` is a conversation, or conversation/thread.
+flow: slack-say
+input: { to: string, text: string }
+stages:
+  say:
+    job:
+      script: ./slack.js
+      input: { do: say, to: "${input.to}", text: "${input.text}" }
+      allow: [net:slack.com, "secret:SLACK_TOKEN@net:slack.com"]
+      restart: { limit: 2 }
+output: ${stages.say.output}

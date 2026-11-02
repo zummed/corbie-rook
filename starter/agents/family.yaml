@@ -1,0 +1,3 @@
+# The agent for everyone else in people.yaml. It opens no part, so it only talks.
+agent: family
+include: ./base.yaml

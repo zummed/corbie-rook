@@ -1,0 +1,97 @@
+// Package rook is what Rook ships: ready-made machines, and what writes them into
+// a project.
+package rook
+
+import (
+	"embed"
+	"fmt"
+	"io/fs"
+	"os"
+	"path"
+	"path/filepath"
+	"slices"
+)
+
+//go:embed all:shipped all:starter all:bridges
+var files embed.FS
+
+// Shipped is the directory in a project that holds Rook's machines. Rook rewrites
+// it, and a person changes nothing in it.
+const Shipped = ".rook"
+
+// Secrets gives the secrets each bridge needs.
+var Secrets = map[string][]string{
+	"telegram": {"TELEGRAM_TOKEN"},
+	"slack":    {"SLACK_TOKEN", "SLACK_APP_TOKEN"},
+	"gitlab":   {"GITLAB_TOKEN"},
+	"jira":     {"JIRA_TOKEN"},
+}
+
+// Bridges gives the name of every bridge, sorted.
+func Bridges() []string {
+	names := make([]string, 0, len(Secrets))
+	for name := range Secrets {
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
+}
+
+// Init makes dir a project, or brings one up to date. It rewrites .rook. It writes
+// the starting files if dir has no rules.yaml, and the file of each bridge named
+// that is not there, so it changes no file of the person's.
+func Init(dir string, bridges []string) error {
+	for _, name := range bridges {
+		if _, ok := Secrets[name]; !ok {
+			return fmt.Errorf("there is no bridge %q: there are %v", name, Bridges())
+		}
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	if err := os.RemoveAll(filepath.Join(dir, Shipped)); err != nil {
+		return err
+	}
+	if err := copyTree("shipped", filepath.Join(dir, Shipped), true); err != nil {
+		return err
+	}
+	if _, err := os.Stat(filepath.Join(dir, "rules.yaml")); os.IsNotExist(err) {
+		if err := copyTree("starter", dir, false); err != nil {
+			return err
+		}
+	}
+	for _, name := range bridges {
+		if err := copyFile("bridges/"+name+".yaml", filepath.Join(dir, "bridges", name+".yaml"), false); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// copyTree copies a tree of files to a directory.
+func copyTree(from, to string, replace bool) error {
+	return fs.WalkDir(files, from, func(name string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		rel, err := filepath.Rel(from, name)
+		if err != nil {
+			return err
+		}
+		return copyFile(name, filepath.Join(to, rel), replace)
+	})
+}
+
+func copyFile(name, to string, replace bool) error {
+	if _, err := os.Stat(to); err == nil && !replace {
+		return nil
+	}
+	text, err := files.ReadFile(path.Clean(name))
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(to, text, 0o644)
+}

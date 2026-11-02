@@ -1,0 +1,13 @@
+# Who an event is from, and which agent they get in the place it came from.
+# lookup.yaml says who they are, and rules.yaml what they get.
+flow: who
+input: { bridge: string, id: string, place: string }
+stages:
+  person:
+    job: { machine: lookup.yaml, input: { do: who, bridge: "${input.bridge}", id: "${input.id}" } }
+  agent:
+    job:
+      script: ./who.js
+      files: [rules.yaml]
+      input: { person: "${stages.person.output.person}", groups: "${stages.person.output.groups}", place: "${input.place}" }
+output: "${ { person: stages.person.output.person, groups: stages.person.output.groups, agent: stages.agent.output } }"

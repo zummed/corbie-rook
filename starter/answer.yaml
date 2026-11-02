@@ -1,0 +1,13 @@
+# Gives what someone said to the agent `who` chose, with one stage for each agent
+# in rules.yaml. A job's machine is named here, and not chosen as it runs, since
+# only a machine written in a file keeps its parts' asks.
+flow: answer
+input: { agent: string, message: any }
+stages:
+  helper:
+    when: "${input.agent === 'helper'}"
+    job: { machine: agents/helper.yaml, input: "${input.message}" }
+  family:
+    when: "${input.agent === 'family'}"
+    job: { machine: agents/family.yaml, input: "${input.message}" }
+output: "${stages.helper.skipped ? stages.family.output : stages.helper.output}"

@@ -1,0 +1,21 @@
+# GitLab issues: asks each project what happened, every thirty seconds, since
+# GitLab cannot be asked to wait. An issue opened or a comment on an issue that
+# names the bot goes to that issue's run. Its first ask marks where each project
+# stands, and hears nothing. The token is the secret GITLAB_TOKEN.
+statechart: gitlab-listen
+input: { dir: string, site: string, projects: list }
+initial: hearing
+states:
+  hearing:
+    job:
+      script: ./gitlab.js
+      input: { do: hear, site: "${input.site}", projects: "${input.projects}", cursor: "${states.hearing.output ? states.hearing.output.cursor : null}" }
+      allow: ["net:${input.site}", "secret:GITLAB_TOKEN@net:${input.site}"]
+      timeout: 2m
+    on:
+      message: { send: { to: { machine: .rook/blocks/chat.yaml, key: "gitlab:${event.data.chat}" }, event: message, data: { event: "${event.data}", dir: "${input.dir}" } } }
+      done: resting
+      failed: resting
+  resting:
+    timers: { again: 30s }
+    on: { again: hearing }

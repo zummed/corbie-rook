@@ -1,0 +1,18 @@
+# Says a text at an address: { bridge, id }, with `answers` and `settings` where a
+# bridge uses them. One stage for each bridge, since a job's machine is named here;
+# a bridge a project does not run is never reached.
+flow: say
+input: { address: map, text: string }
+stages:
+  telegram:
+    when: "${input.address.bridge === 'telegram'}"
+    job: { machine: .rook/bridges/telegram/say.yaml, input: { to: "${input.address.id}", text: "${input.text}", answers: "${input.address.answers}" } }
+  slack:
+    when: "${input.address.bridge === 'slack'}"
+    job: { machine: .rook/bridges/slack/say.yaml, input: { to: "${input.address.id}", text: "${input.text}" } }
+  gitlab:
+    when: "${input.address.bridge === 'gitlab'}"
+    job: { machine: .rook/bridges/gitlab/say.yaml, input: { to: "${input.address.id}", text: "${input.text}", site: "${input.address.settings.site}" } }
+  jira:
+    when: "${input.address.bridge === 'jira'}"
+    job: { machine: .rook/bridges/jira/say.yaml, input: { to: "${input.address.id}", text: "${input.text}", site: "${input.address.settings.site}", email: "${input.address.settings.email}" } }

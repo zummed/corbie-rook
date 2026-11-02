@@ -1,0 +1,12 @@
+# Asks people, each on their own bridge, with a button for each choice, and gives
+# `choice`: the first answer from one of them, or no after seven days. `to` lists
+# people's addresses from lookup.yaml, on Telegram or Slack.
+flow: ask
+input: { to: list, text: string, choices: list }
+stages:
+  question:
+    job:
+      machine: ./question.yaml
+      key: "question:${run.id.slice(-10)}"
+      input: { to: "${input.to}", text: "${input.text}", choices: "${input.choices}" }
+output: ${stages.question.output}

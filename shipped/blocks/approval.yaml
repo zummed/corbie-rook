@@ -1,0 +1,22 @@
+# Approval for a part's held calls. The reviewer judges them first, and a
+# refusal ends it. Those rules.yaml names as the part's approvers decide the
+# rest, shown the reviewer's word, but for calls of tools in `alone` the
+# reviewer's yes is the last word. A part names this as its ask.
+flow: approval
+input: { asking: any, jobs: any, part: string, alone: "list?", asker: "string?", request: "string?" }
+stages:
+  brief:
+    job: { script: ./held.js, input: { jobs: "${input.jobs}", alone: "${input.alone}", asker: "${input.asker}", request: "${input.request}" } }
+  review:
+    job: { machine: agents/reviewer.yaml, input: { context: "${stages.brief.output.context}" } }
+  approvers:
+    job: { machine: ./approvers.yaml, input: { part: "${input.part}" } }
+  person:
+    when: "${stages.review.output.reply.says !== 'refuse' && !(stages.brief.output.alone && stages.review.output.reply.says === 'yes')}"
+    job:
+      machine: ./ask.yaml
+      input:
+        to: "${stages.approvers.output}"
+        choices: ["yes", "no"]
+        text: "An agent wants to run ${stages.brief.output.names.join(', ')}.\n\n${stages.brief.output.context}\n\nReviewer: ${stages.review.output.reply.says}, ${stages.review.output.reply.note}"
+output: "${stages.person.skipped ? { approve: stages.review.output.reply.says === 'yes' ? stages.brief.output.names : [], note: 'The reviewer said ' + stages.review.output.reply.says + ': ' + stages.review.output.reply.note } : { approve: stages.person.output.choice === 'yes' ? stages.brief.output.names : [], note: 'The approver said ' + stages.person.output.choice + '.' }}"

@@ -1,0 +1,6 @@
+# The agent for the person who runs this directory. A part's tools and its ask
+# come with the part.
+agent: helper
+include: ./base.yaml
+open:
+  messages: { include: parts/messages/part.yaml }

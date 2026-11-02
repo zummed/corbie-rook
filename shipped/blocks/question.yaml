@@ -1,0 +1,33 @@
+# The run behind a question, under the key ask.yaml gives it, which the buttons
+# name, so a tap goes to it. It asks each person on their own bridge, and gives the
+# first answer from one of them; no after seven days.
+statechart: question
+input: { to: list, text: string, choices: list }
+initial: asking
+states:
+  asking:
+    defer: [answer]
+    job:
+      input: { to: "${input.to}", text: "${input.text}", choices: "${input.choices}", question: "${run.key.slice(9)}" }
+      machine:
+        flow: ask-on
+        input: { to: list, text: string, choices: list, question: string }
+        stages:
+          telegram:
+            when: "${input.to.some((t) => t.bridge === 'telegram')}"
+            job:
+              machine: .rook/bridges/telegram/ask.yaml
+              input: { to: "${input.to.filter((t) => t.bridge === 'telegram').map((t) => t.id)}", text: "${input.text}", choices: "${input.choices}", question: "${input.question}" }
+          slack:
+            when: "${input.to.some((t) => t.bridge === 'slack')}"
+            job:
+              machine: .rook/bridges/slack/ask.yaml
+              input: { to: "${input.to.filter((t) => t.bridge === 'slack').map((t) => t.id)}", text: "${input.text}", choices: "${input.choices}", question: "${input.question}" }
+    on: { done: waiting }
+  waiting:
+    timers: { unanswered: 7d }
+    on:
+      answer: { go: answered, when: "${input.to.some((t) => t.bridge === event.data.bridge && t.id === event.data.from)}" }
+      unanswered: unanswered
+  answered: { end: done, output: { choice: "${event.data.choice}" } }
+  unanswered: { end: done, output: { choice: "no" } }

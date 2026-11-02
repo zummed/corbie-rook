@@ -1,0 +1,22 @@
+# Slack: listens over Socket Mode, so nothing need reach this computer. A direct
+# message and a message naming the bot each go to their conversation's run. Each
+# press of a button goes to the run that waits for it. A job ends after four
+# minutes, and the next connects again.
+statechart: slack-listen
+input: { dir: string }
+initial: hearing
+states:
+  hearing:
+    job:
+      script: ./slack.js
+      input: { do: hear }
+      allow: [net:slack.com, net:wss-primary.slack.com, net:wss-backup.slack.com, "secret:SLACK_TOKEN@net:slack.com", "secret:SLACK_APP_TOKEN@net:slack.com"]
+      timeout: 5m
+    on:
+      message: { send: { to: { machine: .rook/blocks/chat.yaml, key: "slack:${event.data.chat}" }, event: message, data: { event: "${event.data}", dir: "${input.dir}" } } }
+      answer: { send: { to: { key: "question:${event.data.question}" }, event: answer, data: "${event.data}" } }
+      done: hearing
+      failed: resting
+  resting:
+    timers: { again: 1m }
+    on: { again: hearing }

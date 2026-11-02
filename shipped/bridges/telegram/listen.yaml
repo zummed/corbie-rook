@@ -1,0 +1,20 @@
+# Telegram: asks for each new update. Each message goes to its chat's run, which is started if the chat has none. Each
+# tap on a button goes to the run that waits for it.
+statechart: telegram
+input: { dir: string }
+initial: hearing
+states:
+  hearing:
+    job:
+      script: ./telegram.js
+      input: { do: hear, token: TELEGRAM_TOKEN, cursor: "${states.hearing.output ? states.hearing.output.cursor : null}" }
+      allow: [net:api.telegram.org, "secret:TELEGRAM_TOKEN@net:api.telegram.org"]
+      timeout: 2m
+    on:
+      message: { send: { to: { machine: .rook/blocks/chat.yaml, key: "telegram:${event.data.chat}" }, event: message, data: { event: "${event.data}", dir: "${input.dir}" } } }
+      answer: { send: { to: { key: "question:${event.data.question}" }, event: answer, data: "${event.data}" } }
+      done: hearing
+      failed: resting
+  resting:
+    timers: { again: 1m }
+    on: { again: hearing }
