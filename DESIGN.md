@@ -17,7 +17,7 @@ A project fills five slots. Each is one or a few files, and nothing else depends
 |---|---|---|
 | Bridges | where does work come in and go out? | a file for each in `bridges/`: `telegram.yaml`, `slack.yaml`, `gitlab.yaml`, `jira.yaml` |
 | People | who is this, what groups are they in, and how are they reached? | `lookup.yaml`, by default from `people.yaml` |
-| Attend | is a message that does not name the bot meant for it? | `attend.yaml`, by default asking a small model |
+| Attend | is a message that does not name the bot meant for it? | `attend.yaml`, by default no |
 | Rules | which group gets which agent, and who approves what? | `rules.yaml`, `answer.yaml` |
 | Parts | what can the agents do? | `agents/`, `parts/` |
 
@@ -26,6 +26,8 @@ A slot's file names a machine as a job. Rook's ready-made machine for a slot is 
 ## A project
 
 `corbie rook init` writes `.rook/`, and the first time the starting files. It rewrites `.rook/` every time, writes any file `.rook/` reads by name that the project lacks, and changes no other file.
+
+A project's own files hold its choices, and `.rook/` holds what Rook does. `.rook/starter/` holds this version's starting files and every bridge's file, so a project's file can be compared with the one Rook writes now.
 
 | In `.rook/` | What it does |
 |---|---|
@@ -37,10 +39,13 @@ A slot's file names a machine as a job. Rook's ready-made machine for a slot is 
 | `blocks/say.yaml`, `tell.yaml`, `ask.yaml`, `status.yaml` | say at an address, tell a person, ask people, show a status |
 | `blocks/history.yaml`, `thread.js` | what a service's thread held before a message |
 | `blocks/rich.js` | the charts in a text, drawn by Slack and shown as tables by the other bridges |
+| `blocks/format.js` | how to write for each bridge, given to an agent as `format` |
+| `agents/base.yaml` | what every agent answering a message takes from Rook: its input, prompt, conversation and the tool `progress` |
 | `blocks/question.yaml` | the run behind `ask.yaml`, which a tap goes to |
 | `blocks/approval.yaml` | a part's ask: the reviewer, then the part's approvers |
 | `people/file.js` | the People slot, read from `people.yaml` |
-| `attend/model.yaml` | the Attend slot, asking a small model |
+| `attend/never.yaml`, `attend/model.yaml` | the Attend slot: no, or asking a small model |
+| `starter/` | this version's starting files, to compare with a project's |
 
 A machine in `.rook/` reads a project's files by these names: `rules.yaml`, `lookup.yaml`, `attend.yaml`, `answer.yaml` and `agents/reviewer.yaml`. `.rook/people/file.js` reads `people.yaml`.
 
@@ -129,6 +134,7 @@ Your machines use Rook's blocks as jobs. A job runs from a flow, a statechart or
 | `address` | where the message came from |
 | `history` | what the service's thread held before this message, for a new conversation on Slack, GitLab or Jira, or nothing |
 | `conversation` | what the last answer gave, or nothing |
+| `format` | how to write for the message's bridge: Markdown or not, and how to write a chart |
 
 | Output | What it does |
 |---|---|
@@ -165,7 +171,7 @@ tools:
     job: { machine: .rook/blocks/status.yaml, input: { address: "${input.address}", text: "${args.text}" } }
 ```
 
-The starter's `agents/base.yaml` holds this tool. It needs no `approve: true`, since its text goes to those who read the answer. A tool whose arguments name a person does. Give a model no address as an argument: `settings.site` is the host a bridge sends its token to.
+`.rook/agents/base.yaml` holds this tool. It needs no `approve: true`, since its text goes to those who read the answer. A tool whose arguments name a person does. Give a model no address as an argument: `settings.site` is the host a bridge sends its token to.
 
 A person's reply to a text goes to `chat.yaml` as a new message, and the agent there does not know the text. Only a tap on a question goes back to the machine that asked.
 
@@ -187,11 +193,16 @@ A text says a chart as a fenced block marked `chart`, holding one JSON object. S
 | `series` | each a `name` and one number in `values` for each label |
 | `x`, `y` | the names of the axes |
 
-A block that does not read as a chart is left as it is written.
+An agent learns this from `${input.format}`, which tells it on Telegram to write no tables. A block that does not read as a chart is left as it is written.
 
 ## Attend
 
-`attend.yaml` takes `said`, `asker`, `address` and `history`, and gives `{ answer: true }` or `{ answer: false }`. The starter's runs `.rook/attend/model.yaml`, which asks `claude-haiku-5-5` with the secret `ANTHROPIC_KEY` and gives false when the model is unsure. It takes `about`, what the bot is for, by default a bot that answers the people it belongs to. Any machine with the same input and output can take its place.
+`attend.yaml` takes `said`, `asker`, `address` and `history`, and gives `{ answer: true }` or `{ answer: false }`. Rook ships two machines for it, and any machine with the same input and output can take their place.
+
+| Machine | What it gives |
+|---|---|
+| `.rook/attend/never.yaml` | no, always; the starting `attend.yaml` runs it |
+| `.rook/attend/model.yaml` | what `claude-haiku-5-5` says, with the secret `ANTHROPIC_KEY`, and no when the model is unsure; `about` says what the bot is for |
 
 ## Asking a person
 
@@ -219,10 +230,17 @@ tools:
 ```yaml
 # agents/helper.yaml
 agent: helper
-include: ./base.yaml
+include: .rook/agents/base.yaml
+model: { name: claude-sonnet-5-5, secret: ANTHROPIC_KEY }
+system: |
+  You help the person who runs this computer. Answer in one or two short sentences.
+
+  ${input.format}
 open:
   messages: { include: parts/messages/part.yaml }
 ```
+
+An agent includes `.rook/agents/base.yaml`, and writes its own model, system text and parts. `${input.format}` in its system text says how to write for the bridge the message came from.
 
 A part's script can call GitLab or Jira through the bridge's `api.js`. Its job lists the file under `files:` and allows the host and the secret, as the file's comment says.
 

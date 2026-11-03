@@ -50,7 +50,7 @@ const stubReviewer = "statechart: reviewer\ninput: { context: string }\ninitial:
 // at an address.
 func realAgent(t *testing.T, dir, address string) {
 	t.Helper()
-	for _, name := range []string{"agents/helper.yaml", "agents/base.yaml"} {
+	for _, name := range []string{"agents/helper.yaml"} {
 		text, err := os.ReadFile(filepath.Join("starter", name))
 		if err != nil {
 			t.Fatal(err)
@@ -763,6 +763,11 @@ func TestInitAgainKeepsThePersonsFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "attend.yaml")); err != nil {
 		t.Error("a file .rook reads by name was not written")
+	}
+	for _, name := range []string{"agents/family.yaml", "bridges/slack.yaml", "bridges/jira.yaml"} {
+		if _, err := os.Stat(filepath.Join(dir, ".rook/starter", name)); err != nil {
+			t.Errorf("the starting file %s is not in .rook/starter", name)
+		}
 	}
 	if got, _ := os.ReadFile(filepath.Join(dir, ".rook/blocks/tell.yaml")); string(got) == "changed" {
 		t.Error(".rook was not rewritten")

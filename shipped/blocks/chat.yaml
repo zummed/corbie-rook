@@ -51,6 +51,9 @@ states:
           busy:
             when: "${stages.attend.output}"
             job: { machine: ./status.yaml, input: { address: "${input.address}", text: Working on it. } }
+          format:
+            when: "${stages.attend.output}"
+            job: { script: ./format.js, input: { bridge: "${input.event.bridge}" } }
           answer:
             when: "${stages.attend.output}"
             job:
@@ -64,6 +67,7 @@ states:
                   address: "${input.address}"
                   history: "${input.last && input.last.conversation ? null : stages.history.output}"
                   conversation: "${input.last ? input.last.conversation : null}"
+                  format: "${stages.format.output}"
           say:
             when: "${(stages.answer.output || {}).reply}"
             job: { machine: ./say.yaml, input: { address: "${input.address}", text: "${stages.answer.output.reply}" } }

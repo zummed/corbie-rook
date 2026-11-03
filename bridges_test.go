@@ -917,4 +917,13 @@ func TestAgentIsToldTheThread(t *testing.T) {
 	if strings.Index(shown, "alice asks: go on") > strings.Index(shown, "earlier words") {
 		t.Errorf("the thread comes before the message: %s", shown)
 	}
+	system := model.Calls[0].System
+	for _, want := range []string{"You help the person", "shown on Slack, in Markdown", "```chart"} {
+		if !strings.Contains(system, want) {
+			t.Errorf("%q is not in the system text %q", want, system)
+		}
+	}
+	if tools := fmt.Sprint(model.Calls[0].Tools); !strings.Contains(tools, "progress") {
+		t.Errorf("progress is not among the tools %s", tools)
+	}
 }

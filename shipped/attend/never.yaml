@@ -1,0 +1,7 @@
+# The Attend slot, filled with no: a message that does not name the bot is never
+# answered. It needs nothing.
+statechart: attend-never
+input: { said: string, asker: string, address: map, history: "any?" }
+initial: e
+states:
+  e: { end: done, output: { answer: false } }
