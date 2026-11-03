@@ -17,7 +17,7 @@ corbie init --ceiling all
 corbie rook init my-bot --bridges slack,jira,gitlab
 ```
 
-`rook init` lists the secrets to set. Then change `people.yaml` and `rules.yaml`, and run:
+`rook init` lists the secrets to set. For Slack, make the app first, as [The Slack app](#the-slack-app) says. Then change `people.yaml` and `rules.yaml`, and run:
 
 ```sh
 cd my-bot
@@ -55,7 +55,6 @@ Your files are yours, and Rook never updates them. After updating Rook, compare 
 ## Common changes
 
 - **Add a bridge:** run `corbie rook init <project> --bridges <name>`, then set its secrets. Delete its file and submit again to stop it.
-- **Give Slack its history:** the bot's token needs `channels:history`, `groups:history`, `im:history` and `mpim:history`. Without them a new conversation starts with nothing, and is still answered.
 - **Add a tool:** add a part under `parts/`, and list it under `open:` in an agent's file. Mark a tool that changes something `approve: true`, and name who approves it in `rules.yaml`.
 - **Add an agent:** add its file to `agents/`, add it to `rules.yaml`, and add a stage for it in `answer.yaml`.
 - **Answer with your own machine:** add it as an agent is added. It gets the message and gives a `reply`, as the design says under Your machines.
@@ -67,7 +66,53 @@ Your files are yours, and Rook never updates them. After updating Rook, compare 
 - **Wait for an issue to be finished:** add `settle: 2m` to the input in `bridges/gitlab.yaml` or `bridges/jira.yaml`. An opened issue is heard once nobody has changed it for two minutes.
 - **Show a chart:** an agent writes a fenced `chart` block, as `${input.format}` in its system text tells it. Slack draws it, and GitLab and Jira show a table.
 - **Call GitLab or Jira from a part:** load `.rook/bridges/gitlab/api.js` or `.rook/bridges/jira/api.js` in the part's script.
-- **Show a status on Slack:** declare the Slack app an agent, which gives it `assistant:write`. Slack shows a status only in a thread.
+
+## The Slack app
+
+The Slack bridge needs a Slack app that is an agent and uses Socket Mode, so nothing on the internet connects to this computer.
+
+1. At [api.slack.com/apps](https://api.slack.com/apps), choose Create New App, then From a manifest, and pick the workspace.
+2. Paste this manifest, with the name and description you want. Slack cannot turn an agent back into a plain app.
+3. Under Basic Information, App-Level Tokens, make a token with the scope `connections:write`. Set it with `corbie controller secret set SLACK_APP_TOKEN`.
+4. Under Install App, install the app. Set its Bot User OAuth Token with `corbie controller secret set SLACK_TOKEN`.
+5. In `people.yaml`, give each person `slack:` with their member ID, from their profile's menu, Copy member ID.
+6. In each channel the bot should hear, run `/invite @Rook`.
+
+```yaml
+display_information:
+  name: Rook
+features:
+  bot_user:
+    display_name: Rook
+    always_online: true
+  app_home:
+    messages_tab_enabled: true
+    messages_tab_read_only_enabled: false
+  agent_view:
+    agent_description: Answers questions and does tasks for the people it belongs to.
+oauth_config:
+  scopes:
+    bot:
+      - assistant:write     # show a status in a thread
+      - chat:write          # post, and change a question once it is answered
+      - im:write            # open a direct message to ask a question
+      - channels:read       # a channel's name, as rules.yaml names places
+      - groups:read         # the same, for a private channel
+      - channels:history    # hear messages, and read a thread's history
+      - groups:history
+      - im:history
+settings:
+  event_subscriptions:
+    bot_events:
+      - message.channels
+      - message.groups
+      - message.im
+  interactivity:
+    is_enabled: true
+  socket_mode_enabled: true
+```
+
+The bot hears a direct message, and a message naming it in a channel it was invited to.
 
 A GitLab project or a Jira project not listed under `places:` in `rules.yaml` counts as read by anyone, so only an agent `for: [anyone]` answers there.
 
