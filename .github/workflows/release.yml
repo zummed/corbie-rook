@@ -1,13 +1,13 @@
 name: release
 
 # A person starts a release and gives it a version, such as 0.3.0. The
-# binaries are built, and the release is tagged with that version.
+# binaries are built with that version, and the release is tagged with it.
 # Nothing in the code changes for a release.
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: "The version to release: 0.3.0"
+        description: "The version to release, as the binary prints it: 0.3.0"
         required: true
         type: string
 
@@ -38,6 +38,13 @@ jobs:
       - run: mise run check
 
       - run: mise run dist
+
+      - name: Check what the binary prints
+        run: |
+          printed=$(dist/corbie-rook-linux-amd64 version | sed -n '1s/^corbie-rook //p')
+          if [ "$printed" != "$VERSION" ]; then
+            echo "the binary prints \"$printed\", not \"$VERSION\""; exit 1
+          fi
 
       - name: Create the release
         env:
