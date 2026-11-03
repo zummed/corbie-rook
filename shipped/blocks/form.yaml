@@ -1,0 +1,13 @@
+# A form in the conversation a message came from, for the person who asked: the
+# text, the fields, and a Send and a Cancel button. It gives `choice`, send or
+# cancel, or no after an hour unanswered, and `values`, by field name. Only
+# Slack shows forms; on another bridge it gives a note saying so.
+flow: form
+input: { address: map, asker: string, text: string, fields: list }
+stages:
+  question:
+    when: "${input.address.bridge === 'slack'}"
+    job:
+      machine: ./ask.yaml
+      input: { people: ["${input.asker}"], in: "${input.address.id}", text: "${input.text}", choices: ["send", "cancel"], fields: "${input.fields}", within: 1h }
+output: "${stages.question.skipped ? { choice: 'no', note: 'Forms are shown only on Slack. Ask in your reply instead.' } : stages.question.output}"

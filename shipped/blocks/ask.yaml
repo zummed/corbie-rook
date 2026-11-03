@@ -1,13 +1,16 @@
 # Asks people, with a button for each choice, and gives `choice`: the first answer
-# from someone `people` names, or no after seven days. `people` names people and
-# groups in lookup.yaml, each asked on their own bridge; with `in`, a Slack channel
-# named as rules.yaml names places, the question is posted there instead.
+# from someone `people` names, or no after `within` (a duration, by default 7d). `people` names people and
+# groups in lookup.yaml, each asked on their own bridge; with `in`, a Slack
+# channel's #name or a Slack conversation's address, the question is posted there
+# instead. `fields` are form fields, each { name, label, kind, choices } with kind
+# text, long, number or choice; the answer gives their values as `values`, by
+# name. Only Slack shows fields, so a question with fields is asked only there.
 flow: ask
-input: { people: list, in: "string?", text: string, choices: list }
+input: { people: list, in: "string?", text: string, choices: list, fields: "list?", within: "string?" }
 stages:
   question:
     job:
       machine: ./question.yaml
       key: "question:${run.id.slice(-10)}"
-      input: { people: "${input.people}", in: "${input.in || ''}", text: "${input.text}", choices: "${input.choices}" }
+      input: { people: "${input.people}", in: "${input.in || ''}", text: "${input.text}", choices: "${input.choices}", fields: "${input.fields || []}", within: "${input.within || '7d'}" }
 output: ${stages.question.output}

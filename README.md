@@ -65,6 +65,9 @@ Your files are yours, and Rook never updates them. After updating Rook, `corbie 
 - **Decide what is meant for the bot:** in `attend.yaml`, name `.rook/attend/model.yaml` to ask a small model, or your own machine. It gives `{ answer: true }` or `{ answer: false }`.
 - **Wait for an issue to be finished:** add `settle: 2m` to the input in `bridges/gitlab.yaml` or `bridges/jira.yaml`. An opened issue is heard once nobody has changed it for two minutes.
 - **Show a chart:** an agent writes a fenced `chart` block, as `${input.format}` in its system text tells it. Slack draws it, and GitLab and Jira show a table.
+- **Show a layout or a diagram:** on Slack, an agent writes a fenced `blocks` block of Block Kit JSON; on GitLab, a fenced `mermaid` block. `${input.format}` tells it which its bridge shows.
+- **Ask with a form:** an agent on Slack calls its tool `form`, and gets back what the person filled in. A machine runs `.rook/blocks/ask.yaml` with `fields`.
+- **Write for one bridge:** test `input.address.bridge` in an agent's system text, as in `${input.address.bridge == 'slack' ? 'End with a summary in bold.' : ''}`.
 - **Call GitLab or Jira from a part:** load `.rook/bridges/gitlab/api.js` or `.rook/bridges/jira/api.js` in the part's script.
 
 ## The Slack app

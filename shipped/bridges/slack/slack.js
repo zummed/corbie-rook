@@ -48,15 +48,23 @@ if (input.do === "hear") {
   const me = call("auth.test").user_id
   const mention = "<@" + me + ">"
 
-  // pressed gives the answer a press of a button is. A button's value holds the
-  // question and the choice. The question's run takes the buttons away once a
-  // press counts.
+  // pressed gives the answer a press of a question's button is. A button's value
+  // holds the question and the choice, and the message's form fields give their
+  // values by name. The question's run takes the buttons away once a press counts.
   const pressed = (body) => {
     const action = (body.actions || [])[0] || {}
+    if (!String(action.action_id || "").startsWith("choice-")) return
     const value = String(action.value || "")
     const at = value.indexOf(" ")
     if (at < 0) return
-    emit("answer", { bridge: "slack", question: value.slice(0, at), from: body.user.id, choice: value.slice(at + 1) })
+    const values = {}
+    for (const block of Object.values((body.state || {}).values || {})) {
+      for (const [name, field] of Object.entries(block)) {
+        const v = field.selected_option ? field.selected_option.value : field.value
+        values[name] = field.type === "number_input" && v != null && v !== "" ? Number(v) : v === undefined ? null : v
+      }
+    }
+    emit("answer", { bridge: "slack", question: value.slice(0, at), from: body.user.id, choice: value.slice(at + 1), values: values })
   }
 
   // spoke holds the threads the bot has said something in, as channel/thread:
@@ -127,14 +135,24 @@ if (input.do === "hear") {
 }
 
 if (input.do === "ask") {
-  // A question, with a button for each choice, in a direct message to each
-  // person in input.to, or in a channel for each name there that starts with #.
-  // A button's value holds the question and the choice, which a press names.
-  const buttons = input.choices.map((c, n) => ({ type: "button", action_id: "choice-" + n, text: { type: "plain_text", text: c[0].toUpperCase() + c.slice(1) }, value: input.question + " " + c }))
+  // A question, with a button for each choice: in input.in, a channel's #name or
+  // a conversation, or else in a direct message to each person in input.to. Each
+  // of input.fields is a form field above the buttons. A button's value holds the
+  // question and the choice, which a press names.
+  const label = (s) => ({ type: "plain_text", text: String(s).slice(0, 75) })
+  const element = (f) =>
+    f.kind === "choice" ? { type: "static_select", options: f.choices.map((c) => ({ text: label(c), value: String(c) })) }
+      : f.kind === "number" ? { type: "number_input", is_decimal_allowed: true }
+        : { type: "plain_text_input", multiline: f.kind === "long" }
+  const fields = (input.fields || []).map((f) => ({ type: "input", block_id: f.name, optional: true, label: label(f.label || f.name), element: Object.assign({ action_id: f.name }, element(f)) }))
+  const buttons = input.choices.map((c, n) => ({ type: "button", action_id: "choice-" + n, text: label(c[0].toUpperCase() + c.slice(1)), value: input.question + " " + c }))
+  const blocks = [{ type: "section", text: { type: "mrkdwn", text: input.text } }, ...fields, { type: "actions", elements: buttons }]
+  const places = input.in ? [input.in] : input.to.map((id) => call("conversations.open", { users: id }).channel.id)
   const sent = []
-  for (const to of input.to) {
-    const channel = to.startsWith("#") ? named(to) : call("conversations.open", { users: to }).channel.id
-    const posted = call("chat.postMessage", { channel: channel, text: input.text, blocks: [{ type: "section", text: { type: "mrkdwn", text: input.text } }, { type: "actions", elements: buttons }] })
+  for (const place of places) {
+    const [to, thread] = place.split("/")
+    const channel = named(to)
+    const posted = call("chat.postMessage", Object.assign({ channel: channel, text: input.text, blocks: blocks }, thread ? { thread_ts: thread } : {}))
     sent.push({ channel: channel, ts: posted.ts })
   }
   return { sent: sent }
@@ -183,10 +201,11 @@ if (input.do === "status") {
   return {}
 }
 
-// say: the text in messages Slack takes, in a conversation or a channel's #name. Markdown is cut at a line's end where
-// one is near, and a message holds at most 12000 characters of it and two charts.
-// A chart Slack cannot draw is shown as its table, and a message Slack refuses is
-// posted again as plain markdown.
+// say: the text in messages Slack takes, in a conversation or a channel's #name.
+// Markdown is cut at a line's end where one is near, and a message holds at most
+// 12000 characters of it, two charts and 50 blocks. A layout's blocks are posted
+// as they are. A chart Slack cannot draw is shown as its table, and a message
+// Slack refuses is posted again as plain markdown, each layout as its text.
 const rich = require("../../blocks/rich.js")
 const [to, thread] = String(input.to).split("/")
 const channel = named(to)
@@ -221,35 +240,43 @@ const cut = (text) => {
   }
   return pieces
 }
-// Each message is a list of parts: { markdown } or { chart }.
+// Each message is a list of parts: { markdown }, { chart } or { blocks }.
 const messages = [[]]
 const last = () => messages[messages.length - 1]
-// count gives a message's charts, or its characters of markdown with the blank
-// line between parts.
-const count = (m, kind) => m.reduce((n, p) => n + (kind === "chart" ? (p.chart ? 1 : 0) : p.markdown === undefined ? 0 : p.markdown.length + 2), 0)
+// count gives a message's charts, its blocks, or its characters of markdown with
+// the blank line between parts.
+const count = (m, kind) => m.reduce((n, p) => n + (
+  kind === "chart" ? (p.chart ? 1 : 0)
+    : kind === "blocks" ? (p.blocks ? p.blocks.length : 1)
+      : p.markdown === undefined ? 0 : p.markdown.length + 2), 0)
 for (const p of rich.parts(String(input.text))) {
+  if (p.blocks) {
+    if (count(last(), "blocks") + p.blocks.length > 50) messages.push([])
+    last().push({ blocks: p.blocks.slice(0, 50) })
+    continue
+  }
   if (p.chart && fits(p.chart)) {
-    if (count(last(), "chart") === 2) messages.push([])
+    if (count(last(), "chart") === 2 || count(last(), "blocks") === 50) messages.push([])
     last().push(p)
     continue
   }
   for (const piece of cut(p.chart ? rich.table(p.chart) : p.markdown)) {
-    if (count(last(), "markdown") + piece.length > longest) messages.push([])
+    if (count(last(), "markdown") + piece.length > longest || count(last(), "blocks") === 50) messages.push([])
     last().push({ markdown: piece })
   }
 }
 const sent = []
 for (const m of messages.filter((m) => m.length)) {
-  const plain = m.map((p) => (p.chart ? rich.table(p.chart) : p.markdown)).join("\n\n")
+  const plain = m.map((p) => (p.chart ? rich.table(p.chart) : p.blocks ? rich.words(p.blocks) : p.markdown)).filter((s) => s).join("\n\n") || "(A layout with no text.)"
   const post = { channel: channel }
   if (thread) post.thread_ts = thread
-  if (!m.some((p) => p.chart)) {
+  if (!m.some((p) => p.chart || p.blocks)) {
     post.markdown_text = plain
     sent.push(channel + ":" + call("chat.postMessage", post).ts)
     continue
   }
   post.text = plain.slice(0, 3000)
-  post.blocks = m.map((p) => (p.chart ? drawn(p.chart) : { type: "markdown", text: p.markdown }))
+  post.blocks = m.flatMap((p) => (p.chart ? [drawn(p.chart)] : p.blocks ? p.blocks : [{ type: "markdown", text: p.markdown }]))
   let ts
   try {
     ts = call("chat.postMessage", post).ts

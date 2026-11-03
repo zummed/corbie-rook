@@ -617,7 +617,7 @@ func TestSlackQuestionIsAnsweredByAPress(t *testing.T) {
 	}
 	press := func(id, user string) {
 		s.send(map[string]any{"envelope_id": id, "type": "interactive", "payload": map[string]any{
-			"type": "block_actions", "user": map[string]any{"id": user}, "actions": []any{map[string]any{"value": "abc no"}},
+			"type": "block_actions", "user": map[string]any{"id": user}, "actions": []any{map[string]any{"action_id": "choice-1", "value": "abc no"}},
 			"channel": map[string]any{"id": "D9"}, "message": map[string]any{"ts": "1.1", "text": "Well?"},
 		}})
 	}
