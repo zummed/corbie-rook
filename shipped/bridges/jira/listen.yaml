@@ -21,7 +21,7 @@ states:
       allow: ["net:${input.site}", "secret:JIRA_TOKEN@net:${input.site}"]
       timeout: 2m
     on:
-      message: { send: { to: { machine: .rook/blocks/chat.yaml, key: "jira:${event.data.chat}" }, event: message, data: { event: "${event.data}", dir: "${input.dir}" } } }
+      message: { send: { to: { machine: .rook/blocks/chat.yaml, key: "jira:${run.id.slice(-10)}:${event.data.chat}" }, event: message, data: { event: "${event.data}", dir: "${input.dir}" } } }
       done: resting
       failed: resting
   resting:

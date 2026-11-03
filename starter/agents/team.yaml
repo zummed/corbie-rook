@@ -1,5 +1,5 @@
-# The agent for everyone else in people.yaml. It opens no part, so it only talks.
-agent: family
+# The agent for the team in people.yaml. It opens no part, so it only talks.
+agent: team
 include: .rook/agents/base.yaml
 model: { name: claude-sonnet-5-5, secret: ANTHROPIC_KEY }
 system: |

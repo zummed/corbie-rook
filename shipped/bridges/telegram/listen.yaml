@@ -11,7 +11,7 @@ states:
       allow: [net:api.telegram.org, "secret:TELEGRAM_TOKEN@net:api.telegram.org"]
       timeout: 2m
     on:
-      message: { send: { to: { machine: .rook/blocks/chat.yaml, key: "telegram:${event.data.chat}" }, event: message, data: { event: "${event.data}", dir: "${input.dir}" } } }
+      message: { send: { to: { machine: .rook/blocks/chat.yaml, key: "telegram:${run.id.slice(-10)}:${event.data.chat}" }, event: message, data: { event: "${event.data}", dir: "${input.dir}" } } }
       answer: { send: { to: { key: "question:${event.data.question}" }, event: answer, data: "${event.data}" } }
       done: hearing
       failed: resting

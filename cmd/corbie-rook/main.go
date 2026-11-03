@@ -4,6 +4,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -54,19 +55,33 @@ func cmdInit(e *cli.Env, args []string) error {
 	if list != "" {
 		bridges = strings.Split(list, ",")
 	}
-	if err := rook.Init(rest[0], bridges); err != nil {
+	dir := rest[0]
+	_, err = os.Stat(filepath.Join(dir, "rules.yaml"))
+	updating := err == nil
+	if err := rook.Init(dir, bridges); err != nil {
 		return err
+	}
+	in := ""
+	if filepath.Clean(dir) != "." {
+		in = "cd " + dir + " && "
 	}
 	if slices.Contains(bridges, "slack") {
 		fmt.Fprintln(e.Out, "Make the Slack app first, as corbie rook manual rook-project says under The Slack app.")
 	}
-	fmt.Fprintf(e.Out, "%s is ready. Change people.yaml and rules.yaml, then:\n\n", rest[0])
-	fmt.Fprintln(e.Out, "  corbie controller secret set ANTHROPIC_KEY")
+	if updating {
+		fmt.Fprintf(e.Out, "%s has this version's .rook. Compare your files with .rook/starter, then:\n\n", dir)
+	} else {
+		fmt.Fprintf(e.Out, "%s is ready. Change people.yaml and rules.yaml, then:\n\n", dir)
+		fmt.Fprintln(e.Out, "  corbie controller secret set ANTHROPIC_KEY")
+	}
 	for _, name := range bridges {
 		for _, secret := range rook.Secrets[name] {
 			fmt.Fprintf(e.Out, "  corbie controller secret set %s\n", secret)
 		}
 	}
-	fmt.Fprintf(e.Out, "  cd %s && corbie run submit bridges\n", rest[0])
+	if updating {
+		fmt.Fprintf(e.Out, "  %scorbie run submit . --check\n", in)
+	}
+	fmt.Fprintf(e.Out, "  %scorbie run submit bridges\n", in)
 	return nil
 }

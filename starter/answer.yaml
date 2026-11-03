@@ -7,7 +7,7 @@ stages:
   helper:
     when: "${input.agent === 'helper'}"
     job: { machine: agents/helper.yaml, input: "${input.message}" }
-  family:
-    when: "${input.agent === 'family'}"
-    job: { machine: agents/family.yaml, input: "${input.message}" }
-output: "${stages.helper.skipped ? stages.family.output : stages.helper.output}"
+  team:
+    when: "${input.agent === 'team'}"
+    job: { machine: agents/team.yaml, input: "${input.message}" }
+output: "${stages.helper.skipped ? stages.team.output : stages.helper.output}"
