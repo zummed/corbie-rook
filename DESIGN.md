@@ -152,7 +152,7 @@ Any machine can run these blocks. A path reads from the project's top directory,
 | `.rook/blocks/ask.yaml` | `people`, `in`, `text`, `choices` | asks people, or a Slack channel, and gives `choice` |
 | `.rook/blocks/status.yaml` | `address`, `text` | shows a status at an address: under a Slack thread, or "typing" on Telegram; an empty text clears it, and a failure gives nothing |
 
-An address is a mapping: `{ bridge, id }`, with `answers`, `at` and `settings` where a bridge uses them. `chat.yaml` gives one for a message, and `lookup.yaml`, with `do: reach`, gives one for each person. Pass it whole.
+An address is a mapping: `{ bridge, id }`, with `answers`, `at` and `settings` where a bridge uses them. On Slack, `id` may be a channel's `#name`. `chat.yaml` gives one for a message, and `lookup.yaml`, with `do: reach`, gives one for each person. Pass it whole.
 
 `ask.yaml` takes names, as `lookup.yaml` knows them. A message's address can be a channel or an issue, so it goes to `say.yaml` only.
 
