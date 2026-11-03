@@ -770,7 +770,7 @@ func TestInitAgainKeepsThePersonsFiles(t *testing.T) {
 	if differ, err := rook.Differ(dir); err != nil || !reflect.DeepEqual(differ, []string{"bridges/slack.yaml", "people.yaml"}) {
 		t.Errorf("the files not as Rook starts them are %v, %v", differ, err)
 	}
-	if text := rook.Pages()[3].Text; !strings.Contains(text, "\nagents/helper.yaml\n") || !strings.Contains(text, "\nbridges/jira.yaml\n") {
+	if text := rook.Pages()[3].Text; !strings.Contains(text, "\n## agents/helper.yaml\n\n```yaml\n") || !strings.Contains(text, "\n## bridges/jira.yaml\n") {
 		t.Error("the page rook-starter lacks a starting file")
 	}
 	if got, _ := os.ReadFile(filepath.Join(dir, ".rook/blocks/tell.yaml")); string(got) == "changed" {
