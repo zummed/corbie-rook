@@ -1,6 +1,6 @@
 # The Attend slot: whether a message that does not name the bot is meant for it.
 # A bridge sends one only when its file sets `overhear: true`. This job says no.
-# Name .rook/attend/model.yaml to ask a small model, which needs ANTHROPIC_KEY,
+# Name .rook/attend/model.yaml to ask a small model, which needs CLAUDE_TOKEN,
 # or your own machine; it gives `{ answer: true }` or `{ answer: false }`.
 flow: attend
 input: { said: string, asker: string, address: map, history: "any?" }

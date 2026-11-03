@@ -17,7 +17,7 @@ corbie init --ceiling all
 corbie rook init my-bot --bridges slack,jira,gitlab
 ```
 
-`rook init` lists the secrets to set. For Slack, make the app first, as [The Slack app](#the-slack-app) says. Then change `people.yaml` and `rules.yaml`, and run:
+`rook init` lists the secrets to set. The agents run on Claude Code with your Claude subscription: install Claude Code on the computer that runs the runner, and set `CLAUDE_TOKEN` to the token `claude setup-token` prints. For Slack, make the app first, as [The Slack app](#the-slack-app) says. Then change `people.yaml` and `rules.yaml`, and run:
 
 ```sh
 cd my-bot

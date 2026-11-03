@@ -16,7 +16,7 @@ stages:
       machine:
         agent: attend
         input: { said: string, asker: string, history: string, about: string }
-        model: { name: claude-haiku-5-5, secret: ANTHROPIC_KEY }
+        model: { name: haiku, service: claude-code, secret: CLAUDE_TOKEN }
         system: |
           You are shown the newest message in a thread, the thread before it, and
           what a bot in the thread is for. Answer true when the newest message is

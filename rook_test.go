@@ -55,7 +55,7 @@ func realAgent(t *testing.T, dir, address string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		written := strings.Replace(string(text), "model: { name: claude-sonnet-5-5, secret: ANTHROPIC_KEY }",
+		written := strings.Replace(string(text), "model: { name: sonnet, service: claude-code, secret: CLAUDE_TOKEN }",
 			"model: { name: test-model, service: anthropic, address: "+address+", secret: TEST_KEY }", 1)
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(written), 0o644); err != nil {
 			t.Fatal(err)
