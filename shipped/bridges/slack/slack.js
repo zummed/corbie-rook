@@ -29,6 +29,21 @@ function call(method, body, query, token) {
   return answer
 }
 
+// named gives the ID of the channel a #name names, of those the bot can see, and
+// a conversation ID as it is.
+function named(to) {
+  if (!to.startsWith("#")) return to
+  let cursor
+  for (let page = 0; page < 20; page++) {
+    const part = call("conversations.list", null, Object.assign({ types: "public_channel,private_channel", exclude_archived: "true", limit: "200" }, cursor ? { cursor: cursor } : {}))
+    const found = (part.channels || []).find((c) => c.name === to.slice(1))
+    if (found) return found.id
+    cursor = (part.response_metadata || {}).next_cursor
+    if (!cursor) break
+  }
+  throw new Error("Slack has no channel " + to + " the bot can see")
+}
+
 if (input.do === "hear") {
   const me = call("auth.test").user_id
   const mention = "<@" + me + ">"
@@ -116,20 +131,9 @@ if (input.do === "ask") {
   // person in input.to, or in a channel for each name there that starts with #.
   // A button's value holds the question and the choice, which a press names.
   const buttons = input.choices.map((c, n) => ({ type: "button", action_id: "choice-" + n, text: { type: "plain_text", text: c[0].toUpperCase() + c.slice(1) }, value: input.question + " " + c }))
-  const named = (name) => {
-    let cursor
-    for (let page = 0; page < 20; page++) {
-      const part = call("conversations.list", null, Object.assign({ types: "public_channel,private_channel", exclude_archived: "true", limit: "200" }, cursor ? { cursor: cursor } : {}))
-      const found = (part.channels || []).find((c) => c.name === name)
-      if (found) return found.id
-      cursor = (part.response_metadata || {}).next_cursor
-      if (!cursor) break
-    }
-    throw new Error("Slack has no channel #" + name + " the bot can see")
-  }
   const sent = []
   for (const to of input.to) {
-    const channel = to.startsWith("#") ? named(to.slice(1)) : call("conversations.open", { users: to }).channel.id
+    const channel = to.startsWith("#") ? named(to) : call("conversations.open", { users: to }).channel.id
     const posted = call("chat.postMessage", { channel: channel, text: input.text, blocks: [{ type: "section", text: { type: "mrkdwn", text: input.text } }, { type: "actions", elements: buttons }] })
     sent.push({ channel: channel, ts: posted.ts })
   }
@@ -179,12 +183,13 @@ if (input.do === "status") {
   return {}
 }
 
-// say: the text in messages Slack takes. Markdown is cut at a line's end where
+// say: the text in messages Slack takes, in a conversation or a channel's #name. Markdown is cut at a line's end where
 // one is near, and a message holds at most 12000 characters of it and two charts.
 // A chart Slack cannot draw is shown as its table, and a message Slack refuses is
 // posted again as plain markdown.
 const rich = require("../../blocks/rich.js")
-const [channel, thread] = String(input.to).split("/")
+const [to, thread] = String(input.to).split("/")
+const channel = named(to)
 if (!input.text) throw new Error("there is nothing to say")
 const short = (s, n) => s === undefined || String(s).length <= n
 const fits = (c) => {

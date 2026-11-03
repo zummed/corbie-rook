@@ -420,3 +420,22 @@ func TestChangedBridgeStartsNewConversations(t *testing.T) {
 		t.Fatalf("the bot said %q", got)
 	}
 }
+
+// A machine says a text in a Slack channel named as #name.
+func TestSlackSaysInAChannelByName(t *testing.T) {
+	s := newSlack(t)
+	w := newWorld(t)
+	dir := slackProject(t, w, s)
+	if err := os.WriteFile(filepath.Join(dir, "on/log.yaml"), []byte(dedent(`
+		flow: log
+		stages:
+		  say: { job: { machine: .rook/blocks/say.yaml, input: { address: { bridge: slack, id: "#approvals" }, text: Moved. } } }
+	`)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w.sync(dir)
+	w.until("the text", func() bool { return len(s.posted()) == 1 })
+	if post := s.posted()[0]; post["channel"] != "C5" || post["markdown_text"] != "Moved." {
+		t.Fatalf("the bot posted %v", post)
+	}
+}

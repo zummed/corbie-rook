@@ -1,5 +1,5 @@
-# Says a text on Slack, drawing its charts: `to` is a conversation, or
-# conversation/thread.
+# Says a text on Slack, drawing its charts: `to` is a conversation, a channel's
+# #name, or either with /thread.
 flow: slack-say
 input: { to: string, text: string }
 stages:
