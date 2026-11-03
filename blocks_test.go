@@ -29,7 +29,8 @@ func replying(t *testing.T, dir, reply string) {
 const charts = "Here.\n\n" +
 	"```chart\n{\"type\": \"bar\", \"title\": \"Tickets\", \"labels\": [\"Jan\", \"Feb\"], \"series\": [{\"name\": \"Email\", \"values\": [1, 2]}]}\n```\n\n" +
 	"```chart\n{\"type\": \"pie\", \"title\": \"Mix\", \"labels\": [\"A\", \"B\"], \"series\": [{\"values\": [3, 4]}]}\n```\n\n" +
-	"```chart\n{\"type\": \"line\", \"title\": \"Long\", \"labels\": [\"a label far longer than twenty\"], \"series\": [{\"values\": [5]}]}\n```"
+	"```chart\n{\"type\": \"line\", \"title\": \"Long\", \"labels\": [\"a label far longer than twenty\"], \"series\": [{\"values\": [5]}]}\n```\n\n" +
+	"```mermaid\ngraph LR; A-->B\n```"
 
 // Slack draws a chart it can, and shows one it cannot as a table. A message Slack
 // refuses is posted again as markdown, each chart as its table.
@@ -99,6 +100,9 @@ func TestGitLabSaysAChartAsATable(t *testing.T) {
 	}
 	if strings.Contains(got, "```chart") {
 		t.Errorf("a chart is left in %q", got)
+	}
+	if !strings.Contains(got, "```mermaid\ngraph LR; A-->B\n```") {
+		t.Errorf("the diagram is not in %q", got)
 	}
 }
 
@@ -340,7 +344,7 @@ func TestQuestionInAChannelCountsTheGroup(t *testing.T) {
 	value := strings.Split(strings.Split(string(blocks), `"value":"`)[1], " ")[0]
 	press := func(id, user, choice string) {
 		s.send(map[string]any{"envelope_id": id, "type": "interactive", "payload": map[string]any{
-			"type": "block_actions", "user": map[string]any{"id": user}, "actions": []any{map[string]any{"value": value + " " + choice}},
+			"type": "block_actions", "user": map[string]any{"id": user}, "actions": []any{map[string]any{"action_id": "choice-0", "value": value + " " + choice}},
 			"channel": map[string]any{"id": "C5"}, "message": map[string]any{"ts": "1.1", "text": "Deploy?"},
 		}})
 	}
@@ -437,5 +441,125 @@ func TestSlackSaysInAChannelByName(t *testing.T) {
 	w.until("the text", func() bool { return len(s.posted()) == 1 })
 	if post := s.posted()[0]; post["channel"] != "C5" || post["markdown_text"] != "Moved." {
 		t.Fatalf("the bot posted %v", post)
+	}
+}
+
+const layout = "Done.\n\n```blocks\n" +
+	`[{"type": "header", "text": {"type": "plain_text", "text": "Release 4.2"}}, {"type": "section", "fields": [{"type": "mrkdwn", "text": "*Status*"}, {"type": "mrkdwn", "text": "Shipped"}]}]` +
+	"\n```"
+
+// Slack posts a layout's blocks as they are, and a message Slack refuses is posted
+// again as markdown, each layout as its text.
+func TestSlackPostsALayout(t *testing.T) {
+	for _, refuse := range []bool{false, true} {
+		t.Run(fmt.Sprint("refused ", refuse), func(t *testing.T) {
+			s := newSlack(t)
+			s.refuse = refuse
+			w := newWorld(t)
+			dir := slackProject(t, w, s)
+			replying(t, dir, layout)
+			w.sync(dir)
+			w.until("Slack connected", s.connected)
+			s.says("a", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "ts": "3.0", "text": "status?"})
+			w.until("the answer", func() bool { return len(s.posted()) >= 1 })
+			post := s.posted()[0]
+			if refuse {
+				if got := post["markdown_text"]; got != "Done.\n\nRelease 4.2\n*Status*\nShipped" {
+					t.Fatalf("the bot posted %q", got)
+				}
+				return
+			}
+			blocks, _ := json.Marshal(post["blocks"])
+			want := `[{"text":"Done.","type":"markdown"},{"text":{"text":"Release 4.2","type":"plain_text"},"type":"header"},{"fields":[{"text":"*Status*","type":"mrkdwn"},{"text":"Shipped","type":"mrkdwn"}],"type":"section"}]`
+			if string(blocks) != want {
+				t.Fatalf("the blocks are %s", blocks)
+			}
+		})
+	}
+}
+
+// A form is posted in the asker's thread with its fields, and a press of Send by
+// the asker gives the fields' values. The message then shows them.
+func TestFormIsAnsweredInTheThread(t *testing.T) {
+	s := newSlack(t)
+	w := newWorld(t)
+	dir := slackProject(t, w, s)
+	if err := os.WriteFile(filepath.Join(dir, "on/former.yaml"), []byte(dedent(`
+		flow: former
+		stages:
+		  form:
+		    job:
+		      machine: .rook/blocks/form.yaml
+		      input:
+		        address: { bridge: slack, id: "C1/4.0" }
+		        asker: alice
+		        text: "The bug?"
+		        fields: [{ name: title, label: Title, kind: text }, { name: size, label: Size, kind: choice, choices: [small, big] }, { name: hours, label: Hours, kind: number }]
+		output: ${stages.form.output}
+	`)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w.sync(dir)
+	former := w.kept("on/former.yaml")
+	w.until("Slack connected", s.connected)
+	w.until("the form", func() bool { return len(s.posted()) == 1 })
+	post := s.posted()[0]
+	if post["channel"] != "C1" || post["thread_ts"] != "4.0" {
+		t.Fatalf("the form went to %v", post)
+	}
+	blocks, _ := json.Marshal(post["blocks"])
+	for _, want := range []string{
+		`"block_id":"title"`, `"type":"plain_text_input"`,
+		`"options":[{"text":{"text":"small","type":"plain_text"},"value":"small"}`,
+		`"type":"number_input"`, `"action_id":"choice-1"`,
+	} {
+		if !strings.Contains(string(blocks), want) {
+			t.Errorf("%s is not in %s", want, blocks)
+		}
+	}
+	value := strings.Split(strings.Split(string(blocks), `"value":"`)[3], " ")[0]
+	s.send(map[string]any{"envelope_id": "a", "type": "interactive", "payload": map[string]any{
+		"type": "block_actions", "user": map[string]any{"id": "U1"},
+		"actions": []any{map[string]any{"action_id": "choice-0", "value": value + " send"}},
+		"state": map[string]any{"values": map[string]any{
+			"title": map[string]any{"title": map[string]any{"type": "plain_text_input", "value": "Login fails"}},
+			"size":  map[string]any{"size": map[string]any{"type": "static_select", "selected_option": map[string]any{"value": "big"}}},
+			"hours": map[string]any{"hours": map[string]any{"type": "number_input", "value": "2.5"}},
+		}},
+	}})
+	w.until("the form done", func() bool { return w.show(former).Status == "done" })
+	got, _ := json.Marshal(w.show(former).Output)
+	if string(got) != `{"choice":"send","values":{"hours":2.5,"size":"big","title":"Login fails"}}` {
+		t.Fatalf("the form gave %s", got)
+	}
+	w.until("the form closed", func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return len(s.updates) == 1
+	})
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if got := s.updates[0]["text"]; got != "The bug?\n\nalice said send.\nTitle: Login fails\nSize: big\nHours: 2.5" {
+		t.Fatalf("the form was changed to %q", got)
+	}
+}
+
+// A form on a bridge other than Slack is not asked, and gives a note saying so.
+func TestFormOffSlackGivesANote(t *testing.T) {
+	w := newWorld(t)
+	dir := slackProject(t, w, newSlack(t))
+	if err := os.WriteFile(filepath.Join(dir, "on/former.yaml"), []byte(dedent(`
+		flow: former
+		stages:
+		  form: { job: { machine: .rook/blocks/form.yaml, input: { address: { bridge: gitlab, id: "1/2" }, asker: alice, text: "The bug?", fields: [{ name: title, label: Title, kind: text }] } } }
+		output: ${stages.form.output}
+	`)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w.sync(dir)
+	former := w.started("on/former.yaml")
+	w.until("the form done", func() bool { return w.show(former).Status == "done" })
+	if got := fmt.Sprint(w.show(former).Output); !strings.Contains(got, "only on Slack") {
+		t.Fatalf("the form gave %s", got)
 	}
 }

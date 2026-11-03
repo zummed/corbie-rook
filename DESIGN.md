@@ -38,10 +38,11 @@ A project's own files hold its choices, and `.rook/` holds what Rook does. When 
 | `blocks/who.yaml` | the person an event is from, and the agent they get where it came from |
 | `blocks/say.yaml`, `tell.yaml`, `ask.yaml`, `status.yaml` | say at an address, tell a person, ask people, show a status |
 | `blocks/history.yaml`, `thread.js` | what a service's thread held before a message |
-| `blocks/rich.js` | the charts in a text, drawn by Slack and shown as tables by the other bridges |
+| `blocks/rich.js` | the charts and layouts in a text, drawn by Slack and shown as tables and text by the other bridges |
 | `blocks/format.js` | how to write for each bridge, given to an agent as `format` |
-| `agents/base.yaml` | what every agent answering a message takes from Rook: its input, prompt, conversation and the tool `progress` |
+| `agents/base.yaml` | what every agent answering a message takes from Rook: its input, prompt, conversation and the tools `progress` and `form` |
 | `blocks/question.yaml`, `close.yaml` | the run behind `ask.yaml`, which a tap goes to, and what shows its answer |
+| `blocks/form.yaml` | a form in the asker's Slack thread, for the tool `form` |
 | `blocks/approval.yaml` | a part's ask: the reviewer, then the part's approvers |
 | `people/file.js` | the People slot, read from `people.yaml` |
 | `attend/never.yaml`, `attend/model.yaml` | the Attend slot: no, or asking a small model |
@@ -116,7 +117,7 @@ A conversation is a run. Its messages are answered one at a time, each by a new 
 - Rook reads nothing for a person with no agent.
 - A message marked `unaddressed` from someone with an agent goes to `attend.yaml`, with the thread before it, and is answered only when it gives `answer: true`. A failed `attend.yaml` answers nothing. No one is told anything for an unaddressed message.
 - While an agent works, `blocks/status.yaml` shows `Working on it.`, and a reply clears it. An answer that says nothing clears it.
-- A conversation waits while its message waits, approvals included, up to seven days.
+- A conversation waits while its message waits: up to seven days for an approval, and an hour for a form.
 - An answer that fails is told so, and the conversation starts afresh.
 - A person with no agent who names the bot is told the bot is not theirs.
 
@@ -134,7 +135,7 @@ Your machines use Rook's blocks as jobs. A job runs from a flow, a statechart or
 | `address` | where the message came from |
 | `history` | what the service's thread held before this message, for a new conversation on Slack, GitLab or Jira, or nothing |
 | `conversation` | what the last answer gave, or nothing |
-| `format` | how to write for the message's bridge: Markdown or not, and how to write a chart |
+| `format` | how to write for the message's bridge: Markdown or not, and how to write a chart, a layout or a diagram |
 
 | Output | What it does |
 |---|---|
@@ -149,7 +150,7 @@ Any machine can run these blocks. A path reads from the project's top directory,
 |---|---|---|
 | `.rook/blocks/tell.yaml` | `person`, `text` | says a text to a person named in `lookup.yaml` |
 | `.rook/blocks/say.yaml` | `address`, `text` | says a text at an address |
-| `.rook/blocks/ask.yaml` | `people`, `in`, `text`, `choices` | asks people, or a Slack channel, and gives `choice` |
+| `.rook/blocks/ask.yaml` | `people`, `in`, `text`, `choices`, `fields`, `within` | asks people, or a Slack channel or conversation, and gives `choice` and `values` |
 | `.rook/blocks/status.yaml` | `address`, `text` | shows a status at an address: under a Slack thread, or "typing" on Telegram; an empty text clears it, and a failure gives nothing |
 
 An address is a mapping: `{ bridge, id }`, with `answers`, `at` and `settings` where a bridge uses them. On Slack, `id` may be a channel's `#name`. `chat.yaml` gives one for a message, and `lookup.yaml`, with `do: reach`, gives one for each person. Pass it whole.
@@ -175,7 +176,7 @@ tools:
 
 A person's reply to a text goes to `chat.yaml` as a new message, and the agent there does not know the text. Only a tap on a question goes back to the machine that asked.
 
-## Charts
+## Charts, layouts and diagrams
 
 A text says a chart as a fenced block marked `chart`, holding one JSON object. Slack draws it, two to a message, and every other bridge shows it as a table; so does Slack, for a chart outside its limits.
 
@@ -193,7 +194,11 @@ A text says a chart as a fenced block marked `chart`, holding one JSON object. S
 | `series` | each a `name` and one number in `values` for each label |
 | `x`, `y` | the names of the axes |
 
-An agent learns this from `${input.format}`, which tells it on Telegram to write no tables. A block that does not read as a chart is left as it is written.
+A layout is a fenced block marked `blocks`, holding a JSON list of Slack's Block Kit blocks. Slack posts them as they are, at most 50 to a message. Every other bridge, and Slack for a message it refuses, shows the layout's text.
+
+GitLab draws a fenced block marked `mermaid` as a diagram. Rook passes it on as it is, and other bridges show it as code.
+
+An agent learns what its bridge shows from `${input.format}`: layouts only on Slack, diagrams only on GitLab, and no tables on Telegram. A block that does not read as a chart or a layout is left as it is written.
 
 ## Attend
 
@@ -211,10 +216,14 @@ A question is a run with a key, named on its buttons, so a press goes to it. `as
 | Input | What it does |
 |---|---|
 | `people` | people and groups; each is asked in a direct message on the first bridge `lookup.yaml` gives that reaches them |
-| `in` | a Slack channel, as `#name`; the question is posted there in place of direct messages, and the bot must be in it |
+| `in` | a Slack channel, as `#name`, or a Slack conversation's address `id`; the question is posted there in place of direct messages, and the bot must be in it |
+| `fields` | form fields above the buttons, each `{ name, label, kind, choices }` with `kind` `text`, `long`, `number` or `choice`; only Slack shows them, so the question is asked only there |
+| `within` | how long to wait, by default `7d` |
 
 - A tap counts when `lookup.yaml` says its sender is someone `people` names, or in a group it names, on any bridge. The first tap that counts is the answer, and others change nothing.
-- The question's messages then show who answered, and their buttons go. Unanswered after seven days, the choice is `no`.
+- The answer is `choice`, and `values`, the fields' values by name. The question's messages then show who answered and the values, and their buttons go.
+- Unanswered after `within`, the choice is `no`.
+- The tool `form` in `.rook/agents/base.yaml` asks the person who asked, in their Slack thread, with the buttons Send and Cancel, for an hour. On another bridge it gives a note saying forms are shown only on Slack.
 - A person with no bridge that reaches them directly cannot be asked: the ask fails, and the call does not run.
 
 ## Parts
