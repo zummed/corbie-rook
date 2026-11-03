@@ -19,10 +19,11 @@ stages:
         model: { name: claude-haiku-5-5, secret: ANTHROPIC_KEY }
         system: |
           You are shown the newest message in a thread, the thread before it, and
-          what a bot in the thread is for. Answer true when the newest message asks
-          the bot for something or answers what the bot last said. Answer false
-          when people are talking to each other, and when you are unsure.
-        prompt: "The bot is ${input.about}.\n\nThe thread before the message, where the bot is called you:\n<thread>\n${input.history}\n</thread>\n\nThe newest message, from ${input.asker}:\n<message>\n${input.said}\n</message>"
+          what a bot in the thread is for. Answer true when the newest message is
+          meant for the bot: it asks the bot for something, answers what the bot
+          last said, or is the kind of message the bot is for. Answer false when
+          people are talking to each other, and when you are unsure.
+        prompt: "The bot is ${input.about}.\n\n${input.history ? 'The thread before the message, where the bot is called you:\\n<thread>\\n' + input.history + '\\n</thread>' : 'The message starts the thread.'}\n\nThe newest message, from ${input.asker}:\n<message>\n${input.said}\n</message>"
         reply:
           type: object
           required: [answer]
