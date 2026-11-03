@@ -1,12 +1,13 @@
-# Asks people, each on their own bridge, with a button for each choice, and gives
-# `choice`: the first answer from one of them, or no after seven days. `to` lists
-# people's addresses from lookup.yaml, on Telegram or Slack.
+# Asks people, with a button for each choice, and gives `choice`: the first answer
+# from someone `people` names, or no after seven days. `people` names people and
+# groups in lookup.yaml, each asked on their own bridge; with `in`, a Slack channel
+# named as rules.yaml names places, the question is posted there instead.
 flow: ask
-input: { to: list, text: string, choices: list }
+input: { people: list, in: "string?", text: string, choices: list }
 stages:
   question:
     job:
       machine: ./question.yaml
       key: "question:${run.id.slice(-10)}"
-      input: { to: "${input.to}", text: "${input.text}", choices: "${input.choices}" }
+      input: { people: "${input.people}", in: "${input.in || ''}", text: "${input.text}", choices: "${input.choices}" }
 output: ${stages.question.output}

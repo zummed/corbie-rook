@@ -300,3 +300,75 @@ func TestStartingAttendSaysNo(t *testing.T) {
 		t.Fatalf("attend ended %s with %v: %s", run.Status, run.Output, run.Error)
 	}
 }
+
+// A question in a Slack channel is posted there, and the first tap from someone in
+// the group it names answers it; the message then shows who answered, with no
+// buttons. rules.yaml names such approvers as { people, in }.
+func TestQuestionInAChannelCountsTheGroup(t *testing.T) {
+	s := newSlack(t)
+	w := newWorld(t)
+	dir := slackProject(t, w, s)
+	for name, text := range map[string]string{
+		"people.yaml": "people:\n  alice: { slack: U1 }\n  bob: { slack: U2 }\ngroups:\n  team: [bob]\n",
+		"rules.yaml":  "places: {}\nagents:\n  - { name: helper, for: [alice] }\napprove:\n  deploys: { people: [team], in: \"#approvals\" }\n",
+		"on/asker.yaml": dedent(`
+			statechart: asker
+			initial: who
+			states:
+			  who:
+			    job: { machine: .rook/blocks/approvers.yaml, input: { part: deploys } }
+			    on: { done: asking }
+			  asking:
+			    job: { machine: .rook/blocks/ask.yaml, input: { people: "${states.who.output.people}", in: "${states.who.output.in}", text: "Deploy?", choices: ["yes", "no"] } }
+			    on: { done: over }
+			  over: { end: done, output: "${states.asking.output.choice}" }
+		`),
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.sync(dir)
+	asker := w.kept("on/asker.yaml")
+	w.until("Slack connected", s.connected)
+	w.until("the question", func() bool { return len(s.posted()) == 1 })
+	post := s.posted()[0]
+	if post["channel"] != "C5" {
+		t.Fatalf("the question went to %v", post)
+	}
+	blocks, _ := json.Marshal(post["blocks"])
+	value := strings.Split(strings.Split(string(blocks), `"value":"`)[1], " ")[0]
+	press := func(id, user, choice string) {
+		s.send(map[string]any{"envelope_id": id, "type": "interactive", "payload": map[string]any{
+			"type": "block_actions", "user": map[string]any{"id": user}, "actions": []any{map[string]any{"value": value + " " + choice}},
+			"channel": map[string]any{"id": "C5"}, "message": map[string]any{"ts": "1.1", "text": "Deploy?"},
+		}})
+	}
+	press("a", "U1", "no")
+	w.until("the press received", func() bool { return s.acked() == 1 })
+	time.Sleep(20 * interval)
+	if run := w.show(asker); run.Status != "running" {
+		t.Fatalf("a press by someone outside the group ended the question: %+v", run)
+	}
+	s.mu.Lock()
+	changed := len(s.updates)
+	s.mu.Unlock()
+	if changed != 0 {
+		t.Fatalf("a press that did not count changed the question")
+	}
+	press("b", "U2", "yes")
+	w.until("the asker done", func() bool { return w.show(asker).Status == "done" })
+	if got := w.show(asker).Output; got != "yes" {
+		t.Fatalf("the choice was %v", got)
+	}
+	w.until("the question closed", func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return len(s.updates) == 1
+	})
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if got := s.updates[0]; got["channel"] != "C5" || got["text"] != "Deploy?\n\nbob said yes." {
+		t.Fatalf("the question was changed to %v", got)
+	}
+}

@@ -8,7 +8,7 @@ stages:
   brief:
     job: { script: ./held.js, input: { jobs: "${input.jobs}", alone: "${input.alone}", asker: "${input.asker}", request: "${input.request}" } }
   review:
-    job: { machine: agents/reviewer.yaml, input: { context: "${stages.brief.output.context}" } }
+    job: { machine: agents/reviewer.yaml, input: { context: "${stages.brief.output.context + '\\n\\n' + stages.brief.output.rule}" } }
   approvers:
     job: { machine: ./approvers.yaml, input: { part: "${input.part}" } }
   person:
@@ -16,7 +16,8 @@ stages:
     job:
       machine: ./ask.yaml
       input:
-        to: "${stages.approvers.output}"
+        people: "${stages.approvers.output.people}"
+        in: "${stages.approvers.output.in}"
         choices: ["yes", "no"]
         text: "An agent wants to run ${stages.brief.output.names.join(', ')}.\n\n${stages.brief.output.context}\n\nReviewer: ${stages.review.output.reply.says}, ${stages.review.output.reply.note}"
 output: "${stages.person.skipped ? { approve: stages.review.output.reply.says === 'yes' ? stages.brief.output.names : [], note: 'The reviewer said ' + stages.review.output.reply.says + ': ' + stages.review.output.reply.note } : { approve: stages.person.output.choice === 'yes' ? stages.brief.output.names : [], note: 'The approver said ' + stages.person.output.choice + '.' }}"

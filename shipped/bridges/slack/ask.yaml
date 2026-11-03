@@ -1,4 +1,6 @@
-# Asks people on Slack in a direct message, with a button for each choice.
+# Asks on Slack, with a button for each choice: `to` lists people's ids, each
+# asked in a direct message, and channels, as #name, asked there. It gives `sent`,
+# the messages it posted.
 flow: slack-ask
 input: { to: list, text: string, choices: list, question: string }
 stages:
@@ -8,3 +10,4 @@ stages:
       input: { do: ask, to: "${input.to}", text: "${input.text}", choices: "${input.choices}", question: "${input.question}" }
       allow: [net:slack.com, "secret:SLACK_TOKEN@net:slack.com"]
       restart: { limit: 2 }
+output: ${stages.question.output}

@@ -1,5 +1,6 @@
 // Slack's script: input.do is hear, for listen.yaml, say, for say.yaml, ask, for
-// ask.yaml, history, for history.yaml, or status, for status.yaml. It speaks
+// ask.yaml, close, for close.yaml, history, for history.yaml, or status, for
+// status.yaml. It speaks
 // Slack's Web API with the bot token SLACK_TOKEN and listens with the app-level
 // token SLACK_APP_TOKEN, holding each as a handle.
 const api = "https://slack.com/api"
@@ -33,21 +34,14 @@ if (input.do === "hear") {
   const mention = "<@" + me + ">"
 
   // pressed gives the answer a press of a button is. A button's value holds the
-  // question and the choice, and the buttons go once one is pressed.
+  // question and the choice. The question's run takes the buttons away once a
+  // press counts.
   const pressed = (body) => {
     const action = (body.actions || [])[0] || {}
     const value = String(action.value || "")
     const at = value.indexOf(" ")
     if (at < 0) return
     emit("answer", { bridge: "slack", question: value.slice(0, at), from: body.user.id, choice: value.slice(at + 1) })
-    const shown = body.message && body.message.text
-    if (body.channel && body.message) {
-      try {
-        call("chat.update", { channel: body.channel.id, ts: body.message.ts, text: shown + "\n\nYou said " + value.slice(at + 1) + ".", blocks: [] })
-      } catch (e) {
-        log(e.message)
-      }
-    }
   }
 
   // spoke holds the threads the bot has said something in, as channel/thread:
@@ -118,13 +112,34 @@ if (input.do === "hear") {
 }
 
 if (input.do === "ask") {
-  // A question in a direct message, with a button for each choice. A button's
-  // value holds the question and the choice, which a press names.
+  // A question, with a button for each choice, in a direct message to each
+  // person in input.to, or in a channel for each name there that starts with #.
+  // A button's value holds the question and the choice, which a press names.
   const buttons = input.choices.map((c, n) => ({ type: "button", action_id: "choice-" + n, text: { type: "plain_text", text: c[0].toUpperCase() + c.slice(1) }, value: input.question + " " + c }))
-  for (const to of input.to) {
-    const channel = call("conversations.open", { users: to }).channel.id
-    call("chat.postMessage", { channel: channel, text: input.text, blocks: [{ type: "section", text: { type: "mrkdwn", text: input.text } }, { type: "actions", elements: buttons }] })
+  const named = (name) => {
+    let cursor
+    for (let page = 0; page < 20; page++) {
+      const part = call("conversations.list", null, Object.assign({ types: "public_channel,private_channel", exclude_archived: "true", limit: "200" }, cursor ? { cursor: cursor } : {}))
+      const found = (part.channels || []).find((c) => c.name === name)
+      if (found) return found.id
+      cursor = (part.response_metadata || {}).next_cursor
+      if (!cursor) break
+    }
+    throw new Error("Slack has no channel #" + name + " the bot can see")
   }
+  const sent = []
+  for (const to of input.to) {
+    const channel = to.startsWith("#") ? named(to.slice(1)) : call("conversations.open", { users: to }).channel.id
+    const posted = call("chat.postMessage", { channel: channel, text: input.text, blocks: [{ type: "section", text: { type: "mrkdwn", text: input.text } }, { type: "actions", elements: buttons }] })
+    sent.push({ channel: channel, ts: posted.ts })
+  }
+  return { sent: sent }
+}
+
+if (input.do === "close") {
+  // Each message a question posted shows input.text in place of the question,
+  // with no buttons.
+  for (const m of input.sent) call("chat.update", { channel: m.channel, ts: m.ts, text: input.text, blocks: [] })
   return {}
 }
 

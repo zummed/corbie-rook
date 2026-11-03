@@ -32,7 +32,7 @@ A project's own files hold its choices, and `.rook/` holds what Rook does. `.roo
 | In `.rook/` | What it does |
 |---|---|
 | `bridges/<name>/listen.yaml` | hears a service, and sends each message and answer by key |
-| `bridges/<name>/say.yaml`, `ask.yaml`, `history.yaml`, `status.yaml` | says a text, asks a question with buttons, reads a thread, and shows a status |
+| `bridges/<name>/say.yaml`, `ask.yaml`, `close.yaml`, `history.yaml`, `status.yaml` | says a text, asks a question with buttons, shows its answer, reads a thread, and shows a status |
 | `bridges/gitlab/api.js`, `bridges/jira/api.js` | the service's REST API, for the bridge and a part's script |
 | `blocks/chat.yaml` | one conversation on any bridge, a message at a time: `who`, `attend`, then `answer` and `say` |
 | `blocks/who.yaml` | the person an event is from, and the agent they get where it came from |
@@ -41,7 +41,7 @@ A project's own files hold its choices, and `.rook/` holds what Rook does. `.roo
 | `blocks/rich.js` | the charts in a text, drawn by Slack and shown as tables by the other bridges |
 | `blocks/format.js` | how to write for each bridge, given to an agent as `format` |
 | `agents/base.yaml` | what every agent answering a message takes from Rook: its input, prompt, conversation and the tool `progress` |
-| `blocks/question.yaml` | the run behind `ask.yaml`, which a tap goes to |
+| `blocks/question.yaml`, `close.yaml` | the run behind `ask.yaml`, which a tap goes to, and what shows its answer |
 | `blocks/approval.yaml` | a part's ask: the reviewer, then the part's approvers |
 | `people/file.js` | the People slot, read from `people.yaml` |
 | `attend/never.yaml`, `attend/model.yaml` | the Attend slot: no, or asking a small model |
@@ -149,12 +149,12 @@ Any machine can run these blocks. A path reads from the project's top directory,
 |---|---|---|
 | `.rook/blocks/tell.yaml` | `person`, `text` | says a text to a person named in `lookup.yaml` |
 | `.rook/blocks/say.yaml` | `address`, `text` | says a text at an address |
-| `.rook/blocks/ask.yaml` | `to`, `text`, `choices` | asks people, and gives `choice` |
+| `.rook/blocks/ask.yaml` | `people`, `in`, `text`, `choices` | asks people, or a Slack channel, and gives `choice` |
 | `.rook/blocks/status.yaml` | `address`, `text` | shows a status at an address: under a Slack thread, or "typing" on Telegram; an empty text clears it, and a failure gives nothing |
 
 An address is a mapping: `{ bridge, id }`, with `answers`, `at` and `settings` where a bridge uses them. `chat.yaml` gives one for a message, and `lookup.yaml`, with `do: reach`, gives one for each person. Pass it whole.
 
-`ask.yaml` takes a list of people's addresses from `lookup.yaml`, since a tap counts by a person's id. A message's address can be a channel or an issue, so it goes to `say.yaml` only.
+`ask.yaml` takes names, as `lookup.yaml` knows them. A message's address can be a channel or an issue, so it goes to `say.yaml` only.
 
 ```yaml
 # A machine in schedules/ tells a person.
@@ -206,11 +206,16 @@ An agent learns this from `${input.format}`, which tells it on Telegram to write
 
 ## Asking a person
 
-A question is a run with a key, named on its buttons, so a press goes to it. `ask.yaml` gives the key, and `to` lists addresses, so each person is asked on their own bridge.
+A question is a run with a key, named on its buttons, so a press goes to it. `ask.yaml` gives the key.
 
-- Everyone in `to` is asked, and the first answer counts. Unanswered after seven days, the choice is `no`.
-- An answer counts only from someone in `to`, by bridge and id.
-- `lookup.yaml` gives the first bridge in a person's entry that can reach them directly. A person with none cannot approve: the ask fails, and the call does not run.
+| Input | What it does |
+|---|---|
+| `people` | people and groups; each is asked in a direct message on the first bridge `lookup.yaml` gives that reaches them |
+| `in` | a Slack channel, as `#name`; the question is posted there in place of direct messages, and the bot must be in it |
+
+- A tap counts when `lookup.yaml` says its sender is someone `people` names, or in a group it names, on any bridge. The first tap that counts is the answer, and others change nothing.
+- The question's messages then show who answered, and their buttons go. Unanswered after seven days, the choice is `no`.
+- A person with no bridge that reaches them directly cannot be asked: the ask fails, and the call does not run.
 
 ## Parts
 
@@ -261,6 +266,7 @@ agents:
   - { name: support, for: [anyone] }
 approve:
   deploys: [platform]
+  refunds: { people: [support], in: "#refunds" }
 ```
 
 | Who asks | Where | Agent |
@@ -274,7 +280,7 @@ approve:
 - A place not listed is read by anyone, so a GitLab or Jira project must be listed for a private agent to answer there.
 - History comes from the thread the answer goes to. GitLab's internal notes and Jira's restricted comments are left out of it and are not heard, since an answer is public on the issue. Someone who names the bot in one gets no answer.
 - `readers:` names groups, `anyone` or `asker`. It is written in the file, and not read from a channel's members.
-- `approve:` names who answers each part's held calls, each a person or a group.
+- `approve:` names who answers each part's held calls: a list of people and groups, each asked in a direct message, or `{ people, in }`, posted in the Slack channel `in` for any of `people` to answer.
 
 ## Who may do what
 

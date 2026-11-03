@@ -15,7 +15,6 @@ for (const j of jobs) {
 }
 // A job's name carries which call of its tool it is, as tool#2 or tool.1.
 const alone = jobs.length > 0 && jobs.every((j) => (input.alone || []).includes(j.name.split(/[.#]/)[0]))
-lines.push(alone
-  ? "Your yes ends it: the call runs at once."
-  : "Your yes is passed on as a recommendation, and a person answers.")
-return { context: lines.join("\n"), names: jobs.map((j) => j.name), alone: alone }
+// rule is for the reviewer alone: what its yes does.
+const rule = alone ? "Your yes ends it: the call runs at once." : "Your yes is passed on as a recommendation, and a person answers."
+return { context: lines.join("\n").trim(), rule: rule, names: jobs.map((j) => j.name), alone: alone }

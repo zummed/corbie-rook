@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	llmstandin "github.com/zummed/corbie/plugin/llm/standin"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -422,6 +421,7 @@ type slack struct {
 	thread []map[string]any // what the conversation holds, oldest first
 	reads  []string         // the methods that read it
 	status []map[string]any // each status set, in order
+	updates []map[string]any // each message changed, in order
 	refuse bool             // a message with blocks is refused
 }
 
@@ -489,8 +489,14 @@ func (s *slack) serve(w http.ResponseWriter, r *http.Request) {
 	case "/api/conversations.open":
 		fmt.Fprint(w, `{"ok": true, "channel": {"id": "D9"}}`)
 	case "/api/chat.update":
-		io.Copy(io.Discard, r.Body)
+		var update map[string]any
+		json.NewDecoder(r.Body).Decode(&update)
+		s.mu.Lock()
+		s.updates = append(s.updates, update)
+		s.mu.Unlock()
 		fmt.Fprint(w, `{"ok": true}`)
+	case "/api/conversations.list":
+		fmt.Fprint(w, `{"ok": true, "channels": [{"id": "C5", "name": "approvals"}], "response_metadata": {"next_cursor": ""}}`)
 	case "/api/chat.postMessage":
 		var post map[string]any
 		json.NewDecoder(r.Body).Decode(&post)
@@ -591,7 +597,7 @@ func TestSlackQuestionIsAnsweredByAPress(t *testing.T) {
 		initial: asking
 		states:
 		  asking:
-		    job: { machine: .rook/blocks/question.yaml, key: "question:abc", input: { to: [{ bridge: slack, id: U1 }], text: "Well?", choices: ["yes", "no"] } }
+		    job: { machine: .rook/blocks/question.yaml, key: "question:abc", input: { people: [alice], text: "Well?", choices: ["yes", "no"] } }
 		    on: { done: over }
 		  over: { end: done, output: "${states.asking.output.choice}" }
 	`)), 0o644); err != nil {
@@ -625,6 +631,16 @@ func TestSlackQuestionIsAnsweredByAPress(t *testing.T) {
 	w.until("the asker done", func() bool { return w.show(asker).Status == "done" })
 	if got := w.show(asker).Output; got != "no" {
 		t.Fatalf("the choice was %v", got)
+	}
+	w.until("the question closed", func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return len(s.updates) == 1
+	})
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if got := s.updates[0]; got["channel"] != "D9" || got["ts"] != "1.1" || got["text"] != "Well?\n\nalice said no." {
+		t.Fatalf("the question was changed to %v", got)
 	}
 }
 
