@@ -1,0 +1,11 @@
+# Shows the answer on each message a question posted, and takes its buttons away.
+# `sent` is what the bridges' asks gave.
+flow: close
+input: { sent: map, text: string }
+stages:
+  telegram:
+    when: "${(input.sent.telegram || []).length > 0}"
+    job: { machine: .rook/bridges/telegram/close.yaml, input: { sent: "${input.sent.telegram}", text: "${input.text}" } }
+  slack:
+    when: "${(input.sent.slack || []).length > 0}"
+    job: { machine: .rook/bridges/slack/close.yaml, input: { sent: "${input.sent.slack}", text: "${input.text}" } }

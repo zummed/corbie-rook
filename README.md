@@ -55,7 +55,7 @@ Your files are yours, and Rook never updates them. After updating Rook, compare 
 ## Common changes
 
 - **Add a bridge:** run `corbie rook init <project> --bridges <name>`, then set its secrets. Delete its file and submit again to stop it.
-- **Add a tool:** add a part under `parts/`, and list it under `open:` in an agent's file. Mark a tool that changes something `approve: true`, and name who approves it in `rules.yaml`.
+- **Add a tool:** add a part under `parts/`, and list it under `open:` in an agent's file. Mark a tool that changes something `approve: true`, and name who approves it in `rules.yaml`: people, asked each in a direct message, or `{ people: [team], in: "#approvals" }`, asked in a Slack channel where anyone in `team` may answer.
 - **Add an agent:** add its file to `agents/`, add it to `rules.yaml`, and add a stage for it in `answer.yaml`.
 - **Answer with your own machine:** add it as an agent is added. It gets the message and gives a `reply`, as the design says under Your machines.
 - **Tell someone from a machine:** run `.rook/blocks/tell.yaml` as a job, with `person` and `text`. `say.yaml` says at an address, and `ask.yaml` asks a question.

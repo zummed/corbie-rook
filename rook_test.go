@@ -244,7 +244,7 @@ func TestApproversAreThoseOfThePart(t *testing.T) {
 	w.sync(dir)
 	id := w.started("on/try.yaml")
 	w.until("the approvers", func() bool { return w.show(id).Status != "running" })
-	if got := fmt.Sprint(w.show(id).Output); got != "map[deploys:[map[bridge:telegram id:1] map[bridge:telegram id:2]] messages:[map[bridge:telegram id:2]] net:[map[bridge:telegram id:1]]]" {
+	if got := fmt.Sprint(w.show(id).Output); got != "map[deploys:map[in: people:[family]] messages:map[in: people:[bob]] net:map[in: people:[alice]]]" {
 		t.Errorf("the approvers were %s", got)
 	}
 }
@@ -577,8 +577,8 @@ func TestApprovalAsksThePartsApprovers(t *testing.T) {
 		}
 		return question != nil
 	})
-	want := []any{map[string]any{"bridge": "telegram", "id": "2"}}
-	if got := w.show(question.ID).Input.(map[string]any)["to"]; !reflect.DeepEqual(got, want) {
+	want := []any{"bob"}
+	if got := w.show(question.ID).Input.(map[string]any)["people"]; !reflect.DeepEqual(got, want) {
 		t.Fatalf("it asked %v", got)
 	}
 	for _, from := range []string{"1", "2"} {
@@ -625,9 +625,9 @@ func TestAnIdCountsOnlyOnItsBridge(t *testing.T) {
 	}
 }
 
-// A question goes to a run with a key its caller never names, and a tap by that
-// person answers it.
-// A tap by anyone else, or for another question, changes nothing.
+// A question goes to a run with a key its caller never names, and a tap by a
+// person it names answers it, on any of their bridges. A tap by anyone else
+// changes nothing.
 func TestAskPersonIsAnsweredByATap(t *testing.T) {
 	w := newWorld(t)
 	dir := copyStarter(t)
@@ -645,10 +645,13 @@ func TestAskPersonIsAnsweredByATap(t *testing.T) {
 		initial: asking
 		states:
 		  asking:
-		    job: { machine: .rook/blocks/ask.yaml, input: { to: [{ bridge: telegram, id: "1" }, { bridge: slack, id: "2" }], text: "Well?", choices: ["yes", "no"] } }
+		    job: { machine: .rook/blocks/ask.yaml, input: { people: [bob], text: "Well?", choices: ["yes", "no"] } }
 		    on: { done: over }
 		  over: { end: done, output: "${states.asking.output.choice}" }
 	`)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "people.yaml"), []byte("people:\n  alice: { telegram: \"1\" }\n  bob: { telegram: \"2\", slack: \"5\" }\ngroups: {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	removeListener(t, dir)
@@ -674,14 +677,14 @@ func TestAskPersonIsAnsweredByATap(t *testing.T) {
 	if run := w.show(asker); run.Status != "running" {
 		t.Fatalf("a tap by someone else ended the asker: %+v", run)
 	}
-	if _, err := w.SendToKey(context.Background(), question, "answer", map[string]any{"bridge": "telegram", "from": "2", "choice": "no"}, 0); err != nil {
+	if _, err := w.SendToKey(context.Background(), question, "answer", map[string]any{"bridge": "telegram", "from": "1", "choice": "yes"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(10 * interval)
 	if run := w.show(asker); run.Status != "running" {
-		t.Fatalf("the same id on another bridge ended the asker: %+v", run)
+		t.Fatalf("a tap by someone not asked ended the asker: %+v", run)
 	}
-	if _, err := w.SendToKey(context.Background(), question, "answer", map[string]any{"bridge": "slack", "from": "2", "choice": "no"}, 0); err != nil {
+	if _, err := w.SendToKey(context.Background(), question, "answer", map[string]any{"bridge": "slack", "from": "5", "choice": "no"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	w.until("the asker done", func() bool { return w.show(asker).Status == "done" })

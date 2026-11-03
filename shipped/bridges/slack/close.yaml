@@ -1,0 +1,10 @@
+# Shows `text` in place of the questions a Slack ask posted, with no buttons.
+flow: slack-close
+input: { sent: list, text: string }
+stages:
+  close:
+    job:
+      script: ./slack.js
+      input: { do: close, sent: "${input.sent}", text: "${input.text}" }
+      allow: [net:slack.com, "secret:SLACK_TOKEN@net:slack.com"]
+      restart: { limit: 2 }

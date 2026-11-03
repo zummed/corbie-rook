@@ -1,5 +1,5 @@
 // The bot's script: input.do is hear, for listen.yaml, say, for say.yaml,
-// ask, for ask.yaml, or status, for status.yaml. It speaks Telegram's Bot API with the token of the secret
+// ask, for ask.yaml, close, for close.yaml, or status, for status.yaml. It speaks Telegram's Bot API with the token of the secret
 // input.token names, which it holds only as a handle.
 const api = "https://api.telegram.org"
 const token = secrets.get(input.token)
@@ -24,7 +24,7 @@ if (input.do === "hear") {
   // the cursor tells Telegram every update before it was heard; with no
   // cursor, Telegram gives the oldest it has not been told of. A message in
   // a person's own chat with the bot is emitted as message; a tap on a
-  // button of a question is emitted as answer, and the buttons go.
+  // button of a question is emitted as answer.
   const ask = { timeout: 50, limit: 1, allowed_updates: ["message", "callback_query"] }
   if (input.cursor !== null && input.cursor !== undefined) ask.offset = input.cursor
   let cursor = ask.offset === undefined ? null : ask.offset
@@ -35,11 +35,10 @@ if (input.do === "hear") {
       const at = q.data.indexOf(" ")
       const question = q.data.slice(0, at), choice = q.data.slice(at + 1)
       emit("answer", { bridge: "telegram", question: question, from: String(q.from.id), choice: choice })
-      // These only show the tap. Telegram refuses them for an old tap, and a
+      // This only shows the tap. Telegram refuses it for an old tap, and a
       // refusal must not stop the cursor passing this update.
       try {
         call("answerCallbackQuery", { callback_query_id: q.id, text: choice })
-        call("editMessageText", { chat_id: q.message.chat.id, message_id: q.message.message_id, text: q.message.text + "\n\nYou said " + choice + "." })
       } catch (e) {
         log(e.message)
       }
@@ -59,7 +58,17 @@ if (input.do === "ask") {
   // A question with a button for each choice. A button holds the question
   // and the choice, which a tap names; Telegram takes at most 64 bytes.
   const buttons = input.choices.map((c) => ({ text: c[0].toUpperCase() + c.slice(1), callback_data: input.question + " " + c }))
-  for (const to of input.to) call("sendMessage", { chat_id: to, text: input.text, reply_markup: { inline_keyboard: [buttons] } })
+  const sent = []
+  for (const to of input.to) {
+    const m = call("sendMessage", { chat_id: to, text: input.text, reply_markup: { inline_keyboard: [buttons] } })
+    sent.push({ chat: to, id: m.message_id })
+  }
+  return { sent: sent }
+}
+
+if (input.do === "close") {
+  // Each message a question posted shows input.text, with no buttons.
+  for (const m of input.sent) call("editMessageText", { chat_id: m.chat, message_id: m.id, text: input.text })
   return {}
 }
 
