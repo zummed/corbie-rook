@@ -767,10 +767,11 @@ func TestInitAgainKeepsThePersonsFiles(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "attend.yaml")); err != nil {
 		t.Error("a file .rook reads by name was not written")
 	}
-	for _, name := range []string{"agents/team.yaml", "bridges/slack.yaml", "bridges/jira.yaml"} {
-		if _, err := os.Stat(filepath.Join(dir, ".rook/starter", name)); err != nil {
-			t.Errorf("the starting file %s is not in .rook/starter", name)
-		}
+	if differ, err := rook.Differ(dir); err != nil || !reflect.DeepEqual(differ, []string{"bridges/slack.yaml", "people.yaml"}) {
+		t.Errorf("the files not as Rook starts them are %v, %v", differ, err)
+	}
+	if text := rook.Pages()[3].Text; !strings.Contains(text, "\nagents/helper.yaml\n") || !strings.Contains(text, "\nbridges/jira.yaml\n") {
+		t.Error("the page rook-starter lacks a starting file")
 	}
 	if got, _ := os.ReadFile(filepath.Join(dir, ".rook/blocks/tell.yaml")); string(got) == "changed" {
 		t.Error(".rook was not rewritten")

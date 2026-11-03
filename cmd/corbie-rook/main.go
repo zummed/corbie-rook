@@ -69,7 +69,17 @@ func cmdInit(e *cli.Env, args []string) error {
 		fmt.Fprintln(e.Out, "Make the Slack app first, as corbie rook manual rook-project says under The Slack app.")
 	}
 	if updating {
-		fmt.Fprintf(e.Out, "%s has this version's .rook. Compare your files with .rook/starter, then:\n\n", dir)
+		differ, err := rook.Differ(dir)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(e.Out, "%s has this version's .rook.\n\n", dir)
+		if len(differ) > 0 {
+			fmt.Fprintf(e.Out, "These of your files are not as this version starts a project:\n\n  %s\n\ncorbie rook manual rook-starter shows how it starts them. Take what you want of them, then:\n\n", strings.Join(differ, "\n  "))
+		} else {
+			fmt.Fprintln(e.Out, "Then:")
+			fmt.Fprintln(e.Out)
+		}
 	} else {
 		fmt.Fprintf(e.Out, "%s is ready. Change people.yaml and rules.yaml, then:\n\n", dir)
 		fmt.Fprintln(e.Out, "  corbie controller secret set ANTHROPIC_KEY")

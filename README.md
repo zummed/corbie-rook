@@ -50,7 +50,7 @@ A model connected to `rook` is told the page `corbie rook manual rook`, and read
 
 `.rook/` holds Rook's machines. Change nothing there: `corbie rook init` rewrites it, so run that after updating Rook. It changes no other file, and writes any file `.rook/` needs that the project lacks.
 
-Your files are yours, and Rook never updates them. After updating Rook, compare them with `.rook/starter/`, which holds the files this version starts a project with, and run `corbie run submit . --check`.
+Your files are yours, and Rook never updates them. After updating Rook, `corbie rook init` names your files that are not as this version starts a project, and `corbie rook manual rook-starter` shows how it starts them. Take what you want of them, and run `corbie run submit . --check`.
 
 ## Common changes
 

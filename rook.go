@@ -6,10 +6,12 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
 	"slices"
+	"strings"
 
 	"github.com/zummed/corbie/manual"
 )
@@ -33,7 +35,57 @@ func Pages() []manual.Page {
 		{Name: "rook", Group: "Rook", Summary: "Rook: what to do in a project, for a model.", Text: briefing},
 		{Name: "rook-project", Group: "Rook", Summary: "Project: installing Rook, a project's files and the common changes.", Text: readme},
 		{Name: "rook-design", Group: "Rook", Summary: "Design: the blocks, what each takes and gives, and who may do what.", Text: design},
+		{Name: "rook-starter", Group: "Rook", Summary: "Starting files: the files this version writes into a new project, and each bridge's file.", Text: starterPage()},
 	}
+}
+
+// Starting gives the path in a project of each file this version starts a project
+// with, and of each bridge's file, sorted, with where it is kept here.
+func Starting() map[string]string {
+	out := map[string]string{}
+	for _, top := range []string{"starter", "bridges"} {
+		fs.WalkDir(files, top, func(name string, d fs.DirEntry, err error) error {
+			if err == nil && !d.IsDir() {
+				rel := strings.TrimPrefix(name, "starter/")
+				out[rel] = name
+			}
+			return err
+		})
+	}
+	return out
+}
+
+// starterPage gives every starting file, under its path in a project.
+func starterPage() string {
+	var b strings.Builder
+	b.WriteString("The files this version of Rook writes into a new project, and each bridge's file. Compare a project's files with these after corbie rook init updates it.\n")
+	starting := Starting()
+	for _, rel := range slices.Sorted(maps.Keys(starting)) {
+		text, _ := files.ReadFile(starting[rel])
+		fmt.Fprintf(&b, "\n%s\n\n%s", rel, text)
+	}
+	return b.String()
+}
+
+// Differ gives the project's files that are not as this version starts them, of
+// those it has, sorted.
+func Differ(dir string) ([]string, error) {
+	var out []string
+	starting := Starting()
+	for _, rel := range slices.Sorted(maps.Keys(starting)) {
+		mine, err := os.ReadFile(filepath.Join(dir, rel))
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		text, _ := files.ReadFile(starting[rel])
+		if string(mine) != string(text) {
+			out = append(out, rel)
+		}
+	}
+	return out, nil
 }
 
 // Shipped is the directory in a project that holds Rook's machines. Rook rewrites
@@ -61,8 +113,7 @@ func Bridges() []string {
 // Named are the project's files that a machine in .rook reads by name.
 var Named = []string{"rules.yaml", "lookup.yaml", "attend.yaml", "answer.yaml", "agents/reviewer.yaml"}
 
-// Init makes dir a project, or brings one up to date. It rewrites .rook, with a
-// copy of the starting files and every bridge's file in .rook/starter. It writes
+// Init makes dir a project, or brings one up to date. It rewrites .rook. It writes
 // the starting files if dir has no rules.yaml, each of Named that is not there,
 // and the file of each bridge named that is not there, so it changes no file of
 // the person's.
@@ -79,12 +130,6 @@ func Init(dir string, bridges []string) error {
 		return err
 	}
 	if err := copyTree("shipped", filepath.Join(dir, Shipped), true); err != nil {
-		return err
-	}
-	if err := copyTree("starter", filepath.Join(dir, Shipped, "starter"), true); err != nil {
-		return err
-	}
-	if err := copyTree("bridges", filepath.Join(dir, Shipped, "starter", "bridges"), true); err != nil {
 		return err
 	}
 	if _, err := os.Stat(filepath.Join(dir, "rules.yaml")); os.IsNotExist(err) {

@@ -413,16 +413,16 @@ func TestJiraHearsTwoCommentsAtOneMoment(t *testing.T) {
 // A slack stands in for Slack's Web API and Socket Mode.
 type slack struct {
 	*httptest.Server
-	t      *testing.T
-	mu     sync.Mutex
-	socket *websocket.Conn
-	posts  []map[string]any
-	acks   []string
-	thread []map[string]any // what the conversation holds, oldest first
-	reads  []string         // the methods that read it
-	status []map[string]any // each status set, in order
+	t       *testing.T
+	mu      sync.Mutex
+	socket  *websocket.Conn
+	posts   []map[string]any
+	acks    []string
+	thread  []map[string]any // what the conversation holds, oldest first
+	reads   []string         // the methods that read it
+	status  []map[string]any // each status set, in order
 	updates []map[string]any // each message changed, in order
-	refuse bool             // a message with blocks is refused
+	refuse  bool             // a message with blocks is refused
 }
 
 func newSlack(t *testing.T) *slack {

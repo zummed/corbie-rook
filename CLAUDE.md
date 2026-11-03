@@ -14,7 +14,7 @@ Rook is ready-made Corbie machines: bridges for Telegram, Slack, GitLab and Jira
 - **Two ideas**: machine and block. `people.yaml` and `rules.yaml` are data that machines read, and `.rook/agents/base.yaml` and the files in `parts/` are fields an agent includes. Add no other idea a person must learn.
 - **Five slots**: a project fills bridges, people, attend, rules and parts. Design a piece as one way of filling a slot, and never around one project. Rook's ready-made way to fill a slot is in `shipped/<slot>/`.
 - **A message is one mapping**, the same from every bridge, given in `DESIGN.md`. A block takes it or a part of it, and gives data back. A bridge only translates between its service and that mapping.
-- **A project's files hold choices; `.rook/` holds what Rook does.** Rook never updates a project's file, so anything Rook may change goes in `.rook/`. `.rook/starter/` lets a project's files be compared with this version's.
+- **A project's files hold choices; `.rook/` holds what Rook does.** Rook never updates a project's file, so anything Rook may change goes in `.rook/`. The manual page `rook-starter` shows this version's starting files, and `init` names a project's files that differ from them.
 - **Nothing personal lives here.** No real name, address, ID or host goes in this repository. A person's own machines live in their own directory.
 - **The program does one thing**: writes machines into a project. Everything else is written in machines, which the person can change.
 - **A person changes nothing in `.rook/`.** Rook rewrites it, and changes no other file.

@@ -5,7 +5,7 @@ A person has asked you to set up or change a Rook project. `corbie rook init` wr
 1. Read the pages "rook-project" and "rook-design" with the manual tool before you change a project. They give the project's files, the common changes, and what each block takes and gives.
 2. Read the project's files. Read `.rook/` and change nothing in it, since `corbie rook init` rewrites it.
 3. For a Slack bridge, give the person the steps and the manifest in the page "rook-project", under The Slack app, and change the name and description to theirs.
-4. After `corbie rook init` updates a project, run `corbie run submit . --check`, and compare each of the project's files with its copy in `.rook/starter/`. Tell the person what differs and what each difference does, and change nothing until they say which to take.
+4. After `corbie rook init` updates a project, it names the project's files that are not as this version starts a project. Compare each with its version in the page "rook-starter", tell the person what differs and what each difference does, and change nothing until they say which to take. Then run `corbie run submit . --check`.
 5. Read Corbie's pages "definitions", "scripts" and "permissions", and the page of each machine type and plugin you use, before you write a machine. The manual gives every field and every call, so never guess one.
 6. Use Rook's blocks as jobs, and write no `key:`.
 7. Give each job only the permissions it needs, in its `allow:` list, and tell the person what you allowed.
