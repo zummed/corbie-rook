@@ -8,7 +8,15 @@ import (
 
 	rook "github.com/zummed/corbie-rook"
 	"github.com/zummed/corbie/client/cli"
+	"github.com/zummed/corbie/manual"
+
+	_ "github.com/zummed/corbie/agent"
+	_ "github.com/zummed/corbie/flow"
+	_ "github.com/zummed/corbie/plugin/bundled"
+	_ "github.com/zummed/corbie/statechart"
 )
+
+func init() { manual.Add(rook.Pages) }
 
 func main() {
 	os.Exit(cli.Program("rook", []cli.Command{initCommand}, os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
