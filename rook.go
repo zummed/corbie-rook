@@ -61,7 +61,8 @@ func Bridges() []string {
 // Named are the project's files that a machine in .rook reads by name.
 var Named = []string{"rules.yaml", "lookup.yaml", "attend.yaml", "answer.yaml", "agents/reviewer.yaml"}
 
-// Init makes dir a project, or brings one up to date. It rewrites .rook. It writes
+// Init makes dir a project, or brings one up to date. It rewrites .rook, with a
+// copy of the starting files and every bridge's file in .rook/starter. It writes
 // the starting files if dir has no rules.yaml, each of Named that is not there,
 // and the file of each bridge named that is not there, so it changes no file of
 // the person's.
@@ -78,6 +79,12 @@ func Init(dir string, bridges []string) error {
 		return err
 	}
 	if err := copyTree("shipped", filepath.Join(dir, Shipped), true); err != nil {
+		return err
+	}
+	if err := copyTree("starter", filepath.Join(dir, Shipped, "starter"), true); err != nil {
+		return err
+	}
+	if err := copyTree("bridges", filepath.Join(dir, Shipped, "starter", "bridges"), true); err != nil {
 		return err
 	}
 	if _, err := os.Stat(filepath.Join(dir, "rules.yaml")); os.IsNotExist(err) {

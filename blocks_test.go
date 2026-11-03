@@ -257,7 +257,7 @@ func TestAttendAsksAModel(t *testing.T) {
 	t.Cleanup(web.Close)
 	setSite(t, dir, ".rook/attend/model.yaml", "model: { name: claude-haiku-5-5, secret: ANTHROPIC_KEY }",
 		"model: { name: test-model, service: anthropic, address: "+web.URL+", secret: TEST_KEY }")
-	draft, _, err := client.ReadMachine(dir, "attend.yaml")
+	draft, _, err := client.ReadMachine(dir, ".rook/attend/model.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,5 +276,27 @@ func TestAttendAsksAModel(t *testing.T) {
 		if !strings.Contains(shown, want) {
 			t.Errorf("%q is not in %s", want, shown)
 		}
+	}
+}
+
+// The starting attend.yaml answers no, and needs no model.
+func TestStartingAttendSaysNo(t *testing.T) {
+	w := newWorld(t)
+	dir := filepath.Join(t.TempDir(), "project")
+	if err := rook.Init(dir, nil); err != nil {
+		t.Fatal(err)
+	}
+	draft, _, err := client.ReadMachine(dir, "attend.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := w.Start(context.Background(), draft, client.Start{
+		Input: map[string]any{"said": "please look", "asker": "alice", "address": map[string]any{"bridge": "slack", "id": "C1/1.0"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.until("the answer", func() bool { return w.show(id).HasEnded() })
+	if run := w.show(id); run.Status != "done" || fmt.Sprint(run.Output) != "map[answer:false]" {
+		t.Fatalf("attend ended %s with %v: %s", run.Status, run.Output, run.Error)
 	}
 }

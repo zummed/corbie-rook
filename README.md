@@ -48,23 +48,24 @@ A model connected to `rook` is told the page `corbie rook manual rook`, and read
 | Rules | `rules.yaml`, `answer.yaml` | which group gets which agent, and who approves what |
 | Parts | `agents/`, `parts/` | the agents, and the tools each can open |
 
-`.rook/` holds Rook's machines. Change nothing there: `corbie rook init` rewrites it, so run that after updating Rook. It changes no other file.
+`.rook/` holds Rook's machines. Change nothing there: `corbie rook init` rewrites it, so run that after updating Rook. It changes no other file, and writes any file `.rook/` needs that the project lacks.
+
+Your files are yours, and Rook never updates them. After updating Rook, compare them with `.rook/starter/`, which holds the files this version starts a project with, and run `corbie run submit . --check`.
 
 ## Common changes
 
 - **Add a bridge:** run `corbie rook init <project> --bridges <name>`, then set its secrets. Delete its file and submit again to stop it.
 - **Give Slack its history:** the bot's token needs `channels:history`, `groups:history`, `im:history` and `mpim:history`. Without them a new conversation starts with nothing, and is still answered.
-- **Give an older project history:** add `history` to `input:` and the prompt in `agents/base.yaml`, as `starter/agents/base.yaml` has them. Without it an agent is given the thread and does not show it to the model.
 - **Add a tool:** add a part under `parts/`, and list it under `open:` in an agent's file. Mark a tool that changes something `approve: true`, and name who approves it in `rules.yaml`.
 - **Add an agent:** add its file to `agents/`, add it to `rules.yaml`, and add a stage for it in `answer.yaml`.
 - **Answer with your own machine:** add it as an agent is added. It gets the message and gives a `reply`, as the design says under Your machines.
 - **Tell someone from a machine:** run `.rook/blocks/tell.yaml` as a job, with `person` and `text`. `say.yaml` says at an address, and `ask.yaml` asks a question.
 - **Run something at a time:** add a statechart with a timer under `schedules/`, and run `corbie run submit bridges schedules`. See `corbie manual schedules`.
 - **Take people from elsewhere:** change the job in `lookup.yaml`.
-- **Answer in a thread without being named:** add `overhear: true` to the input in `bridges/slack.yaml`. Each reply in a thread the bot has said something in goes to `attend.yaml`, which by default asks a small model. On GitLab and Jira, `overhear: true` sends every issue and comment there.
-- **Decide another way what is meant for the bot:** change the job in `attend.yaml`. It gives `{ answer: true }` or `{ answer: false }`.
+- **Answer in a thread without being named:** add `overhear: true` to the input in `bridges/slack.yaml`. Each reply in a thread the bot has said something in goes to `attend.yaml`, which says no until you change it. On GitLab and Jira, `overhear: true` sends every issue and comment there.
+- **Decide what is meant for the bot:** in `attend.yaml`, name `.rook/attend/model.yaml` to ask a small model, or your own machine. It gives `{ answer: true }` or `{ answer: false }`.
 - **Wait for an issue to be finished:** add `settle: 2m` to the input in `bridges/gitlab.yaml` or `bridges/jira.yaml`. An opened issue is heard once nobody has changed it for two minutes.
-- **Show a chart:** an agent writes a fenced `chart` block, as the starter's `agents/base.yaml` tells it. Slack draws it, and the other bridges show a table.
+- **Show a chart:** an agent writes a fenced `chart` block, as `${input.format}` in its system text tells it. Slack draws it, and GitLab and Jira show a table.
 - **Call GitLab or Jira from a part:** load `.rook/bridges/gitlab/api.js` or `.rook/bridges/jira/api.js` in the part's script.
 - **Show a status on Slack:** declare the Slack app an agent, which gives it `assistant:write`. Slack shows a status only in a thread.
 

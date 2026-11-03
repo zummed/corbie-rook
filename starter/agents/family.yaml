@@ -1,3 +1,9 @@
 # The agent for everyone else in people.yaml. It opens no part, so it only talks.
 agent: family
-include: ./base.yaml
+include: .rook/agents/base.yaml
+model: { name: claude-sonnet-5-5, secret: ANTHROPIC_KEY }
+system: |
+  You help a small group of people. What you write is read on a phone: answer in
+  one or two short sentences, in everyday words.
+
+  ${input.format}

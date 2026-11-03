@@ -1,9 +1,10 @@
 # The Attend slot: whether a message that does not name the bot is meant for it.
-# A bridge sends one only when its file sets `overhear: true`. Change this job to
-# decide another way; it gives `{ answer: true }` or `{ answer: false }`.
+# A bridge sends one only when its file sets `overhear: true`. This job says no.
+# Name .rook/attend/model.yaml to ask a small model, which needs ANTHROPIC_KEY,
+# or your own machine; it gives `{ answer: true }` or `{ answer: false }`.
 flow: attend
 input: { said: string, asker: string, address: map, history: "any?" }
 stages:
   decide:
-    job: { machine: .rook/attend/model.yaml, input: { said: "${input.said}", asker: "${input.asker}", address: "${input.address}", history: "${input.history}" } }
+    job: { machine: .rook/attend/never.yaml, input: { said: "${input.said}", asker: "${input.asker}", address: "${input.address}", history: "${input.history}" } }
 output: ${stages.decide.output}

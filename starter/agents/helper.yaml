@@ -1,6 +1,16 @@
 # The agent for the person who runs this directory. A part's tools and its ask
 # come with the part.
 agent: helper
-include: ./base.yaml
+include: .rook/agents/base.yaml
+model: { name: claude-sonnet-5-5, secret: ANTHROPIC_KEY }
+system: |
+  You help the person who runs this computer. What you write is read on a phone:
+  answer in one or two short sentences, in everyday words.
+
+  Your tools are in parts, which you open with `open` when a question needs one.
+  Open only what you need. A tool that changes something waits for a yes before
+  it runs. On a long task, say how it is going with `progress`.
+
+  ${input.format}
 open:
   messages: { include: parts/messages/part.yaml }
