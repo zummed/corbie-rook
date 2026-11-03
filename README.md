@@ -72,45 +72,67 @@ Your files are yours, and Rook never updates them. After updating Rook, compare 
 The Slack bridge needs a Slack app that is an agent and uses Socket Mode, so nothing on the internet connects to this computer.
 
 1. At [api.slack.com/apps](https://api.slack.com/apps), choose Create New App, then From a manifest, and pick the workspace.
-2. Paste this manifest, with the name and description you want. Slack cannot turn an agent back into a plain app.
+2. Choose JSON, and paste this manifest, with the name and description you want. Slack cannot turn an agent back into a plain app.
 3. Under Basic Information, App-Level Tokens, make a token with the scope `connections:write`. Set it with `corbie controller secret set SLACK_APP_TOKEN`.
 4. Under Install App, install the app. Set its Bot User OAuth Token with `corbie controller secret set SLACK_TOKEN`.
 5. In `people.yaml`, give each person `slack:` with their member ID, from their profile's menu, Copy member ID.
 6. In each channel the bot should hear, run `/invite @Rook`.
 
-```yaml
-display_information:
-  name: Rook
-features:
-  bot_user:
-    display_name: Rook
-    always_online: true
-  app_home:
-    messages_tab_enabled: true
-    messages_tab_read_only_enabled: false
-  agent_view:
-    agent_description: Answers questions and does tasks for the people it belongs to.
-oauth_config:
-  scopes:
-    bot:
-      - assistant:write     # show a status in a thread
-      - chat:write          # post, and change a question once it is answered
-      - im:write            # open a direct message to ask a question
-      - channels:read       # a channel's name, as rules.yaml names places
-      - groups:read         # the same, for a private channel
-      - channels:history    # hear messages, and read a thread's history
-      - groups:history
-      - im:history
-settings:
-  event_subscriptions:
-    bot_events:
-      - message.channels
-      - message.groups
-      - message.im
-  interactivity:
-    is_enabled: true
-  socket_mode_enabled: true
+```json
+{
+  "display_information": {
+    "name": "Rook"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "Rook",
+      "always_online": true
+    },
+    "app_home": {
+      "messages_tab_enabled": true,
+      "messages_tab_read_only_enabled": false
+    },
+    "agent_view": {
+      "agent_description": "Answers questions and does tasks for the people it belongs to."
+    }
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "assistant:write",
+        "chat:write",
+        "im:write",
+        "channels:read",
+        "groups:read",
+        "channels:history",
+        "groups:history",
+        "im:history"
+      ]
+    }
+  },
+  "settings": {
+    "event_subscriptions": {
+      "bot_events": [
+        "message.channels",
+        "message.groups",
+        "message.im"
+      ]
+    },
+    "interactivity": {
+      "is_enabled": true
+    },
+    "socket_mode_enabled": true
+  }
+}
 ```
+
+| Scope | What the bridge does with it |
+|---|---|
+| `assistant:write` | shows a status in a thread |
+| `chat:write` | posts, and changes a question once it is answered |
+| `im:write` | opens a direct message to ask a question |
+| `channels:read`, `groups:read` | reads a channel's name, as `rules.yaml` names places |
+| `channels:history`, `groups:history`, `im:history` | hears messages, and reads a thread's history |
 
 The bot hears a direct message, and a message naming it in a channel it was invited to.
 
