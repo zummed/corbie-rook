@@ -58,11 +58,11 @@ func Starting() map[string]string {
 // starterPage gives every starting file, under its path in a project.
 func starterPage() string {
 	var b strings.Builder
-	b.WriteString("The files this version of Rook writes into a new project, and each bridge's file. Compare a project's files with these after corbie rook init updates it.\n")
+	b.WriteString("# Starting files\n\nThe files this version of Rook writes into a new project, and each bridge's file. Compare a project's files with these after corbie rook init updates it.\n")
 	starting := Starting()
 	for _, rel := range slices.Sorted(maps.Keys(starting)) {
 		text, _ := files.ReadFile(starting[rel])
-		fmt.Fprintf(&b, "\n%s\n\n%s", rel, text)
+		fmt.Fprintf(&b, "\n## %s\n\n```yaml\n%s```\n", rel, text)
 	}
 	return b.String()
 }
