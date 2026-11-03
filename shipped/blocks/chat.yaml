@@ -38,7 +38,7 @@ states:
             job:
               input: { unaddressed: "${!!input.event.unaddressed}", agent: "${!!stages.who.output.agent}", said: "${input.event.text}", asker: "${stages.who.output.person}", address: "${input.address}", history: "${stages.history.output}" }
               machine:
-                flow: attend
+                flow: should-answer
                 input: { unaddressed: boolean, agent: boolean, said: string, asker: "any?", address: map, history: "any?" }
                 stages:
                   decide:
