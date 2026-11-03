@@ -204,7 +204,9 @@ const cut = (text) => {
 // Each message is a list of parts: { markdown } or { chart }.
 const messages = [[]]
 const last = () => messages[messages.length - 1]
-const count = (m, kind) => m.reduce((n, p) => n + (kind === "chart" ? (p.chart ? 1 : 0) : (p.markdown || "").length), 0)
+// count gives a message's charts, or its characters of markdown with the blank
+// line between parts.
+const count = (m, kind) => m.reduce((n, p) => n + (kind === "chart" ? (p.chart ? 1 : 0) : p.markdown === undefined ? 0 : p.markdown.length + 2), 0)
 for (const p of rich.parts(String(input.text))) {
   if (p.chart && fits(p.chart)) {
     if (count(last(), "chart") === 2) messages.push([])

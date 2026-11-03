@@ -59,7 +59,7 @@ func Bridges() []string {
 }
 
 // Named are the project's files that a machine in .rook reads by name.
-var Named = []string{"people.yaml", "rules.yaml", "lookup.yaml", "attend.yaml", "answer.yaml", "agents/reviewer.yaml"}
+var Named = []string{"rules.yaml", "lookup.yaml", "attend.yaml", "answer.yaml", "agents/reviewer.yaml"}
 
 // Init makes dir a project, or brings one up to date. It rewrites .rook. It writes
 // the starting files if dir has no rules.yaml, each of Named that is not there,
