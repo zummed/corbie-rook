@@ -2,11 +2,12 @@
 # bridge's listener sends each message here under a key of its own. Its messages
 # are answered one at a time, each by a new agent given the conversation so far and
 # the message's address, and with no conversation yet, what the service's thread
-# already holds. An empty reply says nothing. Anyone with no agent is told
-# the bot is not theirs, and a question the agent fails on is told so and ends the
-# conversation, so one the model cannot take does not stop the chat. A chat quiet
-# for a day ends, and its next message starts a new conversation with the machines
-# as they are then.
+# already holds. A message marked unaddressed is answered only if attend.yaml says
+# so. A status shows while the agent works, and an empty reply says nothing.
+# Anyone with no agent who names the bot is told the bot is not theirs, and a
+# question the agent fails on is told so and ends the conversation, so one the
+# model cannot take does not stop the chat. A chat quiet for a day ends, and its
+# next message starts a new conversation with the machines as they are then.
 statechart: chat
 initial: waiting
 states:
@@ -32,12 +33,26 @@ states:
           history:
             job:
               machine: ./history.yaml
-              input: { address: "${input.address}", wanted: "${!!stages.who.output.agent && !(input.last && input.last.conversation)}" }
+              input: { address: "${input.address}", wanted: "${!!stages.who.output.agent && (!!input.event.unaddressed || !(input.last && input.last.conversation))}" }
+          attend:
+            job:
+              input: { unaddressed: "${!!input.event.unaddressed}", agent: "${!!stages.who.output.agent}", said: "${input.event.text}", asker: "${stages.who.output.person}", address: "${input.address}", history: "${stages.history.output}" }
+              machine:
+                flow: attend
+                input: { unaddressed: boolean, agent: boolean, said: string, asker: "any?", address: map, history: "any?" }
+                stages:
+                  decide:
+                    when: "${input.unaddressed && input.agent}"
+                    job: { machine: attend.yaml, input: { said: "${input.said}", asker: "${input.asker}", address: "${input.address}", history: "${input.history}" } }
+                output: "${input.agent && (!input.unaddressed || !stages.decide.failed && !!(stages.decide.output || {}).answer)}"
           refuse:
-            when: "${!stages.who.output.agent}"
+            when: "${!stages.who.output.agent && !input.event.unaddressed}"
             job: { machine: ./say.yaml, input: { address: "${input.address}", text: This bot answers only the people it belongs to. } }
+          busy:
+            when: "${stages.attend.output}"
+            job: { machine: ./status.yaml, input: { address: "${input.address}", text: Working on it. } }
           answer:
-            when: "${stages.who.output.agent}"
+            when: "${stages.attend.output}"
             job:
               machine: answer.yaml
               input:
@@ -47,11 +62,14 @@ states:
                   asker: "${stages.who.output.person}"
                   home: "${input.dir}"
                   address: "${input.address}"
-                  history: "${stages.history.output}"
+                  history: "${input.last && input.last.conversation ? null : stages.history.output}"
                   conversation: "${input.last ? input.last.conversation : null}"
           say:
             when: "${(stages.answer.output || {}).reply}"
             job: { machine: ./say.yaml, input: { address: "${input.address}", text: "${stages.answer.output.reply}" } }
+          idle:
+            when: "${!stages.busy.skipped && !stages.answer.skipped && !stages.answer.failed && !(stages.answer.output || {}).reply}"
+            job: { machine: ./status.yaml, input: { address: "${input.address}", text: "" } }
           sorry:
             when: "${stages.answer.failed}"
             job: { machine: ./say.yaml, input: { address: "${input.address}", text: That could not be answered. Ask again in a while. } }

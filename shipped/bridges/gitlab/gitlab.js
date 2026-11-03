@@ -1,31 +1,40 @@
 // GitLab's script: input.do is hear, for listen.yaml, say, for say.yaml, or
-// history, for history.yaml. It
-// speaks the REST API of the GitLab at input.site with the token GITLAB_TOKEN,
-// which it holds only as a handle.
-const api = "https://" + input.site + "/api/v4"
-const token = secrets.get("GITLAB_TOKEN")
+// history, for history.yaml. It speaks the REST API of the GitLab at input.site
+// through api.js.
+const call = require("./api.js").api(input.site)
+const project = (chat) => chat.slice(0, chat.lastIndexOf("#"))
+const issuePath = (chat) => "/projects/" + encodeURIComponent(project(chat)) + "/issues/" + chat.slice(chat.lastIndexOf("#") + 1)
 
-// call calls GitLab and gives its answer; a refusal is thrown with GitLab's
-// status, so the job fails and says why. No error holds the address called. A
-// thing gone or out of the token's sight is null where options.maybe says so.
-function call(method, path, options) {
-  const { maybe, ...rest } = options || {}
-  const reply = http.request(api + path, Object.assign({ method: method, headers: { "PRIVATE-TOKEN": token }, as: "text", timeout: 30 }, rest))
-  if (maybe && (reply.status === 403 || reply.status === 404)) return null
-  if (reply.status < 200 || reply.status >= 300) throw new Error("GitLab answered " + method + " " + path.split("?")[0] + " with " + reply.status)
-  return JSON.parse(reply.body)
+// GitLab records an issue made in its web UI as a work item.
+const issues = ["Issue", "WorkItem"]
+
+// seconds reads a length of time: a number with s, m or h.
+function seconds(text) {
+  const m = /^(\d+)(s|m|h)$/.exec(String(text))
+  if (!m) throw new Error("settle is a number with s, m or h, as 2m, and not " + text)
+  return Number(m[1]) * { s: 1, m: 60, h: 3600 }[m[2]]
 }
 
 if (input.do === "hear") {
-  const cursor = Object.assign({}, input.cursor || {})
+  // The cursor holds the latest event read of each project, and the issues
+  // opened and not yet heard.
+  const at = Object.assign({}, (input.cursor || {}).at)
+  const waiting = ((input.cursor || {}).waiting || []).slice()
+  const settle = seconds(input.settle)
   const heard = []
   const me = call("GET", "/user")
   const named = new RegExp("(^|[^\\w@])@" + me.username.replace(/[.\-]/g, "\\$&") + "(?![\\w.-])")
-  for (const project of input.projects) {
-    const id = "/projects/" + encodeURIComponent(project)
-    if (cursor[project] === undefined) {
+  // hear keeps a message that names the bot, and with overhear one that does
+  // not, marked unaddressed.
+  const hear = (message) => {
+    if (named.test(message.text)) heard.push(message)
+    else if (input.overhear) heard.push(Object.assign(message, { unaddressed: true }))
+  }
+  for (const p of input.projects) {
+    const id = "/projects/" + encodeURIComponent(p)
+    if (at[p] === undefined) {
       const latest = call("GET", id + "/events", { query: { per_page: "1" } })
-      cursor[project] = latest.length ? latest[0].id : 0
+      at[p] = latest.length ? latest[0].id : 0
       continue
     }
     // Events come newest first: read back to the cursor, then take them in the
@@ -33,60 +42,66 @@ if (input.do === "hear") {
     const events = []
     for (let page = 1; page <= 10; page++) {
       const some = call("GET", id + "/events", { query: { per_page: "100", page: String(page) } })
-      const newer = some.filter((e) => e.id > cursor[project])
+      const newer = some.filter((e) => e.id > at[p])
       events.push(...newer)
       if (newer.length < some.length || some.length < 100) break
     }
     events.reverse()
     for (const e of events) {
-      cursor[project] = Math.max(cursor[project], e.id)
-      if (e.author_id === me.id) continue
-      let iid, text, at
+      at[p] = Math.max(at[p], e.id)
+      if (e.author_id === me.id || !e.author_username) continue
       // An answer is a public note, so what only members can read is not heard.
-      if (e.note && e.note.noteable_type === "Issue" && !e.note.system && !e.note.internal && !e.note.confidential) {
-        iid = e.note.noteable_iid
-        text = e.note.body || ""
-        at = e.note.id
-      } else if (!e.note && e.target_type === "Issue" && e.action_name === "opened") {
-        const issue = call("GET", id + "/issues/" + e.target_iid, { maybe: true }) || {}
-        iid = e.target_iid
-        text = (issue.title || "") + "\n\n" + (issue.description || "")
+      // A note on an issue still waiting is read with it, as its history.
+      if (e.note && issues.includes(e.note.noteable_type) && !e.note.system && !e.note.internal && !e.note.confidential) {
+        const chat = p + "#" + e.note.noteable_iid
+        if (waiting.some((w) => w.chat === chat)) continue
+        hear({ bridge: "gitlab", text: String(e.note.body || "").trim(), chat: chat, from: String(e.author_username), place: p, at: e.note.id, settings: { site: input.site } })
+      } else if (!e.note && issues.includes(e.target_type) && e.action_name === "opened") {
+        waiting.push({ chat: p + "#" + e.target_iid, from: String(e.author_username) })
       }
-      if (iid === undefined || !e.author_username || !named.test(text)) continue
-      heard.push({ bridge: "gitlab", text: text.trim(), chat: project + "#" + iid, from: String(e.author_username), place: project, at: at, settings: { site: input.site } })
     }
+  }
+  // An opened issue is heard once nobody has changed it for settle, as it is then.
+  const still = []
+  for (const w of waiting) {
+    const issue = call("GET", issuePath(w.chat), { maybe: true })
+    if (!issue) continue
+    if (Date.now() - Date.parse(issue.updated_at) < settle * 1000) {
+      still.push(w)
+      continue
+    }
+    const text = ((issue.title || "") + "\n\n" + (issue.description || "")).trim()
+    hear({ bridge: "gitlab", text: text, chat: w.chat, from: w.from, place: project(w.chat), settings: { site: input.site } })
   }
   // Said only now, when nothing is left to fail: a job that fails keeps the old
   // cursor, and its next ask hears the same again.
   for (const message of heard) emit("message", message)
-  return { cursor: cursor }
+  return { cursor: { at: at, waiting: still } }
 }
 
 if (input.do === "history") {
-  // The issue and its comments before this one. A message that is the opening of
-  // an issue has none, and holds the issue itself.
-  if (!input.at) return null
-  const to = String(input.to)
-  const cut = to.lastIndexOf("#")
-  const issue = "/projects/" + encodeURIComponent(to.slice(0, cut)) + "/issues/" + to.slice(cut + 1)
+  // The issue and its comments before this one. A message that opens an issue
+  // holds the issue itself, and has only the comments made while it waited.
   const me = call("GET", "/user").username
   const name = (author) => (author.username === me ? "you" : author.username)
-  const opened = call("GET", issue, { maybe: true })
-  const notes = call("GET", issue + "/notes", { query: { sort: "desc", per_page: "30" }, maybe: true }) || []
-  const lines = opened ? [name(opened.author || {}) + ": " + opened.title + "\n\n" + (opened.description || "")] : []
+  const lines = []
+  if (input.at) {
+    const opened = call("GET", issuePath(String(input.to)), { maybe: true })
+    if (opened) lines.push(name(opened.author || {}) + ": " + opened.title + "\n\n" + (opened.description || ""))
+  }
+  const notes = call("GET", issuePath(String(input.to)) + "/notes", { query: { sort: "desc", per_page: "30" }, maybe: true }) || []
   // An internal note is left out: the token may read it, and whoever reads the
   // answer may not.
   for (const note of notes.reverse()) {
-    if (note.system || note.internal || note.confidential || note.id >= input.at) continue
+    if (note.system || note.internal || note.confidential || (input.at && note.id >= input.at)) continue
     lines.push(name(note.author || {}) + ": " + note.body)
   }
-  return require("../../blocks/thread.js").text(lines)
+  return lines.length ? require("../../blocks/thread.js").text(lines) : null
 }
 
-// say: a comment on the issue.
+// say: a comment on the issue, each chart as its table.
 const to = String(input.to)
-const cut = to.lastIndexOf("#")
-if (cut < 0) throw new Error("GitLab has no issue " + to)
+if (to.lastIndexOf("#") < 0) throw new Error("GitLab has no issue " + to)
 if (!input.text) throw new Error("there is nothing to say")
-const note = call("POST", "/projects/" + encodeURIComponent(to.slice(0, cut)) + "/issues/" + to.slice(cut + 1) + "/notes", { json: { body: String(input.text) } })
+const note = call("POST", issuePath(to) + "/notes", { json: { body: require("../../blocks/rich.js").plain(String(input.text)) } })
 return { sent: "note:" + note.id }

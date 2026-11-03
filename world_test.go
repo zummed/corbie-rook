@@ -140,11 +140,23 @@ func (w *world) roots(labels map[string]string) []*client.Run {
 	return out
 }
 
-// until waits for a condition, and fails the test after a few seconds.
+// until waits for a condition, and fails the test after a few seconds, naming
+// the runs that failed.
 func (w *world) until(what string, cond func() bool) {
 	w.t.Helper()
 	for end := time.Now().Add(10 * time.Second); !cond(); {
 		if time.Now().After(end) {
+			if runs, err := w.List(context.Background(), client.Filter{Finished: true}); err == nil {
+				for _, run := range runs {
+					if os.Getenv("ROOK_RUNS") != "" {
+						full := w.show(run.ID)
+						w.t.Logf("%s %s %s in=%v out=%v", run.Machine, run.Status, run.Error, full.Input, full.Output)
+					}
+					if run.Status == "failed" {
+						w.t.Logf("%s failed: %s", run.Machine, run.Error)
+					}
+				}
+			}
 			w.t.Fatalf("waited for %s", what)
 		}
 		time.Sleep(interval)

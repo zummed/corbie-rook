@@ -1,17 +1,7 @@
 // Jira's script: input.do is hear, for listen.yaml, say, for say.yaml, or history,
-// for history.yaml. It
-// speaks the REST API of the Jira Cloud at input.site as input.email, with the
-// API token JIRA_TOKEN, which it holds only as a handle.
-const api = "https://" + input.site + "/rest/api/2"
-const auth = secrets.text`Basic ${secrets.encoded(secrets.text`${input.email}:${secrets.get("JIRA_TOKEN")}`, { as: "base64" })}`
-
-// call calls Jira and gives its answer; a refusal is thrown with Jira's status,
-// so the job fails and says why. No error holds the address called.
-function call(method, path, options) {
-  const reply = http.request(api + path, Object.assign({ as: "text", timeout: 30 }, options, { method: method, headers: { Authorization: auth, Accept: "application/json" } }))
-  if (reply.status < 200 || reply.status >= 300) throw new Error("Jira answered " + method + " " + path.split("?")[0] + " with " + reply.status)
-  return reply.body ? JSON.parse(reply.body) : {}
-}
+// for history.yaml. It speaks the REST API of the Jira Cloud at input.site through
+// api.js.
+const call = require("./api.js").api(input.site, input.email)
 
 // open says everyone who can read the issue can read a comment: one with a
 // visibility is for a role or a group, and jsdPublic false is Service Management's
@@ -21,13 +11,34 @@ const open = (c) => !c.visibility && c.jsdPublic !== false
 // when reads one of Jira's times, as 2026-10-05T09:00:00.000+0000.
 const when = (text) => Date.parse(String(text).replace(/([+-]\d\d)(\d\d)$/, "$1:$2"))
 
+// seconds reads a length of time: a number with s, m or h.
+function seconds(text) {
+  const m = /^(\d+)(s|m|h)$/.exec(String(text))
+  if (!m) throw new Error("settle is a number with s, m or h, as 2m, and not " + text)
+  return Number(m[1]) * { s: 1, m: 60, h: 3600 }[m[2]]
+}
+
 if (input.do === "hear") {
+  // The cursor holds the time read up to, what was heard at that moment, and the
+  // issues opened and not yet heard.
   const now = Date.now()
-  if (!input.cursor) return { cursor: { since: new Date(now).toISOString(), seen: [] } }
+  if (!input.cursor) return { cursor: { since: new Date(now).toISOString(), seen: [], waiting: [] } }
   const since = Date.parse(input.cursor.since)
   const seen = input.cursor.seen
+  const waiting = (input.cursor.waiting || []).slice()
+  const settle = seconds(input.settle)
   const me = call("GET", "/myself").accountId
   const mention = "[~accountid:" + me + "]"
+  const heard = []
+  // hear keeps a message that names the bot, and with overhear one that does
+  // not, marked unaddressed.
+  const hear = (message) => {
+    const named = message.text.includes(mention)
+    message.text = message.text.replaceAll(mention, "").trim()
+    if (named) heard.push(message)
+    else if (input.overhear) heard.push(Object.assign(message, { unaddressed: true }))
+  }
+  const message = (issue, from, text, at) => ({ bridge: "jira", text: text, chat: issue, at: at, from: from, place: issue.slice(0, issue.lastIndexOf("-")), settings: { site: input.site, email: input.email } })
   const minutes = Math.ceil((now - since) / 60000) + 2
   const jql = "project in (" + input.projects.map((p) => JSON.stringify(p)).join(", ") + ") AND updated >= -" + minutes + "m ORDER BY updated ASC"
   // What came at the cursor's own moment is heard unless the job before heard it.
@@ -49,42 +60,59 @@ if (input.do === "hear") {
     token = found.nextPageToken
     if (!token || found.isLast) break
   }
-  if (!things.length) return { cursor: input.cursor }
   things.sort((a, b) => a.at - b.at)
+  // An opened issue waits. A comment on an issue still waiting is read with it, as
+  // its history.
   for (const t of things) {
-    if (!t.text.includes(mention)) continue
-    emit("message", { bridge: "jira", text: t.text.replaceAll(mention, "").trim(), chat: t.issue, at: t.id, from: t.from, place: t.issue.slice(0, t.issue.lastIndexOf("-")), settings: { site: input.site, email: input.email } })
+    if (t.id.startsWith("issue:")) waiting.push({ chat: t.issue, from: t.from, at: t.id })
+    else if (!waiting.some((w) => w.chat === t.issue)) hear(message(t.issue, t.from, t.text, t.id))
   }
+  // An opened issue is heard once nobody has changed it for settle, as it is then.
+  const still = []
+  for (const w of waiting) {
+    const f = (call("GET", "/issue/" + encodeURIComponent(w.chat), { query: { fields: "summary,description,updated" }, maybe: true }) || {}).fields
+    if (!f) continue
+    if (now - when(f.updated) < settle * 1000) {
+      still.push(w)
+      continue
+    }
+    hear(message(w.chat, w.from, (f.summary || "") + "\n\n" + (f.description || ""), w.at))
+  }
+  for (const m of heard) emit("message", m)
+  if (!things.length) return { cursor: Object.assign({}, input.cursor, { waiting: still }) }
   const last = things[things.length - 1].at
   const at = things.filter((t) => t.at === last).map((t) => t.id)
-  return { cursor: { since: new Date(last).toISOString(), seen: last === since ? seen.concat(at) : at } }
+  return { cursor: { since: new Date(last).toISOString(), seen: last === since ? seen.concat(at) : at, waiting: still } }
 }
 
 if (input.do === "history") {
-  // The issue and its comments before this one. A message that is the opening of
-  // an issue has none, and holds the issue itself.
+  // The issue and its comments before this one. A message that opens an issue
+  // holds the issue itself, and has only the comments made while it waited.
   const at = String(input.at || "")
-  if (!at.startsWith("comment:")) return null
-  const id = Number(at.slice("comment:".length))
+  const comment = at.startsWith("comment:")
+  const id = comment ? Number(at.slice("comment:".length)) : Infinity
   const issue = "/issue/" + encodeURIComponent(String(input.to))
   const me = call("GET", "/myself").accountId
   const name = (author) => (author.accountId === me ? "you" : author.displayName || author.accountId)
-  const f = call("GET", issue, { query: { fields: "summary,description,reporter" } }).fields || {}
-  const lines = [name(f.reporter || {}) + ": " + (f.summary || "") + "\n\n" + (f.description || "")]
+  const lines = []
+  if (comment) {
+    const f = call("GET", issue, { query: { fields: "summary,description,reporter" } }).fields || {}
+    lines.push(name(f.reporter || {}) + ": " + (f.summary || "") + "\n\n" + (f.description || ""))
+  }
   const comments = call("GET", issue + "/comment", { query: { orderBy: "-created", maxResults: "30" } }).comments || []
   // A restricted comment is left out: the token may read it, and whoever reads
   // the answer may not.
   for (const c of comments.reverse().filter(open)) {
     if (Number(c.id) < id) lines.push(name(c.author || {}) + ": " + c.body)
   }
-  return require("../../blocks/thread.js").text(lines)
+  return lines.length ? require("../../blocks/thread.js").text(lines) : null
 }
 
-// say: a comment on the issue, in parts Jira takes.
+// say: a comment on the issue, in parts Jira takes, each chart as its table.
 if (!input.text) throw new Error("there is nothing to say")
 const longest = 32767
 const issue = "/issue/" + encodeURIComponent(String(input.to))
-let text = String(input.text)
+let text = require("../../blocks/rich.js").plain(String(input.text), "jira")
 let sent
 while (text.length) {
   sent = call("POST", issue + "/comment", { json: { body: text.slice(0, longest) } })

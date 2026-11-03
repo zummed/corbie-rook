@@ -1,4 +1,6 @@
 # The slack bridge runs while this file is here. Delete it to stop the bridge.
+# Add `overhear: true` to its input to hear replies in a thread the bot has said
+# something in, each weighed by attend.yaml.
 flow: slack-bridge
 limits: { depth: 16 }   # every conversation counts its levels from here
 stages:

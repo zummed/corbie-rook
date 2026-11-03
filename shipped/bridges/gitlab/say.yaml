@@ -1,10 +1,12 @@
-# Says a text as a comment on a GitLab issue: `to` is project#iid.
+# Says a text as a comment on a GitLab issue, each chart as its table: `to` is
+# project#iid.
 flow: gitlab-say
 input: { to: string, text: string, site: string }
 stages:
   say:
     job:
       script: ./gitlab.js
+      files: [./api.js, .rook/blocks/rich.js]
       input: { do: say, to: "${input.to}", text: "${input.text}", site: "${input.site}" }
       allow: ["net:${input.site}", "secret:GITLAB_TOKEN@net:${input.site}"]
       restart: { limit: 2 }

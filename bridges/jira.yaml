@@ -1,6 +1,9 @@
 # The Jira issues bridge runs while this file is here. Delete it to stop the
 # bridge. Set your Jira's host, the account its token belongs to, and the projects
 # the bot watches.
+# Add to its input `settle: 2m` to hear an opened issue once nobody has changed
+# it for two minutes, as it is then, and `overhear: true` to hear every issue and
+# comment, each weighed by attend.yaml.
 flow: jira-bridge
 limits: { depth: 16 }   # every conversation counts its levels from here
 stages:

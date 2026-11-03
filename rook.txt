@@ -1,6 +1,6 @@
 Rook: ready-made Corbie machines for a bot that answers people on Telegram, Slack, GitLab issues and Jira issues.
 
-A person has asked you to set up or change a Rook project. `corbie rook init` writes Rook's machines into the project's `.rook/`, and the project's own files fill four slots: bridges, people, rules and parts.
+A person has asked you to set up or change a Rook project. `corbie rook init` writes Rook's machines into the project's `.rook/`, and the project's own files fill five slots: bridges, people, attend, rules and parts.
 
 1. Read the pages "rook-project" and "rook-design" with the manual tool before you change a project. They give the project's files, the common changes, and what each block takes and gives.
 2. Read the project's files. Read `.rook/` and change nothing in it, since `corbie rook init` rewrites it.

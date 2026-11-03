@@ -50,7 +50,7 @@ func pointed(t *testing.T, bridge string, srv *httptest.Server, hosts ...string)
 			text = strings.ReplaceAll(text, "https://"+host, "http://"+addr)
 		}
 		text = strings.ReplaceAll(text, "@net:${input.site}", "@net.unencrypted:${input.site}")
-		text = strings.ReplaceAll(text, `"https://" + input.site`, `"http://" + input.site`)
+		text = strings.ReplaceAll(text, `"https://" + site`, `"http://" + site`)
 		if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -93,6 +93,8 @@ type gitlab struct {
 	thread  []map[string]any // the issue's comments, oldest first
 	reads   int              // how many times the comments were read
 	broken  bool             // the comments cannot be read
+	text    string           // issue 7's description, by default "It fails."
+	updated string           // when issue 7 last changed, by default never said
 }
 
 func newGitLab(t *testing.T) *gitlab {
@@ -134,7 +136,14 @@ func (gl *gitlab) serve(w http.ResponseWriter, r *http.Request) {
 		slices.Reverse(notes)
 		json.NewEncoder(w).Encode(notes)
 	case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/7"):
-		fmt.Fprint(w, `{"title": "Broken build", "description": "It fails.", "author": {"username": "al"}}`)
+		issue := map[string]any{"title": "Broken build", "description": "It fails.", "author": map[string]any{"username": "al"}}
+		if gl.text != "" {
+			issue["description"] = gl.text
+		}
+		if gl.updated != "" {
+			issue["updated_at"] = gl.updated
+		}
+		json.NewEncoder(w).Encode(issue)
 	case strings.HasSuffix(r.URL.Path, "/issues/8"):
 		fmt.Fprint(w, `{"title": "Help @bot", "description": "It broke."}`)
 	case strings.HasSuffix(r.URL.Path, "/issues/9"):
@@ -412,6 +421,8 @@ type slack struct {
 	acks   []string
 	thread []map[string]any // what the conversation holds, oldest first
 	reads  []string         // the methods that read it
+	status []map[string]any // each status set, in order
+	refuse bool             // a message with blocks is refused
 }
 
 func newSlack(t *testing.T) *slack {
@@ -484,9 +495,20 @@ func (s *slack) serve(w http.ResponseWriter, r *http.Request) {
 		var post map[string]any
 		json.NewDecoder(r.Body).Decode(&post)
 		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.refuse && post["blocks"] != nil {
+			fmt.Fprint(w, `{"ok": false, "error": "invalid_blocks"}`)
+			return
+		}
 		s.posts = append(s.posts, post)
-		s.mu.Unlock()
 		fmt.Fprint(w, `{"ok": true, "ts": "1.1"}`)
+	case "/api/assistant.threads.setStatus":
+		var status map[string]any
+		json.NewDecoder(r.Body).Decode(&status)
+		s.mu.Lock()
+		s.status = append(s.status, status)
+		s.mu.Unlock()
+		fmt.Fprint(w, `{"ok": true}`)
 	default:
 		w.WriteHeader(404)
 	}
