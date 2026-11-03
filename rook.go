@@ -10,10 +10,31 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+
+	"github.com/zummed/corbie/manual"
 )
 
 //go:embed all:shipped all:starter all:bridges
 var files embed.FS
+
+//go:embed rook.txt
+var briefing string
+
+//go:embed README.md
+var readme string
+
+//go:embed DESIGN.md
+var design string
+
+// Pages are Rook's pages of the manual. A model is told the page rook when it
+// connects to corbie rook mcp.
+func Pages() []manual.Page {
+	return []manual.Page{
+		{Name: "rook", Group: "Rook", Summary: "Rook: what to do in a project, for a model.", Text: briefing},
+		{Name: "rook-project", Group: "Rook", Summary: "Project: installing Rook, a project's files and the common changes.", Text: readme},
+		{Name: "rook-design", Group: "Rook", Summary: "Design: the blocks, what each takes and gives, and who may do what.", Text: design},
+	}
+}
 
 // Shipped is the directory in a project that holds Rook's machines. Rook rewrites
 // it, and a person changes nothing in it.
