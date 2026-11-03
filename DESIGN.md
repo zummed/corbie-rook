@@ -42,7 +42,7 @@ A slot's file names a machine as a job. Rook's ready-made machine for a slot is 
 | `people/file.js` | the People slot, read from `people.yaml` |
 | `attend/model.yaml` | the Attend slot, asking a small model |
 
-A machine in `.rook/` reads a project's files by these names: `people.yaml`, `rules.yaml`, `lookup.yaml`, `attend.yaml`, `answer.yaml` and `agents/reviewer.yaml`.
+A machine in `.rook/` reads a project's files by these names: `rules.yaml`, `lookup.yaml`, `attend.yaml`, `answer.yaml` and `agents/reviewer.yaml`. `.rook/people/file.js` reads `people.yaml`.
 
 ## A bridge
 
