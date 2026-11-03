@@ -4,6 +4,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 
 	rook "github.com/zummed/corbie-rook"
@@ -55,6 +56,9 @@ func cmdInit(e *cli.Env, args []string) error {
 	}
 	if err := rook.Init(rest[0], bridges); err != nil {
 		return err
+	}
+	if slices.Contains(bridges, "slack") {
+		fmt.Fprintln(e.Out, "Make the Slack app first, as corbie rook manual rook-project says under The Slack app.")
 	}
 	fmt.Fprintf(e.Out, "%s is ready. Change people.yaml and rules.yaml, then:\n\n", rest[0])
 	fmt.Fprintln(e.Out, "  corbie controller secret set ANTHROPIC_KEY")
