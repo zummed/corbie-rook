@@ -9,6 +9,17 @@ GOWORK = "off"
 description = "Build the program corbie-rook"
 run = "go build -o bin/corbie-rook ./cmd/corbie-rook"
 
+[tasks.dist]
+description = "Build corbie-rook for every platform a release carries, into dist/"
+run = """
+set -e
+for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do
+  os=${target%/*} arch=${target#*/} ext=
+  if [ "$os" = windows ]; then ext=.exe; fi
+  GOOS=$os GOARCH=$arch go build -trimpath -ldflags="-s -w" -o "dist/corbie-rook-$os-$arch$ext" ./cmd/corbie-rook
+done
+"""
+
 [tasks.test]
 description = "Run every package's tests, with Go's checks on unsafe pointers switched on"
 run = "go test -gcflags=all=-d=checkptr ./..."
