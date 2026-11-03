@@ -71,7 +71,7 @@ A conversation starts below the bridge, so a bridge's file sets `limits: { depth
 
 Every bridge ships in `.rook/`, because a block names each bridge it may use, and Corbie reads every file a machine names. One a project does not run is never reached, and needs no secret.
 
-A listener sends two events by key: `message`, to `blocks/chat.yaml` under `<bridge>:<chat>`, and `answer`, a tap on a question, to the run with the key `question:<question>`.
+A listener sends two events by key: `message`, to `blocks/chat.yaml` under `<bridge>:<listener>:<chat>`, where `<listener>` ends the listener's run ID, and `answer`, a tap on a question, to the run with the key `question:<question>`.
 
 A message is one mapping, the same from every bridge, and every block takes it or a part of it.
 
@@ -110,7 +110,8 @@ A comment on an issue that is still waiting is not heard on its own, and is in t
 
 A conversation is a run. Its messages are answered one at a time, each by a new agent given the conversation so far.
 
-- A conversation quiet for a day ends, so a changed file applies to the next, and the next message starts afresh.
+- A conversation quiet for a day ends, and the next message starts afresh.
+- After `corbie run submit` starts a bridge again, its next message starts a new conversation, with the machines as they are then. A conversation already under way finishes with the machines it started with.
 - A new conversation on Slack, GitLab or Jira reads what the thread or issue held before the message: the latest 20 entries, at most 8000 characters, from the first 1000 of a Slack thread. A machine that gives no `conversation` is given it for each message. Telegram keeps nothing a bot can read, so one there starts with nothing.
 - History holds what was said, and no tool calls or results. A read that fails gives no history, and the message is still answered.
 - Rook reads nothing for a person with no agent.

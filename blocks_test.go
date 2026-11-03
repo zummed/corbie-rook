@@ -372,3 +372,51 @@ func TestQuestionInAChannelCountsTheGroup(t *testing.T) {
 		t.Fatalf("the question was changed to %v", got)
 	}
 }
+
+// A message after a bridge's file changes starts a new conversation, with the
+// machines as they are then, and a conversation already under way carries on.
+func TestChangedBridgeStartsNewConversations(t *testing.T) {
+	s := newSlack(t)
+	w := newWorld(t)
+	dir := slackProject(t, w, s)
+	echoing(t, dir)
+	w.sync(dir)
+	w.until("Slack connected", s.connected)
+	s.says("a", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "ts": "3.0", "text": "first"})
+	w.until("the first answer", func() bool { return len(s.posted()) >= 1 })
+	chats := func() []*client.Run {
+		var out []*client.Run
+		for _, run := range stubs(t, w, "chat") {
+			if run.Status == "running" {
+				out = append(out, run)
+			}
+		}
+		return out
+	}
+	first := chats()
+	if len(first) != 1 {
+		t.Fatalf("%d conversations", len(first))
+	}
+	bridge := filepath.Join(dir, "bridges/slack.yaml")
+	text, err := os.ReadFile(bridge)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bridge, append(text, []byte("# changed\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.mu.Lock()
+	s.socket = nil
+	s.mu.Unlock()
+	w.sync(dir)
+	w.until("Slack connected again", s.connected)
+	s.says("b", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "ts": "4.0", "text": "second"})
+	w.until("the second answer", func() bool { return len(s.posted()) >= 2 })
+	now := chats()
+	if len(now) != 2 || now[0].Key == now[1].Key {
+		t.Fatalf("the conversations are %v", now)
+	}
+	if got := fmt.Sprint(s.posted()[1]["markdown_text"]); !strings.HasSuffix(got, "second") {
+		t.Fatalf("the bot said %q", got)
+	}
+}

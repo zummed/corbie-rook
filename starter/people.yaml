@@ -1,7 +1,8 @@
-# Who people are: where each is found on each bridge, and their groups. Change
-# lookup.yaml to take this from elsewhere.
+# Who people are: each person's id on each bridge they use, and their groups. An
+# id is Telegram's user id, Slack's member id (U…, from a profile's menu), GitLab's
+# username or Jira's account id. Change lookup.yaml to take this from elsewhere.
 people:
   alice: { telegram: "1" }
   bob: { telegram: "2" }
 groups:
-  family: [alice, bob]
+  team: [alice, bob]

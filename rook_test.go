@@ -109,10 +109,10 @@ func TestChatAnswersOneMessageAtATime(t *testing.T) {
 	w.until("two chats", func() bool {
 		chats := 0
 		for _, run := range w.roots(nil) {
-			if run.Key == "telegram:9" {
+			if strings.HasPrefix(run.Key, "telegram:") && strings.HasSuffix(run.Key, ":9") {
 				chats++
 			}
-			if run.Key == "telegram:1" {
+			if strings.HasPrefix(run.Key, "telegram:") && strings.HasSuffix(run.Key, ":1") {
 				chats++
 				chat = run
 			}
@@ -165,7 +165,7 @@ func TestAnswerStartsTheAgentWhoChose(t *testing.T) {
 	dir := copyStarter(t)
 	removeListener(t, dir)
 	stub := "statechart: NAME\ninitial: e\nstates:\n  e: { end: done, output: { reply: NAME } }\n"
-	for _, name := range []string{"helper", "family"} {
+	for _, name := range []string{"helper", "team"} {
 		if err := os.WriteFile(filepath.Join(dir, "agents", name+".yaml"), []byte(strings.ReplaceAll(stub, "NAME", name)), 0o644); err != nil {
 			t.Fatal(err)
 		}
@@ -174,9 +174,9 @@ func TestAnswerStartsTheAgentWhoChose(t *testing.T) {
 		flow: try
 		stages:
 		  helper: { job: { machine: answer.yaml, input: { agent: helper, message: {} } } }
-		  family: { job: { machine: answer.yaml, input: { agent: family, message: {} } } }
+		  team: { job: { machine: answer.yaml, input: { agent: team, message: {} } } }
 		  nobody: { job: { machine: answer.yaml, input: { agent: nobody, message: {} } } }
-		output: { helper: "${stages.helper.output.reply}", family: "${stages.family.output.reply}", nobody: "${stages.nobody.output ? stages.nobody.output.reply : 'none'}" }
+		output: { helper: "${stages.helper.output.reply}", team: "${stages.team.output.reply}", nobody: "${stages.nobody.output ? stages.nobody.output.reply : 'none'}" }
 	`
 	if err := os.WriteFile(filepath.Join(dir, "on/try.yaml"), []byte(dedent(try)), 0o644); err != nil {
 		t.Fatal(err)
@@ -185,7 +185,7 @@ func TestAnswerStartsTheAgentWhoChose(t *testing.T) {
 	id := w.started("on/try.yaml")
 	w.until("the answers", func() bool { return w.show(id).Status != "running" })
 	run := w.show(id)
-	if got := fmt.Sprint(run.Status, run.Output); got != "donemap[family:family helper:helper nobody:none]" {
+	if got := fmt.Sprint(run.Status, run.Output); got != "donemap[helper:helper nobody:none team:team]" {
 		t.Errorf("the answers were %s, %v", got, run.Error)
 	}
 }
@@ -227,7 +227,7 @@ func TestApproversAreThoseOfThePart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	table := strings.Replace(string(rules), "  messages: [alice]\n", "  messages: [bob]\n  deploys: [family]\n  net: [alice]\n", 1)
+	table := strings.Replace(string(rules), "  messages: [alice]\n", "  messages: [bob]\n  deploys: [team]\n  net: [alice]\n", 1)
 	try := `
 		flow: try
 		stages:
@@ -244,7 +244,7 @@ func TestApproversAreThoseOfThePart(t *testing.T) {
 	w.sync(dir)
 	id := w.started("on/try.yaml")
 	w.until("the approvers", func() bool { return w.show(id).Status != "running" })
-	if got := fmt.Sprint(w.show(id).Output); got != "map[deploys:map[in: people:[family]] messages:map[in: people:[bob]] net:map[in: people:[alice]]]" {
+	if got := fmt.Sprint(w.show(id).Output); got != "map[deploys:map[in: people:[team]] messages:map[in: people:[bob]] net:map[in: people:[alice]]]" {
 		t.Errorf("the approvers were %s", got)
 	}
 }
@@ -419,7 +419,7 @@ func TestWhoGivesAnAgentTheAskerAndTheReadersMayUse(t *testing.T) {
 		},
 		"": {
 			{"telegram", "1", "dm", "helper"},
-			{"telegram", "2", "dm", "family"},
+			{"telegram", "2", "dm", "team"},
 			{"telegram", "1", "group", ""},
 			{"telegram", "9", "dm", ""},
 		},
@@ -748,7 +748,7 @@ func TestInitAgainKeepsThePersonsFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, name := range []string{"agents/family.yaml", "attend.yaml"} {
+	for _, name := range []string{"agents/team.yaml", "attend.yaml"} {
 		if err := os.Remove(filepath.Join(dir, name)); err != nil {
 			t.Fatal(err)
 		}
@@ -761,13 +761,13 @@ func TestInitAgainKeepsThePersonsFiles(t *testing.T) {
 			t.Errorf("%s is now %q", name, got)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(dir, "agents/family.yaml")); err == nil {
+	if _, err := os.Stat(filepath.Join(dir, "agents/team.yaml")); err == nil {
 		t.Error("a starting file the person removed came back")
 	}
 	if _, err := os.Stat(filepath.Join(dir, "attend.yaml")); err != nil {
 		t.Error("a file .rook reads by name was not written")
 	}
-	for _, name := range []string{"agents/family.yaml", "bridges/slack.yaml", "bridges/jira.yaml"} {
+	for _, name := range []string{"agents/team.yaml", "bridges/slack.yaml", "bridges/jira.yaml"} {
 		if _, err := os.Stat(filepath.Join(dir, ".rook/starter", name)); err != nil {
 			t.Errorf("the starting file %s is not in .rook/starter", name)
 		}
@@ -922,7 +922,7 @@ func TestMachineSaysAsItWorksAndGivesNoReply(t *testing.T) {
 				}
 				done := 0
 				for _, run := range runs {
-					if run.Key == "telegram:1" {
+					if strings.HasPrefix(run.Key, "telegram:") && strings.HasSuffix(run.Key, ":1") {
 						chat = run
 					}
 					if run.Machine == "message" {
