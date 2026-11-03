@@ -27,7 +27,7 @@ A slot's file names a machine as a job. Rook's ready-made machine for a slot is 
 
 `corbie rook init` writes `.rook/`, and the first time the starting files. It rewrites `.rook/` every time, writes any file `.rook/` reads by name that the project lacks, and changes no other file.
 
-A project's own files hold its choices, and `.rook/` holds what Rook does. `.rook/starter/` holds this version's starting files and every bridge's file, so a project's file can be compared with the one Rook writes now.
+A project's own files hold its choices, and `.rook/` holds what Rook does. When `init` updates a project, it names the project's files that are not as this version starts a project; the manual page `rook-starter` shows this version's starting files and every bridge's file.
 
 | In `.rook/` | What it does |
 |---|---|
@@ -45,7 +45,6 @@ A project's own files hold its choices, and `.rook/` holds what Rook does. `.roo
 | `blocks/approval.yaml` | a part's ask: the reviewer, then the part's approvers |
 | `people/file.js` | the People slot, read from `people.yaml` |
 | `attend/never.yaml`, `attend/model.yaml` | the Attend slot: no, or asking a small model |
-| `starter/` | this version's starting files, to compare with a project's |
 
 A machine in `.rook/` reads a project's files by these names: `rules.yaml`, `lookup.yaml`, `attend.yaml`, `answer.yaml` and `agents/reviewer.yaml`. `.rook/people/file.js` reads `people.yaml`.
 
