@@ -255,7 +255,7 @@ func TestAttendAsksAModel(t *testing.T) {
 	model := &llmstandin.Server{Answer: func(llmstandin.Call) llmstandin.Reply { return llmstandin.Reply{Text: `{"answer": true}`} }}
 	web := httptest.NewServer(model)
 	t.Cleanup(web.Close)
-	setSite(t, dir, ".rook/attend/model.yaml", "model: { name: claude-haiku-5-5, secret: ANTHROPIC_KEY }",
+	setSite(t, dir, ".rook/attend/model.yaml", "model: { name: haiku, service: claude-code, secret: CLAUDE_TOKEN }",
 		"model: { name: test-model, service: anthropic, address: "+web.URL+", secret: TEST_KEY }")
 	draft, _, err := client.ReadMachine(dir, ".rook/attend/model.yaml")
 	if err != nil {

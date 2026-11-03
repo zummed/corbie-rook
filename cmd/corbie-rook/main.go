@@ -82,7 +82,7 @@ func cmdInit(e *cli.Env, args []string) error {
 		}
 	} else {
 		fmt.Fprintf(e.Out, "%s is ready. Change people.yaml and rules.yaml, then:\n\n", dir)
-		fmt.Fprintln(e.Out, "  corbie controller secret set ANTHROPIC_KEY")
+		fmt.Fprintln(e.Out, "  corbie controller secret set CLAUDE_TOKEN")
 	}
 	for _, name := range bridges {
 		for _, secret := range rook.Secrets[name] {

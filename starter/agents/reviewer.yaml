@@ -2,7 +2,7 @@
 # it first. It holds no tool.
 agent: reviewer
 input: { context: string }
-model: { name: claude-opus-5-5, secret: ANTHROPIC_KEY }
+model: { name: opus, service: claude-code, secret: CLAUDE_TOKEN }
 system: |
   You are shown one tool call an agent wants to make: what the tool does, its
   arguments, what the agent said, and the request it serves.

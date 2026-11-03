@@ -202,7 +202,7 @@ An agent learns this from `${input.format}`, which tells it on Telegram to write
 | Machine | What it gives |
 |---|---|
 | `.rook/attend/never.yaml` | no, always; the starting `attend.yaml` runs it |
-| `.rook/attend/model.yaml` | what `claude-haiku-5-5` says, with the secret `ANTHROPIC_KEY`, and no when the model is unsure; `about` says what the bot is for |
+| `.rook/attend/model.yaml` | what `haiku` says, through Claude Code with the secret `CLAUDE_TOKEN`, and no when the model is unsure; `about` says what the bot is for |
 
 ## Asking a person
 
@@ -236,7 +236,7 @@ tools:
 # agents/helper.yaml
 agent: helper
 include: .rook/agents/base.yaml
-model: { name: claude-sonnet-5-5, secret: ANTHROPIC_KEY }
+model: { name: sonnet, service: claude-code, secret: CLAUDE_TOKEN }
 system: |
   You help the person who runs this computer. Answer in one or two short sentences.
 
