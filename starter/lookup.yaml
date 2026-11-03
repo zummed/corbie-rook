@@ -5,7 +5,7 @@ input: { do: string, bridge: "string?", id: "string?", names: "list?" }
 stages:
   find:
     job:
-      script: .rook/blocks/people-file.js
+      script: .rook/people/file.js
       files: [people.yaml]
       input: { do: "${input.do}", bridge: "${input.bridge}", id: "${input.id}", names: "${input.names}" }
 output: ${stages.find.output}

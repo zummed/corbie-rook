@@ -1,15 +1,16 @@
 # Slack: listens over Socket Mode, so nothing need reach this computer. A direct
-# message and a message naming the bot each go to their conversation's run. Each
+# message and a message naming the bot each go to their conversation's run, and
+# with overhear, a reply in a thread the bot has said something in. Each
 # press of a button goes to the run that waits for it. A job ends after four
 # minutes, and the next connects again.
 statechart: slack-listen
-input: { dir: string }
+input: { dir: string, overhear: "boolean?" }
 initial: hearing
 states:
   hearing:
     job:
       script: ./slack.js
-      input: { do: hear }
+      input: { do: hear, overhear: "${input.overhear || false}" }
       allow: [net:slack.com, net:wss-primary.slack.com, net:wss-backup.slack.com, "secret:SLACK_TOKEN@net:slack.com", "secret:SLACK_APP_TOKEN@net:slack.com"]
       timeout: 5m
     on:

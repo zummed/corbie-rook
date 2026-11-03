@@ -1,5 +1,5 @@
-// The bot's script: input.do is hear, for listen.yaml, say, for
-// say.yaml, or ask, for ask.yaml. It speaks Telegram's Bot API with the token of the secret
+// The bot's script: input.do is hear, for listen.yaml, say, for say.yaml,
+// ask, for ask.yaml, or status, for status.yaml. It speaks Telegram's Bot API with the token of the secret
 // input.token names, which it holds only as a handle.
 const api = "https://api.telegram.org"
 const token = secrets.get(input.token)
@@ -63,10 +63,18 @@ if (input.do === "ask") {
   return {}
 }
 
+if (input.do === "status") {
+  // Telegram shows "typing" for five seconds, or until the bot says something.
+  // It has no text of its own, and nothing clears it.
+  if (input.text) call("sendChatAction", { chat_id: input.to, action: "typing" })
+  return {}
+}
+
 // say: the text in parts Telegram takes, of at most 4096 characters, cut
 // at a line's end where one is near, the first in reply to what it answers.
-let text = String(input.text || "")
-if (!text) throw new Error("there is nothing to say")
+// Each chart is shown as its table.
+if (!input.text) throw new Error("there is nothing to say")
+let text = require("../../blocks/rich.js").plain(String(input.text))
 const sent = []
 while (text.length) {
   let at = text.length <= 4096 ? text.length : text.lastIndexOf("\n", 4095) + 1

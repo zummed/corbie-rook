@@ -1,15 +1,23 @@
 # Jira issues: asks each project what changed, every thirty seconds. An issue
-# opened or a comment that names the bot goes to that issue's run. Its first ask
-# marks the time, and hears nothing. It signs in as input.email with the API
+# opened or a comment that names the bot goes to that issue's run, and with
+# overhear every other one, marked unaddressed. An opened issue goes once nobody
+# has changed it for settle. Its first ask marks the time, and hears nothing. It signs in as input.email with the API
 # token that is the secret JIRA_TOKEN.
 statechart: jira-listen
-input: { dir: string, site: string, email: string, projects: list }
+input:
+  dir: string
+  site: string
+  email: string
+  projects: list
+  overhear: "boolean?"
+  settle: "string?"
 initial: hearing
 states:
   hearing:
     job:
       script: ./jira.js
-      input: { do: hear, site: "${input.site}", email: "${input.email}", projects: "${input.projects}", cursor: "${states.hearing.output ? states.hearing.output.cursor : null}" }
+      files: [./api.js]
+      input: { do: hear, site: "${input.site}", email: "${input.email}", projects: "${input.projects}", overhear: "${input.overhear || false}", settle: "${input.settle || '0s'}", cursor: "${states.hearing.output ? states.hearing.output.cursor : null}" }
       allow: ["net:${input.site}", "secret:JIRA_TOKEN@net:${input.site}"]
       timeout: 2m
     on:

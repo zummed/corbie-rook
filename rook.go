@@ -58,9 +58,13 @@ func Bridges() []string {
 	return names
 }
 
+// Named are the project's files that a machine in .rook reads by name.
+var Named = []string{"people.yaml", "rules.yaml", "lookup.yaml", "attend.yaml", "answer.yaml", "agents/reviewer.yaml"}
+
 // Init makes dir a project, or brings one up to date. It rewrites .rook. It writes
-// the starting files if dir has no rules.yaml, and the file of each bridge named
-// that is not there, so it changes no file of the person's.
+// the starting files if dir has no rules.yaml, each of Named that is not there,
+// and the file of each bridge named that is not there, so it changes no file of
+// the person's.
 func Init(dir string, bridges []string) error {
 	for _, name := range bridges {
 		if _, ok := Secrets[name]; !ok {
@@ -78,6 +82,11 @@ func Init(dir string, bridges []string) error {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "rules.yaml")); os.IsNotExist(err) {
 		if err := copyTree("starter", dir, false); err != nil {
+			return err
+		}
+	}
+	for _, name := range Named {
+		if err := copyFile("starter/"+name, filepath.Join(dir, name), false); err != nil {
 			return err
 		}
 	}

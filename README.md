@@ -44,6 +44,7 @@ A model connected to `rook` is told the page `corbie rook manual rook`, and read
 |---|---|---|
 | Bridges | `bridges/slack.yaml`, `bridges/jira.yaml`, … | a bridge runs while its file is there |
 | People | `lookup.yaml`, `people.yaml` | who a bridge's id belongs to, and how to reach someone |
+| Attend | `attend.yaml` | whether a message that does not name the bot is meant for it |
 | Rules | `rules.yaml`, `answer.yaml` | which group gets which agent, and who approves what |
 | Parts | `agents/`, `parts/` | the agents, and the tools each can open |
 
@@ -60,6 +61,12 @@ A model connected to `rook` is told the page `corbie rook manual rook`, and read
 - **Tell someone from a machine:** run `.rook/blocks/tell.yaml` as a job, with `person` and `text`. `say.yaml` says at an address, and `ask.yaml` asks a question.
 - **Run something at a time:** add a statechart with a timer under `schedules/`, and run `corbie run submit bridges schedules`. See `corbie manual schedules`.
 - **Take people from elsewhere:** change the job in `lookup.yaml`.
+- **Answer in a thread without being named:** add `overhear: true` to the input in `bridges/slack.yaml`. Each reply in a thread the bot has said something in goes to `attend.yaml`, which by default asks a small model. On GitLab and Jira, `overhear: true` sends every issue and comment there.
+- **Decide another way what is meant for the bot:** change the job in `attend.yaml`. It gives `{ answer: true }` or `{ answer: false }`.
+- **Wait for an issue to be finished:** add `settle: 2m` to the input in `bridges/gitlab.yaml` or `bridges/jira.yaml`. An opened issue is heard once nobody has changed it for two minutes.
+- **Show a chart:** an agent writes a fenced `chart` block, as the starter's `agents/base.yaml` tells it. Slack draws it, and the other bridges show a table.
+- **Call GitLab or Jira from a part:** load `.rook/bridges/gitlab/api.js` or `.rook/bridges/jira/api.js` in the part's script.
+- **Show a status on Slack:** declare the Slack app an agent, which gives it `assistant:write`. Slack shows a status only in a thread.
 
 A GitLab project or a Jira project not listed under `places:` in `rules.yaml` counts as read by anyone, so only an agent `for: [anyone]` answers there.
 

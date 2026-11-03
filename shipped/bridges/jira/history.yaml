@@ -6,7 +6,7 @@ stages:
   read:
     job:
       script: ./jira.js
-      files: [.rook/blocks/thread.js]
+      files: [./api.js, .rook/blocks/thread.js]
       input: { do: history, to: "${input.to}", at: "${input.at}", site: "${input.site}", email: "${input.email}" }
       allow: ["net:${input.site}", "secret:JIRA_TOKEN@net:${input.site}"]
       timeout: 20s

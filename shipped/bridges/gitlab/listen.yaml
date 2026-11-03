@@ -1,15 +1,23 @@
 # GitLab issues: asks each project what happened, every thirty seconds, since
 # GitLab cannot be asked to wait. An issue opened or a comment on an issue that
-# names the bot goes to that issue's run. Its first ask marks where each project
-# stands, and hears nothing. The token is the secret GITLAB_TOKEN.
+# names the bot goes to that issue's run, and with overhear every other one,
+# marked unaddressed. An opened issue goes once nobody has changed it for settle.
+# Its first ask marks where each project stands, and hears nothing. The token is
+# the secret GITLAB_TOKEN.
 statechart: gitlab-listen
-input: { dir: string, site: string, projects: list }
+input:
+  dir: string
+  site: string
+  projects: list
+  overhear: "boolean?"
+  settle: "string?"
 initial: hearing
 states:
   hearing:
     job:
       script: ./gitlab.js
-      input: { do: hear, site: "${input.site}", projects: "${input.projects}", cursor: "${states.hearing.output ? states.hearing.output.cursor : null}" }
+      files: [./api.js]
+      input: { do: hear, site: "${input.site}", projects: "${input.projects}", overhear: "${input.overhear || false}", settle: "${input.settle || '0s'}", cursor: "${states.hearing.output ? states.hearing.output.cursor : null}" }
       allow: ["net:${input.site}", "secret:GITLAB_TOKEN@net:${input.site}"]
       timeout: 2m
     on:

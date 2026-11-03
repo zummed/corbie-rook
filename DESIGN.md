@@ -9,33 +9,40 @@ Rook is ready-made Corbie machines. A message on Telegram or Slack, or a GitLab 
 | A project | the person's own directory: people, rules, agents and parts |
 
 
-## Four slots
+## Five slots
 
-A project fills four slots. Each is one or a few files, and nothing else depends on how one is filled.
+A project fills five slots. Each is one or a few files, and nothing else depends on how one is filled.
 
 | Slot | Question | What fills it |
 |---|---|---|
 | Bridges | where does work come in and go out? | a file for each in `bridges/`: `telegram.yaml`, `slack.yaml`, `gitlab.yaml`, `jira.yaml` |
 | People | who is this, what groups are they in, and how are they reached? | `lookup.yaml`, by default from `people.yaml` |
+| Attend | is a message that does not name the bot meant for it? | `attend.yaml`, by default asking a small model |
 | Rules | which group gets which agent, and who approves what? | `rules.yaml`, `answer.yaml` |
 | Parts | what can the agents do? | `agents/`, `parts/` |
 
+A slot's file names a machine as a job. Rook's ready-made machine for a slot is in `.rook/<slot>/`, and a project's own machine can take its place.
+
 ## A project
 
-`corbie rook init` writes `.rook/`, and the first time the starting files. It rewrites `.rook/` every time, and changes no other file.
+`corbie rook init` writes `.rook/`, and the first time the starting files. It rewrites `.rook/` every time, writes any file `.rook/` reads by name that the project lacks, and changes no other file.
 
 | In `.rook/` | What it does |
 |---|---|
 | `bridges/<name>/listen.yaml` | hears a service, and sends each message and answer by key |
-| `bridges/<name>/say.yaml`, `ask.yaml`, `history.yaml` | says a text, asks a question with buttons, and reads a thread |
-| `blocks/chat.yaml` | one conversation on any bridge, a message at a time: `who`, then `answer`, then `say` |
+| `bridges/<name>/say.yaml`, `ask.yaml`, `history.yaml`, `status.yaml` | says a text, asks a question with buttons, reads a thread, and shows a status |
+| `bridges/gitlab/api.js`, `bridges/jira/api.js` | the service's REST API, for the bridge and a part's script |
+| `blocks/chat.yaml` | one conversation on any bridge, a message at a time: `who`, `attend`, then `answer` and `say` |
 | `blocks/who.yaml` | the person an event is from, and the agent they get where it came from |
-| `blocks/say.yaml`, `tell.yaml`, `ask.yaml` | say at an address, tell a person, ask people |
+| `blocks/say.yaml`, `tell.yaml`, `ask.yaml`, `status.yaml` | say at an address, tell a person, ask people, show a status |
 | `blocks/history.yaml`, `thread.js` | what a service's thread held before a message |
+| `blocks/rich.js` | the charts in a text, drawn by Slack and shown as tables by the other bridges |
 | `blocks/question.yaml` | the run behind `ask.yaml`, which a tap goes to |
 | `blocks/approval.yaml` | a part's ask: the reviewer, then the part's approvers |
+| `people/file.js` | the People slot, read from `people.yaml` |
+| `attend/model.yaml` | the Attend slot, asking a small model |
 
-A machine in `.rook/` reads a project's files by these names: `people.yaml`, `rules.yaml`, `lookup.yaml`, `answer.yaml` and `agents/reviewer.yaml`.
+A machine in `.rook/` reads a project's files by these names: `people.yaml`, `rules.yaml`, `lookup.yaml`, `attend.yaml`, `answer.yaml` and `agents/reviewer.yaml`.
 
 ## A bridge
 
@@ -59,12 +66,23 @@ A conversation starts below the bridge, so a bridge's file sets `limits: { depth
 
 Every bridge ships in `.rook/`, because a block names each bridge it may use, and Corbie reads every file a machine names. One a project does not run is never reached, and needs no secret.
 
-A listener sends two things by key.
+A listener sends two events by key: `message`, to `blocks/chat.yaml` under `<bridge>:<chat>`, and `answer`, a tap on a question, to the run with the key `question:<question>`.
 
-| Event | Fields | Sent to |
-|---|---|---|
-| `message` | `bridge`, `chat`, `from`, `text`, `place`, and `answers`, `at` and `settings` where a bridge uses them | `blocks/chat.yaml`, under `<bridge>:<chat>` |
-| `answer` | `bridge`, `question`, `from`, `choice` | the run with the key `question:<question>` |
+A message is one mapping, the same from every bridge, and every block takes it or a part of it.
+
+| Field | What it holds |
+|---|---|
+| `bridge` | `telegram`, `slack`, `gitlab` or `jira` |
+| `chat` | the conversation it belongs to |
+| `from` | the sender's id on the bridge |
+| `text` | what was said, without the bot's name |
+| `place` | where it was said, as `rules.yaml` names places |
+| `at` | the message's id on the service, where a bridge reads a thread |
+| `answers` | the message a reply answers, on Telegram |
+| `settings` | the service's host, and Jira's account, which a reply needs |
+| `unaddressed` | `true` for a message that does not name the bot, and absent otherwise |
+
+An answer holds `bridge`, `question`, `from` and `choice`.
 
 | Bridge | Hears | `chat` | `place` |
 |---|---|---|---|
@@ -73,7 +91,15 @@ A listener sends two things by key.
 | GitLab | an issue opened or commented on, naming the bot, every 30 seconds | `project#iid` | the project |
 | Jira | an issue opened or commented on, naming the bot, every 30 seconds | the issue's key | the project's key |
 
-What a bridge hears about who sent something is the service's word. Telegram and Slack can reach a person directly, so they ask questions; GitLab and Jira only comment on an issue.
+A bridge's file sets these in its listener's input.
+
+| Setting | Bridges | What it does |
+|---|---|---|
+| `overhear: true` | Slack | hears a reply in a thread the bot has said something in, marked `unaddressed` |
+| `overhear: true` | GitLab, Jira | hears every issue opened and every public comment, marked `unaddressed` where they do not name the bot |
+| `settle: 2m` | GitLab, Jira | hears an opened issue once nobody has changed it for that long, as it is then; `0s` by default |
+
+A comment on an issue that is still waiting is not heard on its own, and is in the issue's history. What a bridge hears about who sent something is the service's word. Telegram and Slack can reach a person directly, so they ask questions; GitLab and Jira only comment on an issue.
 
 ## A conversation
 
@@ -83,9 +109,11 @@ A conversation is a run. Its messages are answered one at a time, each by a new 
 - A new conversation on Slack, GitLab or Jira reads what the thread or issue held before the message: the latest 20 entries, at most 8000 characters, from the first 1000 of a Slack thread. A machine that gives no `conversation` is given it for each message. Telegram keeps nothing a bot can read, so one there starts with nothing.
 - History holds what was said, and no tool calls or results. A read that fails gives no history, and the message is still answered.
 - Rook reads nothing for a person with no agent.
+- A message marked `unaddressed` from someone with an agent goes to `attend.yaml`, with the thread before it, and is answered only when it gives `answer: true`. A failed `attend.yaml` answers nothing. No one is told anything for an unaddressed message.
+- While an agent works, `blocks/status.yaml` shows `Working on it.`, and a reply clears it. An answer that says nothing clears it.
 - A conversation waits while its message waits, approvals included, up to seven days.
 - An answer that fails is told so, and the conversation starts afresh.
-- A person with no agent is told the bot is not theirs.
+- A person with no agent who names the bot is told the bot is not theirs.
 
 ## Your machines
 
@@ -116,6 +144,7 @@ Any machine can run these blocks. A path reads from the project's top directory,
 | `.rook/blocks/tell.yaml` | `person`, `text` | says a text to a person named in `lookup.yaml` |
 | `.rook/blocks/say.yaml` | `address`, `text` | says a text at an address |
 | `.rook/blocks/ask.yaml` | `to`, `text`, `choices` | asks people, and gives `choice` |
+| `.rook/blocks/status.yaml` | `address`, `text` | shows a status at an address: under a Slack thread, or "typing" on Telegram; an empty text clears it, and a failure gives nothing |
 
 An address is a mapping: `{ bridge, id }`, with `answers`, `at` and `settings` where a bridge uses them. `chat.yaml` gives one for a message, and `lookup.yaml`, with `do: reach`, gives one for each person. Pass it whole.
 
@@ -128,17 +157,41 @@ job: { machine: .rook/blocks/tell.yaml, input: { person: alice, text: The backup
 # A machine answering a message says something while it works.
 job: { machine: .rook/blocks/say.yaml, input: { address: "${input.address}", text: Working on it. } }
 
-# An agent's tool does the same, and its model chooses only the text.
+# An agent's tool shows a status, and its model chooses only the text.
 tools:
   progress:
-    does: Say how the work is going.
+    does: Show in a few words what you are doing now, while you work.
     args: { text: string }
-    job: { machine: .rook/blocks/say.yaml, input: { address: "${input.address}", text: "${args.text}" } }
+    job: { machine: .rook/blocks/status.yaml, input: { address: "${input.address}", text: "${args.text}" } }
 ```
 
-The tool above needs no `approve: true`, since its text goes to those who read the answer. A tool whose arguments name a person does. Give a model no address as an argument: `settings.site` is the host a bridge sends its token to.
+The starter's `agents/base.yaml` holds this tool. It needs no `approve: true`, since its text goes to those who read the answer. A tool whose arguments name a person does. Give a model no address as an argument: `settings.site` is the host a bridge sends its token to.
 
 A person's reply to a text goes to `chat.yaml` as a new message, and the agent there does not know the text. Only a tap on a question goes back to the machine that asked.
+
+## Charts
+
+A text says a chart as a fenced block marked `chart`, holding one JSON object. Slack draws it, two to a message, and every other bridge shows it as a table; so does Slack, for a chart outside its limits.
+
+````
+```chart
+{"type": "bar", "title": "Tickets", "labels": ["Jan", "Feb"], "series": [{"name": "Email", "values": [140, 165]}], "x": "Month", "y": "Tickets"}
+```
+````
+
+| Field | What it holds |
+|---|---|
+| `type` | `bar`, `line`, `area` or `pie`; a pie takes the first series |
+| `title` | the chart's title, at most 50 characters for Slack |
+| `labels` | the categories, at most 20, each at most 20 characters for Slack |
+| `series` | each a `name` and one number in `values` for each label |
+| `x`, `y` | the names of the axes |
+
+A block that does not read as a chart is left as it is written.
+
+## Attend
+
+`attend.yaml` takes `said`, `asker`, `address` and `history`, and gives `{ answer: true }` or `{ answer: false }`. The starter's runs `.rook/attend/model.yaml`, which asks `claude-haiku-5-5` with the secret `ANTHROPIC_KEY` and gives false when the model is unsure. It takes `about`, what the bot is for, by default a bot that answers the people it belongs to. Any machine with the same input and output can take its place.
 
 ## Asking a person
 
@@ -170,6 +223,8 @@ include: ./base.yaml
 open:
   messages: { include: parts/messages/part.yaml }
 ```
+
+A part's script can call GitLab or Jira through the bridge's `api.js`. Its job lists the file under `files:` and allows the host and the secret, as the file's comment says.
 
 A part's `ask:` gives `approval.yaml` who asked and what, so the reviewer and the approvers judge a call against the request, and not only the agent's words for it.
 

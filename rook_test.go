@@ -745,8 +745,10 @@ func TestInitAgainKeepsThePersonsFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.Remove(filepath.Join(dir, "agents/family.yaml")); err != nil {
-		t.Fatal(err)
+	for _, name := range []string{"agents/family.yaml", "attend.yaml"} {
+		if err := os.Remove(filepath.Join(dir, name)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := rook.Init(dir, []string{"slack"}); err != nil {
 		t.Fatal(err)
@@ -758,6 +760,9 @@ func TestInitAgainKeepsThePersonsFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "agents/family.yaml")); err == nil {
 		t.Error("a starting file the person removed came back")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "attend.yaml")); err != nil {
+		t.Error("a file .rook reads by name was not written")
 	}
 	if got, _ := os.ReadFile(filepath.Join(dir, ".rook/blocks/tell.yaml")); string(got) == "changed" {
 		t.Error(".rook was not rewritten")

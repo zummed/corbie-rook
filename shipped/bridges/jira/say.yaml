@@ -1,10 +1,12 @@
-# Says a text as a comment on a Jira issue: `to` is its key, such as OPS-12.
+# Says a text as a comment on a Jira issue, each chart as its table: `to` is its
+# key, such as OPS-12.
 flow: jira-say
 input: { to: string, text: string, site: string, email: string }
 stages:
   say:
     job:
       script: ./jira.js
+      files: [./api.js, .rook/blocks/rich.js]
       input: { do: say, to: "${input.to}", text: "${input.text}", site: "${input.site}", email: "${input.email}" }
       allow: ["net:${input.site}", "secret:JIRA_TOKEN@net:${input.site}"]
       restart: { limit: 2 }
