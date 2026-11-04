@@ -234,6 +234,8 @@ type gitlab struct {
 	files   map[string]string // the files uploaded, by path under the project, as /uploads/<secret>/<name>
 	sizes   map[string]int    // the size HEAD gives, where it is not the file's own; -1 for none
 	fetches []string          // each call for a file, as "GET <path>"
+	uploads []upload          // each file the bot uploaded, To being its project
+	full    bool              // an upload is refused with 413
 }
 
 func newGitLab(t *testing.T) *gitlab {
@@ -308,6 +310,23 @@ func (gl *gitlab) serve(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"title": "Help @bot", "description": "It broke."}`)
 	case strings.HasSuffix(r.URL.Path, "/issues/9"):
 		w.WriteHeader(404)
+	case r.Method == "POST" && r.URL.EscapedPath() == "/api/v4/projects/group%2Fproject/uploads":
+		if gl.full {
+			w.WriteHeader(413)
+			return
+		}
+		u, err := uploaded(r, "uploads", "")
+		if err != nil {
+			w.WriteHeader(400)
+			return
+		}
+		u.To = "group/project"
+		gl.uploads = append(gl.uploads, u)
+		link := "[" + u.Name + "](/uploads/" + secret2 + "/" + u.Name + ")"
+		if strings.HasPrefix(u.Type, "image/") {
+			link = "!" + link
+		}
+		json.NewEncoder(w).Encode(map[string]any{"id": len(gl.uploads), "alt": u.Name, "url": "/uploads/" + secret2 + "/" + u.Name, "markdown": link})
 	case r.Method == "POST" && strings.Contains(r.URL.EscapedPath(), "group%2Fproject/issues/7/notes"):
 		var body struct{ Body string }
 		json.NewDecoder(r.Body).Decode(&body)

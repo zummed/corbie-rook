@@ -1,6 +1,6 @@
 // GitLab's script: input.do is hear, for listen.yaml, say, for say.yaml,
-// history, for history.yaml, or attachments, for attachments.yaml. It speaks the
-// REST API of the GitLab at input.site through api.js.
+// history, for history.yaml, attachments, for attachments.yaml, or send, for
+// send.yaml. It speaks the REST API of the GitLab at input.site through api.js.
 const call = require("./api.js").api(input.site)
 const project = (chat) => chat.slice(0, chat.lastIndexOf("#"))
 const issuePath = (chat) => "/projects/" + encodeURIComponent(project(chat)) + "/issues/" + chat.slice(chat.lastIndexOf("#") + 1)
@@ -141,9 +141,19 @@ if (input.do === "attachments") {
   })
 }
 
-// say: a comment on the issue, each chart as its table.
+// say and send: a comment on the issue.
 const to = String(input.to)
 if (to.lastIndexOf("#") < 0) throw new Error("GitLab has no issue " + to)
+
+if (input.do === "send") {
+  // The file is uploaded to the issue's project, and the comment is the link
+  // GitLab gives for it.
+  const file = call("POST", "/projects/" + encodeURIComponent(project(to)) + "/uploads", { upload: { file: { data: input.file, name: input.name, type: input.file.type } }, timeout: 120 })
+  const note = call("POST", issuePath(to) + "/notes", { json: { body: file.markdown } })
+  return { sent: "note:" + note.id }
+}
+
+// say: the text as a comment, each chart as its table.
 if (!input.text) throw new Error("there is nothing to say")
 const note = call("POST", issuePath(to) + "/notes", { json: { body: require("../../blocks/rich.js").plain(String(input.text)) } })
 return { sent: "note:" + note.id }
