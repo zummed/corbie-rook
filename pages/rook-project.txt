@@ -169,7 +169,8 @@ nothing on the internet connects to this computer.
             "channels:history",
             "groups:history",
             "im:history",
-            "files:read"
+            "files:read",
+            "files:write"
           ]
         }
       },
@@ -194,6 +195,7 @@ nothing on the internet connects to this computer.
   channels:read, groups:read                        reads a channel's name, as rules.yaml names places
   channels:history, groups:history, im:history      hears messages, and reads a thread's history
   files:read                                        downloads the files sent with a message
+  files:write                                       sends a file an agent gives
 
 The bot hears a direct message, and a message that names it in a channel it
 was invited to.

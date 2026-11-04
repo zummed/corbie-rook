@@ -1,8 +1,8 @@
 // Slack's script: input.do is hear, for listen.yaml, say, for say.yaml, ask, for
 // ask.yaml, close, for close.yaml, history, for history.yaml, status, for
-// status.yaml, or attachments, for attachments.yaml. It speaks
-// Slack's Web API with the bot token SLACK_TOKEN and listens with the app-level
-// token SLACK_APP_TOKEN, holding each as a handle.
+// status.yaml, attachments, for attachments.yaml, or send, for send.yaml. It
+// speaks Slack's Web API with the bot token SLACK_TOKEN and listens with the
+// app-level token SLACK_APP_TOKEN, holding each as a handle.
 const api = "https://slack.com/api"
 const listenFor = 4 * 60 * 1000
 const longest = 12000
@@ -149,6 +149,19 @@ if (input.do === "attachments") {
     if (reply.status !== 200 || (/^text\/html/.test(type) && !/^text\/html/.test(a.type))) throw new Error("Slack answered the download of " + a.name + " with status " + reply.status + " and " + (type || "no type"))
     return { name: a.name, type: a.type, size: a.size, file: blobs.make(reply.body, { type: a.type }) }
   })
+}
+
+if (input.do === "send") {
+  // A file in a conversation or its thread, which needs the scope files:write.
+  // Slack gives an address on files.slack.com that takes the file's bytes with
+  // no token, then shares the file where it is told.
+  const [to, thread] = String(input.to).split("/")
+  const channel = named(to)
+  const at = call("files.getUploadURLExternal", null, { filename: input.name, length: String(input.file.size) })
+  const reply = http.post(at.upload_url, { body: input.file, timeout: 240 })
+  if (reply.status !== 200) throw new Error("Slack answered the upload of " + input.name + " with status " + reply.status)
+  call("files.completeUploadExternal", Object.assign({ files: [{ id: at.file_id, title: input.name }], channel_id: channel }, thread ? { thread_ts: thread } : {}))
+  return { sent: channel + ":" + at.file_id }
 }
 
 if (input.do === "ask") {
