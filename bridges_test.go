@@ -454,6 +454,8 @@ type jira struct {
 	contents  map[string]string // each file's contents, by id
 	fields    map[string]any    // other fields of the issue, given instead of these
 	downloads []string          // each file's id, as it is downloaded
+	uploads   []upload          // each file the bot attached, in order
+	largest   int               // the largest file Jira takes, in bytes; by default any
 }
 
 func newJira(t *testing.T) *jira {
@@ -497,6 +499,23 @@ func (j *jira) serve(w http.ResponseWriter, r *http.Request) {
 		comments := append([]map[string]any{}, j.comments...)
 		slices.Reverse(comments)
 		json.NewEncoder(w).Encode(map[string]any{"comments": comments})
+	case r.Method == "POST" && r.URL.Path == "/rest/api/2/issue/OPS-12/attachments":
+		if r.Header.Get("X-Atlassian-Token") != "no-check" {
+			w.WriteHeader(403)
+			return
+		}
+		u, err := uploaded(r, "attachments", "")
+		if err != nil {
+			w.WriteHeader(400)
+			return
+		}
+		if j.largest > 0 && len(u.Body) > j.largest {
+			w.WriteHeader(413)
+			return
+		}
+		u.To = "OPS-12"
+		j.uploads = append(j.uploads, u)
+		json.NewEncoder(w).Encode([]any{map[string]any{"id": fmt.Sprint(20000 + len(j.uploads)), "filename": u.Name, "mimeType": u.Type, "size": len(u.Body)}})
 	case r.Method == "POST" && r.URL.Path == "/rest/api/2/issue/OPS-12/comment":
 		var body struct{ Body string }
 		json.NewDecoder(r.Body).Decode(&body)
@@ -528,6 +547,12 @@ func (j *jira) downloaded() []string {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	return slices.Clone(j.downloads)
+}
+
+func (j *jira) attached() []upload {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return slices.Clone(j.uploads)
 }
 
 func (j *jira) saying() []string {

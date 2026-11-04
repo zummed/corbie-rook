@@ -1,6 +1,6 @@
 // Jira's script: input.do is hear, for listen.yaml, say, for say.yaml, history,
-// for history.yaml, or attachments, for attachments.yaml. It speaks the REST API
-// of the Jira Cloud at input.site through api.js.
+// for history.yaml, attachments, for attachments.yaml, or send, for send.yaml. It
+// speaks the REST API of the Jira Cloud at input.site through api.js.
 const call = require("./api.js").api(input.site, input.email)
 
 // open says everyone who can read the issue can read a comment: one with a
@@ -143,6 +143,15 @@ if (input.do === "attachments") {
     const bytes = call("GET", "/attachment/content/" + encodeURIComponent(a.id), { query: { redirect: "false" }, redirects: false, as: "bytes", timeout: 120 })
     return { name: a.name, type: a.type, size: a.size, file: blobs.make(bytes, { type: a.type }) }
   })
+}
+
+if (input.do === "send") {
+  // The file attached to the issue, then a comment that shows it, as !name! for an
+  // image and [^name] for any other, so the issue's readers see it.
+  const issue = "/issue/" + encodeURIComponent(String(input.to))
+  const name = call("POST", issue + "/attachments", { upload: { file: { data: input.file, name: input.name, type: input.file.type } }, headers: { "X-Atlassian-Token": "no-check" }, timeout: 120 })[0].filename
+  const shown = /^image\//.test(input.file.type) ? "!" + name + "!" : "[^" + name + "]"
+  return { sent: "comment:" + call("POST", issue + "/comment", { json: { body: shown } }).id }
 }
 
 // say: a comment on the issue, in parts Jira takes, each chart as its table.
