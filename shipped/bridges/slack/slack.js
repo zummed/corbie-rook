@@ -160,8 +160,8 @@ if (input.do === "send") {
   const at = call("files.getUploadURLExternal", null, { filename: input.name, length: String(input.file.size) })
   const reply = http.post(at.upload_url, { body: input.file, timeout: 240 })
   if (reply.status !== 200) throw new Error("Slack answered the upload of " + input.name + " with status " + reply.status)
-  const done = call("files.completeUploadExternal", Object.assign({ files: [{ id: at.file_id, title: input.name }], channel_id: channel }, thread ? { thread_ts: thread } : {}))
-  return { sent: channel + ":" + done.files[0].id }
+  call("files.completeUploadExternal", Object.assign({ files: [{ id: at.file_id, title: input.name }], channel_id: channel }, thread ? { thread_ts: thread } : {}))
+  return { sent: channel + ":" + at.file_id }
 }
 
 if (input.do === "ask") {
