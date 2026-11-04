@@ -993,8 +993,9 @@ func echoing(t *testing.T, dir string) {
 
 // A chat with no conversation yet is told what the issue holds before the message,
 // and not what came after or GitLab's own notes. A later message has the
-// conversation, and reads nothing more.
-func TestGitLabChatReadsTheIssueOnce(t *testing.T) {
+// conversation, and is told nothing more: the issue is read again only for its
+// files.
+func TestGitLabChatTellsTheIssueOnce(t *testing.T) {
 	gl := newGitLab(t)
 	w := newWorld(t)
 	w.secret("GITLAB_TOKEN", "gl-token")
@@ -1040,7 +1041,7 @@ func TestGitLabChatReadsTheIssueOnce(t *testing.T) {
 	again(2)
 	gl.mu.Lock()
 	defer gl.mu.Unlock()
-	if gl.reads != 1 || !strings.HasPrefix(gl.notes[1], "[null] ") {
+	if gl.reads != 2 || !strings.HasPrefix(gl.notes[1], "[null] ") {
 		t.Fatalf("read %d times, and said %v", gl.reads, gl.notes)
 	}
 	w.titled(map[string][]string{"chat": {"#7 go on"}, "message": {"and again", "go on"}})

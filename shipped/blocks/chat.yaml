@@ -1,8 +1,9 @@
 # One conversation with the bot, on any bridge: a chat, a thread or an issue. A
 # bridge's listener sends each message here under a key of its own. Its messages
-# are answered one at a time, each by a new agent given the conversation so far and
-# the message's address, and with no conversation yet, what the service's thread
-# already holds, with its files. The files are downloaded only to answer it.
+# are answered one at a time, each by a new agent given the conversation so far,
+# the message's address, the files earlier in the service's thread, and with no
+# conversation yet, what the thread already holds. The message's own files are
+# downloaded only to answer it, and an earlier one only when the agent looks at it.
 # A message marked unaddressed is answered only if attend.yaml says so, given
 # what was said and a line naming its files. A status shows while the agent
 # works, and an empty reply says nothing.
@@ -42,7 +43,7 @@ states:
           history:
             job:
               machine: ./history.yaml
-              input: { address: "${input.address}", wanted: "${!!stages.who.output.agent && (!!input.event.unaddressed || !(input.last && input.last.conversation))}" }
+              input: { address: "${input.address}", wanted: "${!!stages.who.output.agent}" }
           attend:
             job:
               input: { unaddressed: "${!!input.event.unaddressed}", agent: "${!!stages.who.output.agent}", said: "${(input.event.text || '') + ((input.event.attachments || []).length ? (input.event.text ? '\\n' : '') + '(files: ' + input.event.attachments.map((a) => a.name).join(', ') + ')' : '')}", asker: "${stages.who.output.person}", address: "${input.address}", history: "${(stages.history.output || {}).text}" }
@@ -66,17 +67,6 @@ states:
           attachments:
             when: "${stages.attend.output}"
             job: { machine: ./attachments.yaml, input: { address: "${input.address}", attachments: "${input.event.attachments}" } }
-          # A new conversation has the files earlier in the thread too, but one that
-          # follows a failed answer does not, since a file there may be its cause.
-          earlier:
-            when: "${stages.attend.output}"
-            job:
-              machine: ./attachments.yaml
-              input:
-                address: "${input.address}"
-                attachments: >-
-                  ${input.last && (input.last.conversation || input.last.failed) ? null :
-                  ((stages.history.output || {}).attachments || []).filter((e) => !(input.event.attachments || []).some((o) => o.id === e.id))}
           answer:
             when: "${stages.attend.output}"
             job:
@@ -89,7 +79,8 @@ states:
                   home: "${input.dir}"
                   address: "${input.address}"
                   history: "${input.last && input.last.conversation ? null : (stages.history.output || {}).text}"
-                  attachments: "${(stages.attachments.output || []).concat(stages.earlier.output || [])}"
+                  attachments: "${stages.attachments.output}"
+                  earlier: "${((stages.history.output || {}).attachments || []).filter((e) => !(input.event.attachments || []).some((o) => o.id === e.id))}"
                   conversation: "${input.last ? input.last.conversation : null}"
                   format: "${stages.format.output}"
           say:
@@ -103,6 +94,5 @@ states:
             job: { machine: ./say.yaml, input: { address: "${input.address}", text: That could not be answered. Ask again in a while. } }
         output:
           conversation: "${stages.answer.failed ? null : stages.answer.skipped ? (input.last ? input.last.conversation : null) : (stages.answer.output || {}).conversation}"
-          failed: "${stages.answer.failed}"
     on: { done: waiting, failed: waiting }
   over: { end: done }
