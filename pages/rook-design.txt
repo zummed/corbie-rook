@@ -136,7 +136,8 @@ thread. An answer holds `bridge`, `question`, `from` and `choice`, and on
 Slack `values`, the form's fields by name.
 
 A Jira file belongs to the issue. A comment has the files its text shows or
-links to by name, and an opened issue the files its reporter attached.
+links to by name, and an opened issue all its files except one that only a
+restricted comment names.
 
 A conversation
 --------------

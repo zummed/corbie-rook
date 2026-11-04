@@ -14,13 +14,14 @@ const when = (text) => Date.parse(String(text).replace(/([+-]\d\d)(\d\d)$/, "$1:
 // file describes one of an issue's attachments for a message.
 const file = (a) => ({ name: a.filename, type: a.mimeType || "application/octet-stream", size: a.size, id: String(a.id) })
 
-// linked gives the issue's files a comment shows, as !name! or !name|…!, or links
-// to, as [^name]. Of two with one name, it gives the newest made at or before the
-// comment, or else the one after it. An external image, as !https://…!, names no
-// file.
-function linked(files, body, at) {
-  const shown = files.filter((a) => ["!" + a.filename + "!", "!" + a.filename + "|", "[^" + a.filename + "]"].some((s) => body.includes(s)))
-  shown.sort((a, b) => (when(a.created) <= at) - (when(b.created) <= at) || when(a.created) - when(b.created))
+// names says whether wiki markup shows a file, as !name! or !name|…!, or links to
+// it, as [^name]. An external image, as !https://…!, names no file.
+const names = (body, a) => ["!" + a.filename + "!", "!" + a.filename + "|", "[^" + a.filename + "]"].some((s) => body.includes(s))
+
+// linked gives the issue's files a comment names. Of two with one name, it gives
+// the newest.
+function linked(files, body) {
+  const shown = files.filter((a) => names(body, a)).sort((a, b) => when(a.created) - when(b.created))
   return [...new Map(shown.map((a) => [a.filename, a])).values()].map(file)
 }
 
@@ -72,7 +73,7 @@ if (input.do === "hear") {
       const f = issue.fields || {}
       add(when(f.created), "issue:" + issue.id, issue.key, f.reporter, (f.summary || "") + "\n\n" + (f.description || ""), [])
       // An answer is a public comment, so what only some can read is not heard.
-      for (const c of ((f.comment && f.comment.comments) || []).filter(open)) add(when(c.created), "comment:" + c.id, issue.key, c.author, c.body || "", linked(f.attachment || [], c.body || "", when(c.created)))
+      for (const c of ((f.comment && f.comment.comments) || []).filter(open)) add(when(c.created), "comment:" + c.id, issue.key, c.author, c.body || "", linked(f.attachment || [], c.body || ""))
     }
     token = found.nextPageToken
     if (!token || found.isLast) break
@@ -85,17 +86,19 @@ if (input.do === "hear") {
     else if (!waiting.some((w) => w.chat === t.issue)) hear(message(t.issue, t.from, t.text, t.id, t.files))
   }
   // An opened issue is heard once nobody has changed it for settle, as it is then,
-  // with the files its reporter attached: another person's may be for a
-  // restricted comment.
+  // with its files, except one that only a restricted comment names.
   const still = []
   for (const w of waiting) {
-    const f = (call("GET", "/issue/" + encodeURIComponent(w.chat), { query: { fields: "summary,description,updated,attachment" }, maybe: true }) || {}).fields
+    const f = (call("GET", "/issue/" + encodeURIComponent(w.chat), { query: { fields: "summary,description,updated,attachment,comment" }, maybe: true }) || {}).fields
     if (!f) continue
     if (now - when(f.updated) < settle * 1000) {
       still.push(w)
       continue
     }
-    const files = (f.attachment || []).filter((a) => a.author && a.author.accountId === w.from).map(file)
+    const comments = (f.comment && f.comment.comments) || []
+    const everyone = [f.description || ""].concat(comments.filter(open).map((c) => c.body || "")).join("\n")
+    const some = comments.filter((c) => !open(c)).map((c) => c.body || "").join("\n")
+    const files = (f.attachment || []).filter((a) => names(everyone, a) || !names(some, a)).map(file)
     hear(message(w.chat, w.from, (f.summary || "") + "\n\n" + (f.description || ""), w.at, files))
   }
   for (const m of heard) emit("message", m)
@@ -129,9 +132,9 @@ if (input.do === "history") {
 }
 
 if (input.do === "attachments") {
-  // Each file's contents, read from the site itself: by default Jira sends the
-  // download to another host, which the token may not go to. A file over
-  // input.most bytes is left as it is.
+  // Each file's contents, read from the site itself: by default Jira answers with
+  // a redirect to another host, which the token may not go to, so the call asks
+  // for none and follows none. A file over input.most bytes is left as it is.
   return input.attachments.map((a) => {
     if (a.size > input.most) return { name: a.name, type: a.type, size: a.size }
     const bytes = call("GET", "/attachment/content/" + encodeURIComponent(a.id), { query: { redirect: "false" }, redirects: false, as: "bytes", timeout: 120 })

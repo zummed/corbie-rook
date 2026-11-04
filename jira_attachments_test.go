@@ -146,20 +146,19 @@ func TestJiraFileAloneIsAnswered(t *testing.T) {
 	}
 }
 
-// A comment has the files it names: of two with one name the newest made by the
-// comment, and one made just after it. An external image names no file, and one
-// over 32 MiB is named and not downloaded.
+// A comment has the files it names, and of two with one name the newest. An
+// external image names no file, and one over 32 MiB is described and not
+// downloaded.
 func TestJiraCommentHasTheFilesItNames(t *testing.T) {
 	at := time.Now().Add(time.Second)
 	f := newJiraFiles(t, []map[string]any{
 		attachment("1", "cat.png", "image/png", 7, "acc-1", at.Add(-2*time.Second)),
 		attachment("2", "cat.png", "image/png", 7, "acc-1", at.Add(-time.Second)),
-		attachment("3", "cat.png", "image/png", 7, "acc-1", at.Add(time.Second)),
 		attachment("4", "dog.png", "image/png", 7, "acc-1", at.Add(time.Second)),
 		attachment("7", "bird.png", "image/png", 7, "acc-1", at),
 		attachment("5", "x.png", "image/png", 7, "acc-1", at),
 		attachment("6", "film.mp4", "video/mp4", 64<<20, "acc-1", at),
-	}, map[string]string{"1": "old cat", "2": "new cat", "3": "late cat", "4": "dog", "5": "x", "7": "bird"}, nil)
+	}, map[string]string{"1": "old cat", "2": "new cat", "4": "dog", "5": "x", "7": "bird"}, nil)
 	w, model, ask := jiraAnswering(t, f)
 	f.j.comment("1", "acc-1", "[~accountid:acc-bot] wow! !cat.png! and !dog.png|thumbnail! and !https://example.com/x.png! [^film.mp4]", at)
 	ask()
@@ -167,25 +166,33 @@ func TestJiraCommentHasTheFilesItNames(t *testing.T) {
 	if got := f.downloaded(); !slices.Equal(got, []string{"2", "4"}) {
 		t.Fatalf("Jira gave the files %v", got)
 	}
-	if shown := fmt.Sprint(model.Calls[0].Messages); !strings.Contains(shown, "film.mp4") {
-		t.Errorf("film.mp4 is not in %s", shown)
+	shown := fmt.Sprint(model.Calls[0].Messages)
+	for _, want := range []string{"video/mp4", "67108864"} {
+		if !strings.Contains(shown, want) {
+			t.Errorf("%q is not in %s", want, shown)
+		}
 	}
 }
 
-// An opened issue has the files its reporter attached, and not another person's.
-func TestJiraIssueHasItsReportersFiles(t *testing.T) {
+// An opened issue has its files, whoever attached them, except one that only a
+// restricted comment names.
+func TestJiraIssueHasItsFiles(t *testing.T) {
 	at := time.Now().Add(time.Second)
 	f := newJiraFiles(t, []map[string]any{
 		attachment("1", "mine.png", "image/png", 4, "acc-1", at),
 		attachment("2", "theirs.png", "image/png", 6, "acc-2", at),
-	}, map[string]string{"1": "mine", "2": "theirs"}, nil)
+		attachment("3", "secret.png", "image/png", 6, "acc-1", at),
+		attachment("4", "both.png", "image/png", 4, "acc-1", at),
+	}, map[string]string{"1": "mine", "2": "theirs", "3": "secret", "4": "both"}, nil)
 	w, _, ask := jiraAnswering(t, f)
 	f.mu.Lock()
-	f.fields = map[string]any{"created": jiraTime(at), "description": "[~accountid:acc-bot] it fails"}
+	f.fields = map[string]any{"created": jiraTime(at), "description": "[~accountid:acc-bot] it fails !both.png!", "comment": map[string]any{"comments": []any{
+		map[string]any{"id": "5", "body": "!secret.png! [^both.png]", "created": jiraTime(at.Add(time.Second)), "author": map[string]any{"accountId": "acc-1"}, "visibility": map[string]any{"type": "role", "value": "Administrators"}},
+	}}}
 	f.mu.Unlock()
 	ask()
 	w.until("the answer", func() bool { return len(f.j.saying()) >= 1 })
-	if got := f.downloaded(); !slices.Equal(got, []string{"1"}) {
+	if got := f.downloaded(); !slices.Equal(got, []string{"1", "2", "4"}) {
 		t.Fatalf("Jira gave the files %v", got)
 	}
 }
