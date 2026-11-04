@@ -4,8 +4,7 @@ Rook is ready-made Corbie machines: bridges for Telegram, Slack, GitLab and Jira
 
 ## Where to start
 
-- `DESIGN.md`: the design. It and `README.md` are pages of the manual the program carries.
-- `rook.txt`: the page a model is told when `corbie mcp` allows it `rook init`.
+- `pages/`: Rook's pages of the manual. `rook-design.txt` is the design, `rook-project.txt` how a person uses it, and `rook.txt` what a model is told when `corbie mcp` allows it `rook init`. `README.md` is the front page on GitHub.
 - `shipped/`: what is written into a project's `.rook/`. `starter/`: a project's first files. `bridges/`: the file that starts each bridge.
 - `rook.go`: what writes them.
 
@@ -13,7 +12,7 @@ Rook is ready-made Corbie machines: bridges for Telegram, Slack, GitLab and Jira
 
 - **Two ideas**: machine and block. `people.yaml` and `rules.yaml` are data that machines read, and `.rook/agents/base.yaml` and the files in `parts/` are fields an agent includes. Add no other idea a person must learn.
 - **Five slots**: a project fills bridges, people, attend, rules and parts. Design a piece as one way of filling a slot, and never around one project. Rook's ready-made way to fill a slot is in `shipped/<slot>/`.
-- **A message is one mapping**, the same from every bridge, given in `DESIGN.md`. A block takes it or a part of it, and gives data back. A bridge only translates between its service and that mapping.
+- **A message is one mapping**, the same from every bridge, given in `pages/rook-design.txt`. A block takes it or a part of it, and gives data back. A bridge only translates between its service and that mapping.
 - **A project's files hold choices; `.rook/` holds what Rook does.** Rook never updates a project's file, so anything Rook may change goes in `.rook/`. The manual page `rook-starter` shows this version's starting files, and `init` names a project's files that differ from them.
 - **Nothing personal lives here.** No real name, address, ID or host goes in this repository. A person's own machines live in their own directory.
 - **The program does one thing**: writes machines into a project. Everything else is written in machines, which the person can change.
@@ -90,6 +89,16 @@ Sentences:
 ## Docs
 
 Docs say how things are now. No history, no "previously", no alternatives. Something removed is simply gone.
+
+A page of the manual is written as Corbie's are:
+
+- It answers three things: what the thing is, why a reader wants it, and how to do it.
+- Its first line is `Title: one sentence that says what the page is for.`, which is its summary in the list of pages.
+- It is plain text: a heading is underlined with dashes, a row is indented two spaces, and an example is indented four.
+- It gives the definition first, then a real example: the real files, the real command and the output it printed. `pages_test.go` checks every example file and the printed output.
+- A mechanism is stated first, in three or four numbered one-line steps, before any example.
+- Another page is named as `corbie manual <page>` or `corbie rook manual <page>`. A page ends with a `Reference` list of pages.
+- Do not add a page without asking the author. The aim is fewer and shorter pages.
 
 ## Commits
 
