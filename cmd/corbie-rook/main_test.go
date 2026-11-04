@@ -17,23 +17,20 @@ func run(t *testing.T, in string, args ...string) (string, int) {
 	return out.String() + errOut.String(), status
 }
 
-func TestAModelIsToldThePageRook(t *testing.T) {
-	out, status := run(t, `{"jsonrpc":"2.0","id":1,"method":"initialize"}`+"\n", "mcp")
-	if status != 0 {
-		t.Fatal(out)
+// corbie mcp, allowed rook init, reads the manual as JSON: the command, and
+// the page rook, which it tells a model.
+func TestCorbieMCPFindsInitAndThePageRook(t *testing.T) {
+	out, status := run(t, "", "manual", "--json")
+	var pages []struct{ Name, Group, Text string }
+	if err := json.Unmarshal([]byte(out), &pages); status != 0 || err != nil {
+		t.Fatalf("corbie rook manual --json ended %d: %v\n%s", status, err, out)
 	}
-	var answer struct {
-		Result struct{ Instructions string }
+	found := map[string]bool{}
+	for _, page := range pages {
+		found[page.Group+" "+page.Name] = page.Name != "rook" || strings.Contains(page.Text, "rook-design")
 	}
-	if err := json.Unmarshal([]byte(out), &answer); err != nil {
-		t.Fatal(err)
-	}
-	page, status := run(t, "", "manual", "rook")
-	if status != 0 {
-		t.Fatal(page)
-	}
-	if strings.TrimSpace(answer.Result.Instructions) != strings.TrimSpace(page) || !strings.Contains(page, "rook-design") {
-		t.Fatalf("told %q, and the page is %q", answer.Result.Instructions, page)
+	if !found["Commands corbie rook init"] || !found["Rook rook"] {
+		t.Fatalf("the manual holds %v", found)
 	}
 }
 

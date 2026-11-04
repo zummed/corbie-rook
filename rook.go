@@ -28,8 +28,8 @@ var readme string
 //go:embed DESIGN.md
 var design string
 
-// Pages are Rook's pages of the manual. A model is told the page rook when it
-// connects to corbie rook mcp.
+// Pages are Rook's pages of the manual. corbie mcp, allowed rook init, tells a
+// model the page rook.
 func Pages() []manual.Page {
 	return []manual.Page{
 		{Name: "rook", Group: "Rook", Summary: "Rook: what to do in a project, for a model.", Text: briefing},

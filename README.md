@@ -32,11 +32,10 @@ Run `corbie run submit bridges` again after any change. `corbie ui` shows what i
 Corbie and Rook carry the manual, and serve it to a model. In the project's directory, run:
 
 ```sh
-claude mcp add corbie -- corbie mcp --allow test
-claude mcp add rook -- corbie rook mcp --allow init
+claude mcp add corbie -- corbie mcp --allow test --allow "rook init"
 ```
 
-A model connected to `rook` is told the page `corbie rook manual rook`, and reads the rest from there. Add `--allow "run submit"` to the first line for the model to check and start what it writes, and without it the model gives you the commands. A submitted machine may do anything the ceiling allows.
+Allowed `rook init`, the server adds Rook's pages to the manual and tells the model the page `corbie rook manual rook`, and the model reads the rest from there. Add `--allow "run submit"` for the model to check and start what it writes, and without it the model gives you the commands. A submitted machine may do anything the ceiling allows.
 
 ## What a project holds
 
