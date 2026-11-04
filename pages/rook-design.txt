@@ -43,6 +43,8 @@ The machines in `.rook/` read these files by name: `rules.yaml`,
 
   bridges/<name>/listen.yaml           hears the service, and sends each message by key
   bridges/<name>/say.yaml              says a text; every bridge has one
+  bridges/<name>/send.yaml             sends a file; every bridge has one
+  bridges/<name>/attachments.yaml      downloads a message's files; every bridge has one
   bridges/<name>/history.yaml          reads a thread; Slack, GitLab and Jira
   bridges/<name>/ask.yaml, close.yaml  asks with buttons, and shows the answer; Telegram and Slack
   bridges/<name>/status.yaml           shows a status; Telegram and Slack
@@ -50,6 +52,9 @@ The machines in `.rook/` read these files by name: `rules.yaml`,
   blocks/chat.yaml                     one conversation, a message at a time
   blocks/who.yaml                      the person a message is from, and the agent they get there
   blocks/say.yaml, tell.yaml           says a text at an address, or to a person
+  blocks/send.yaml, file.js            sends a file at an address, for the tool send
+  blocks/attachments.yaml              downloads a message's files to answer it
+  blocks/types.js                      a file's media type by its name
   blocks/ask.yaml                      asks people, and gives their answer
   blocks/status.yaml                   shows a status at an address
   blocks/history.yaml, thread.js       what a thread held before a message
@@ -216,6 +221,7 @@ directory.
 
   .rook/blocks/tell.yaml      person, text: says a text to a person named in lookup.yaml
   .rook/blocks/say.yaml       address, text: says a text at an address
+  .rook/blocks/send.yaml      address, name, file or text: sends a blob, or a text as a file, at an address
   .rook/blocks/ask.yaml       people, in, text, choices, fields, within: asks, and gives choice and values
   .rook/blocks/status.yaml    address, text: shows a status under a Slack thread or as "typing" on Telegram
 
@@ -346,7 +352,9 @@ includes.
 - An agent that answers messages includes `.rook/agents/base.yaml`, and
   writes its own model, system text and parts.
 - `base.yaml` gives the agent its input, its prompt, the conversation, and the
-  tools `progress` and `form`.
+  tools `progress`, `send` and `form`.
+- The tool `send` sends a file where the message came from, at once: a blob
+  the agent has, or a text it writes, under a name such as `report.csv`.
 - `${input.format}` in the system text says how to write for the bridge the
   message came from.
 - A part's script can call GitLab or Jira through the bridge's `api.js`. Its
