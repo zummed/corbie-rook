@@ -180,9 +180,9 @@ func (gl *gitlab) asked() int {
 	return gl.asks
 }
 
-// A comment naming the bot on an issue is answered there, a comment that does not
-// is left alone, the bot's own words are not heard, and a stranger is told the
-// bot is not theirs.
+// A comment naming the bot on an issue is answered there, without the name, a
+// comment that does not is left alone, the bot's own words are not heard, and a
+// stranger is told the bot is not theirs.
 func TestGitLabIssuesAreAnswered(t *testing.T) {
 	gl := newGitLab(t)
 	w := newWorld(t)
@@ -212,7 +212,7 @@ func TestGitLabIssuesAreAnswered(t *testing.T) {
 	w.until("two comments", func() bool { return len(gl.said()) >= 2 })
 	time.Sleep(50 * interval)
 	got := strings.Join(gl.said(), " | ")
-	if !strings.Contains(got, "@bot the build fails") || !strings.Contains(got, "only the people") || len(gl.said()) != 2 {
+	if !strings.Contains(got, "the build fails") || strings.Contains(got, "@bot the build") || !strings.Contains(got, "only the people") || len(gl.said()) != 2 {
 		t.Fatalf("the bot said %s", got)
 	}
 }
@@ -588,7 +588,7 @@ func TestSlackMessagesAreAnswered(t *testing.T) {
 		"slack-bridge": {"Slack bridge"},
 		"slack-listen": {"Slack listener"},
 		"chat":         {"#help: hello", "dm: in private"},
-		"message":      {"#help: hello", "dm: in private"},
+		"message":      {"hello", "in private"},
 	})
 }
 
@@ -718,6 +718,7 @@ func TestGitLabChatReadsTheIssueOnce(t *testing.T) {
 	if gl.reads != 1 || !strings.HasPrefix(gl.notes[1], "[null] ") {
 		t.Fatalf("read %d times, and said %v", gl.reads, gl.notes)
 	}
+	w.titled(map[string][]string{"chat": {"#7 go on"}, "message": {"and again", "go on"}})
 }
 
 // A thread that cannot be read is only missing context: the message is answered.
@@ -848,7 +849,7 @@ func TestJiraChatReadsItsIssue(t *testing.T) {
 		"jira-bridge": {"Jira bridge"},
 		"jira-listen": {"Jira listener"},
 		"chat":        {"OPS-12 go on"},
-		"message":     {"OPS-12 go on"},
+		"message":     {"go on"},
 	})
 }
 

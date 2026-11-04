@@ -250,7 +250,7 @@ func TestGitLabHearsAnIssueOnceItSettles(t *testing.T) {
 		"gitlab-bridge": {"GitLab bridge"},
 		"gitlab-listen": {"GitLab listener"},
 		"chat":          {"#7 Broken build"},
-		"message":       {"#7 Broken build  It fails on main. @bot help"},
+		"message":       {"Broken build It fails on main. help"},
 	})
 }
 
