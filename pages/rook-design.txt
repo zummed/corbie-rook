@@ -135,6 +135,9 @@ In a channel, each message that is not in a thread starts its own Slack
 thread. An answer holds `bridge`, `question`, `from` and `choice`, and on
 Slack `values`, the form's fields by name.
 
+A Jira file belongs to the issue. A comment has the files its text shows or
+links to by name, and an opened issue the files its reporter attached.
+
 A conversation
 --------------
 
