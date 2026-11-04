@@ -168,8 +168,9 @@ time, each with a new agent given the conversation so far.
 - When a download fails, the agent gets each file as the message holds it,
   with no contents. The history holds no files.
 - `attend.yaml` gets the thread before the message, and only for someone with
-  an agent. When it fails, the message is not answered. A message with
-  `unaddressed: true` never gets a refusal.
+  an agent. Its `said` ends with a line naming the message's files, as
+  `(files: error.png)`. When it fails, the message is not answered. A message
+  with `unaddressed: true` never gets a refusal.
 - While an agent works, `chat.yaml` shows `Working on it.` under a Slack
   thread and "typing" on Telegram. A reply clears it on Slack, and so does
   an answer that says nothing.
