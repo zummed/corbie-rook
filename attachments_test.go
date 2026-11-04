@@ -364,8 +364,8 @@ func TestJiraCommentHasTheFilesItNames(t *testing.T) {
 	}
 }
 
-// An opened issue has its files, whoever attached them, except one that only a
-// restricted comment names.
+// An opened issue has its files, whoever attached them, except each one a
+// restricted comment names, even where the description names it too.
 func TestJiraIssueHasItsFiles(t *testing.T) {
 	at := time.Now().Add(time.Second)
 	j := newJira(t)
@@ -384,7 +384,33 @@ func TestJiraIssueHasItsFiles(t *testing.T) {
 	j.mu.Unlock()
 	ask()
 	w.until("the answer", func() bool { return len(j.saying()) >= 1 })
-	if got := j.downloaded(); !slices.Equal(got, []string{"1", "2", "4"}) {
+	if got := j.downloaded(); !slices.Equal(got, []string{"1", "2"}) {
 		t.Fatalf("Jira gave the files %v", got)
+	}
+}
+
+// An overheard reply that holds only a file is heard, and attend.yaml is given a
+// line naming its files.
+func TestSlackOverheardFileIsNamedToAttend(t *testing.T) {
+	s := newSlack(t)
+	w := newWorld(t)
+	dir := slackProject(t, w, s)
+	echoing(t, dir)
+	setSite(t, dir, "bridges/slack.yaml", `input: { dir: "${run.context}" }`, `input: { dir: "${run.context}", overhear: true }`)
+	setSite(t, dir, "rules.yaml", "  dm: { readers: [asker] }\n", "  dm: { readers: [asker] }\n  \"#help\": { readers: [asker] }\n")
+	if err := os.WriteFile(filepath.Join(dir, "attend.yaml"), []byte(dedent(attendStub)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.thread = []map[string]any{
+		{"ts": "1.0", "user": "U1", "text": "<@UBOT> start"},
+		{"ts": "2.0", "user": "UBOT", "text": "send a screenshot"},
+	}
+	w.sync(dir)
+	w.until("Slack connected", s.connected)
+	s.says("a", map[string]any{"type": "message", "channel": "C1", "channel_type": "channel", "user": "U1", "ts": "5.0", "thread_ts": "1.0", "text": "",
+		"files": []any{map[string]any{"id": "F1", "name": "error.png", "mimetype": "image/png", "size": 3, "url_private_download": s.URL + "/files/T1-F1/error.png"}}})
+	w.until("attend asked", func() bool { return len(stubs(t, w, "attend-stub")) == 1 })
+	if said := fmt.Sprint(w.show(stubs(t, w, "attend-stub")[0].ID).Input.(map[string]any)["said"]); said != "(files: error.png)" {
+		t.Fatalf("attend was given %q", said)
 	}
 }

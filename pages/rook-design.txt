@@ -161,8 +161,10 @@ time, each with a new agent given the conversation so far.
 - Rook reads nothing for a person with no agent.
 - A message's files are downloaded only to answer it, each of at most 32
   MiB, or 20 MB on Telegram. The agent's prompt is then `{ message,
-  attachments }`, where each file holds its contents as a blob. The model is
-  shown each image and PDF, and reads any other file with Corbie's blob tools.
+  attachments }`, where each file holds its contents as a blob.
+- The model is shown each PNG, JPEG, GIF or WebP image of at most 5 MiB, and
+  each PDF, when its service takes them. Any other file is a handle, and the
+  agent reads a text file with Corbie's blob tools.
 - When a download fails, the agent gets each file as the message holds it,
   with no contents. The history holds no files.
 - `attend.yaml` gets the thread before the message, and only for someone with
@@ -181,7 +183,7 @@ time, each with a new agent given the conversation so far.
 
   a conversation          where it is and the first line said: #help: …, dm: …, #7 … on GitLab, OPS-1 … on Jira
   a message               all that was said, or the names of its files
-  an agent answering      the asker's name and what they said
+  an agent answering      the asker's name and what they said, or the names of its files
   a question, a form      the first line of what is asked
   an approval             Approve, the tools held, and what the asker said
   a bridge, its listener  Slack bridge, Slack listener
@@ -200,6 +202,7 @@ an agent's place in `answer.yaml`, with the same input and output.
   home            the project's directory
   address         where the message came from
   history         what the thread held before this message, for a new conversation on Slack, GitLab or Jira
+  attachments     the files sent with it, each { name, type, size, file }, or nothing
   conversation    what the last answer gave, or nothing
   format          how to write for the message's bridge: Markdown or not, and how to write a chart, a layout or a diagram
 

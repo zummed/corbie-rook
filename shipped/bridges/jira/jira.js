@@ -18,8 +18,15 @@ const file = (a) => ({ name: a.filename, type: a.mimeType || "application/octet-
 // it, as [^name]. An external image, as !https://…!, names no file.
 const names = (body, a) => ["!" + a.filename + "!", "!" + a.filename + "|", "[^" + a.filename + "]"].some((s) => body.includes(s))
 
-// linked gives the issue's files a comment names. Of two with one name, it gives
-// the newest.
+// shared gives the issue's files except each whose name a restricted comment
+// names, since Jira tells such a file from another only by its name.
+const shared = (f) => {
+  const restricted = ((f.comment && f.comment.comments) || []).filter((c) => !open(c)).map((c) => c.body || "").join("\n")
+  return (f.attachment || []).filter((a) => !names(restricted, a))
+}
+
+// linked gives the files a comment names. Of two with one name, it gives the
+// newest.
 function linked(files, body) {
   const shown = files.filter((a) => names(body, a)).sort((a, b) => when(a.created) - when(b.created))
   return [...new Map(shown.map((a) => [a.filename, a])).values()].map(file)
@@ -73,7 +80,7 @@ if (input.do === "hear") {
       const f = issue.fields || {}
       add(when(f.created), "issue:" + issue.id, issue.key, f.reporter, (f.summary || "") + "\n\n" + (f.description || ""), [])
       // An answer is a public comment, so what only some can read is not heard.
-      for (const c of ((f.comment && f.comment.comments) || []).filter(open)) add(when(c.created), "comment:" + c.id, issue.key, c.author, c.body || "", linked(f.attachment || [], c.body || ""))
+      for (const c of ((f.comment && f.comment.comments) || []).filter(open)) add(when(c.created), "comment:" + c.id, issue.key, c.author, c.body || "", linked(shared(f), c.body || ""))
     }
     token = found.nextPageToken
     if (!token || found.isLast) break
@@ -86,7 +93,7 @@ if (input.do === "hear") {
     else if (!waiting.some((w) => w.chat === t.issue)) hear(message(t.issue, t.from, t.text, t.id, t.files))
   }
   // An opened issue is heard once nobody has changed it for settle, as it is then,
-  // with its files, except one that only a restricted comment names.
+  // with its shared files.
   const still = []
   for (const w of waiting) {
     const f = (call("GET", "/issue/" + encodeURIComponent(w.chat), { query: { fields: "summary,description,updated,attachment,comment" }, maybe: true }) || {}).fields
@@ -95,11 +102,7 @@ if (input.do === "hear") {
       still.push(w)
       continue
     }
-    const comments = (f.comment && f.comment.comments) || []
-    const everyone = [f.description || ""].concat(comments.filter(open).map((c) => c.body || "")).join("\n")
-    const some = comments.filter((c) => !open(c)).map((c) => c.body || "").join("\n")
-    const files = (f.attachment || []).filter((a) => names(everyone, a) || !names(some, a)).map(file)
-    hear(message(w.chat, w.from, (f.summary || "") + "\n\n" + (f.description || ""), w.at, files))
+    hear(message(w.chat, w.from, (f.summary || "") + "\n\n" + (f.description || ""), w.at, shared(f).map(file)))
   }
   for (const m of heard) emit("message", m)
   if (!things.length) return { cursor: Object.assign({}, input.cursor, { waiting: still }) }
