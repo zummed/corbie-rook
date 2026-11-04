@@ -114,7 +114,7 @@ A conversation is a run. Its messages are answered one at a time, each by a new 
 | Run | Its title |
 |---|---|
 | a conversation | where it is and the first line said: `#help: …`, `dm: …`, `#7 …` for a GitLab issue, `OPS-1 …` for a Jira one |
-| a message | where it was said, and all of it |
+| a message | all that was said |
 | an agent answering | the asker's name and what they said |
 | a question, a form | the first line of what is asked |
 | an approval | `Approve`, the tools held, and what the asker said |

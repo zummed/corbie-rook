@@ -23,11 +23,13 @@ if (input.do === "hear") {
   const settle = seconds(input.settle)
   const heard = []
   const me = call("GET", "/user")
-  const named = new RegExp("(^|[^\\w@])@" + me.username.replace(/[.\-]/g, "\\$&") + "(?![\\w.-])")
+  const mention = new RegExp("(^|[^\\w@])@" + me.username.replace(/[.\-]/g, "\\$&") + "(?![\\w.-])", "g")
   // hear keeps a message that names the bot, and with overhear one that does
   // not, marked unaddressed.
   const hear = (message) => {
-    if (named.test(message.text)) heard.push(message)
+    const named = message.text.search(mention) >= 0
+    message.text = message.text.replace(mention, "$1").trim()
+    if (named) heard.push(message)
     else if (input.overhear) heard.push(Object.assign(message, { unaddressed: true }))
   }
   for (const p of input.projects) {

@@ -160,7 +160,7 @@ func TestChatAnswersOneMessageAtATime(t *testing.T) {
 		"telegram-bridge": {"Telegram bridge"},
 		"telegram":        {"Telegram listener"},
 		"chat":            {"dm: hello", "dm: one"},
-		"message":         {"dm: hello", "dm: one", "dm: two"},
+		"message":         {"hello", "one", "two"},
 	})
 }
 
