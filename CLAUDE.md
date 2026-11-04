@@ -5,7 +5,7 @@ Rook is ready-made Corbie machines: bridges for Telegram, Slack, GitLab and Jira
 ## Where to start
 
 - `DESIGN.md`: the design. It and `README.md` are pages of the manual the program carries.
-- `rook.txt`: the page a model is told when it connects to `corbie rook mcp`.
+- `rook.txt`: the page a model is told when `corbie mcp` allows it `rook init`.
 - `shipped/`: what is written into a project's `.rook/`. `starter/`: a project's first files. `bridges/`: the file that starts each bridge.
 - `rook.go`: what writes them.
 
