@@ -1,4 +1,4 @@
-Rook project: you make a directory a bot that answers people on Telegram, Slack, GitLab and Jira, and change it by changing its files.
+Rook project: you make a project directory for a bot that answers people on Telegram, Slack, GitLab and Jira, and change the bot by changing its files.
 
 Rook is ready-made Corbie machines. `corbie rook init` writes them into the
 project's `.rook/`, and the project's own files say who gets which agent and
@@ -30,7 +30,8 @@ Start a project
     corbie run submit bridges
 
 `corbie ui` shows each run and what waits on a person. Its Parts page shows
-each part, the agents that open it, and which of its tools wait for a yes.
+each part, the agents that open it, and which of its tools have
+`approve: true`.
 
 After a change
 --------------
@@ -39,7 +40,9 @@ Corbie reads the project's files only when they are submitted. After changing
 any file, run in the project:
 
   corbie run submit . --check             reads every machine, and starts nothing
-  corbie run submit bridges schedules     starts each bridge whose files changed; leave out schedules if there is no schedules/
+  corbie run submit bridges schedules     starts each bridge and schedule whose files changed
+
+Leave out `schedules` when the project has no `schedules/`.
 
 A bridge reads every file it names, down to the agents and parts, so a change
 to any of them starts the bridge again. A conversation already under way
@@ -49,8 +52,8 @@ one.
 After updating Rook, run `corbie rook init .` in the project. It rewrites
 `.rook/`, writes any file it needs that the project lacks, and names the
 project's files that are not as this version starts a project. `corbie rook
-manual rook-starter` shows how it starts them: take what you want of them,
-then check and submit.
+manual rook-starter` shows those files as this version writes them. Copy what
+you want, then run the two commands above.
 
 What a project holds
 --------------------
@@ -76,7 +79,7 @@ Common changes
 - To add a tool, add a part under `parts/` and name it under `open:` in an
   agent's file. A tool that changes something gets `approve: true`, its part
   gets the `ask:` that `parts/messages/part.yaml` has, and `approve:` in
-  `rules.yaml` names who says yes under the part's name.
+  `rules.yaml` names who approves, under the part's name.
 - To add an agent, add its file to `agents/` and a line to `rules.yaml`. Then
   give it a stage in `answer.yaml`, and add that stage to `output:` there.
 - To answer with a machine of your own, add it as an agent is added. It takes
@@ -90,12 +93,13 @@ Common changes
 - To answer replies in a Slack thread without being named, add
   `overhear: true` to the input in `bridges/slack.yaml`. A reply in a thread
   the bot has said something in, from someone who gets an agent there, then
-  goes to `attend.yaml`, which says no until you change it.
-- To hear every issue and comment on GitLab or Jira, add `overhear: true` to
-  the input in the bridge's file.
-- To have `attend.yaml` say yes to some messages, name
-  `.rook/attend/model.yaml` in it to ask a small model, or a machine of your
-  own.
+  goes to `attend.yaml`, which gives `{ answer: false }` by default.
+- To hear every public issue and comment on GitLab or Jira, add
+  `overhear: true` to the input in the bridge's file. One that does not name
+  the bot then goes to `attend.yaml`.
+- To answer some of those messages, set the job in `attend.yaml` to
+  `.rook/attend/model.yaml`, which asks a small model, or to a machine of
+  your own.
 - To wait until an issue is finished being written, add `settle: 2m` to the
   input in `bridges/gitlab.yaml` or `bridges/jira.yaml`. An opened issue is
   then heard once nobody has changed it for two minutes.

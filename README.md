@@ -1,6 +1,6 @@
 # Rook
 
-Rook is ready-made [Corbie](https://github.com/zummed/corbie) machines for a bot that answers people on Telegram, Slack, GitLab issues and Jira issues, with agents, approvals and a list of who gets what. `corbie rook init` writes them into a project, Corbie runs them, and the machines are yours to read and change.
+Rook is ready-made [Corbie](https://github.com/zummed/corbie) machines for a bot that answers people on Telegram, Slack, GitLab issues and Jira issues, with agents, approvals and a list of who gets what. `corbie rook init` writes them into a project's `.rook/`, Corbie runs them, and the project's own files say who gets which agent and what each agent can do.
 
 ## Start
 

@@ -108,7 +108,7 @@ func TestEveryPageIsWrittenAsCorbiesAre(t *testing.T) {
 		if title, sentence, ok := strings.Cut(first, ": "); !ok || title == "" || !strings.HasSuffix(sentence, ".") || page.Summary != first {
 			t.Errorf("%s begins %q", page.Name, first)
 		}
-		if page.Name != "rook" && page.Name != "rook-starter" && !strings.Contains(page.Text, "\nReference\n---------\n") {
+		if page.Name != "rook-starter" && !strings.Contains(page.Text, "\nReference\n---------\n") {
 			t.Errorf("%s has no Reference", page.Name)
 		}
 		if strings.Contains(page.Text, "\n## ") || strings.Contains(page.Text, "|---") || strings.Contains(page.Text, "\n```yaml") {
