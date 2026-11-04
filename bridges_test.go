@@ -354,12 +354,6 @@ func (gl *gitlab) said() []string {
 	return append([]string{}, gl.notes...)
 }
 
-func (gl *gitlab) uploaded() []upload {
-	gl.mu.Lock()
-	defer gl.mu.Unlock()
-	return append([]upload{}, gl.uploads...)
-}
-
 func (gl *gitlab) asked() int {
 	gl.mu.Lock()
 	defer gl.mu.Unlock()

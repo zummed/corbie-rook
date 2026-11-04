@@ -153,7 +153,7 @@ if (input.do === "send") {
   return { sent: "note:" + note.id }
 }
 
-// say: each chart as its table.
+// say: the text as a comment, each chart as its table.
 if (!input.text) throw new Error("there is nothing to say")
 const note = call("POST", issuePath(to) + "/notes", { json: { body: require("../../blocks/rich.js").plain(String(input.text)) } })
 return { sent: "note:" + note.id }
