@@ -1,7 +1,13 @@
+# Sends a file as a comment on a GitLab issue: `to` is project#iid. The file is
+# uploaded to the issue's project, and the comment links to it.
 flow: gitlab-send
-input: { to: string, name: string, file: blob, site: "any?", email: "any?" }
+input: { to: string, name: string, file: blob, site: string }
 stages:
-  none:
-    when: "${false}"
-    job: { script: ./gitlab.js }
-output: { sent: none }
+  send:
+    job:
+      script: ./gitlab.js
+      files: [./api.js]
+      input: { do: send, to: "${input.to}", name: "${input.name}", file: "${input.file}", site: "${input.site}" }
+      allow: ["net:${input.site}", "secret:GITLAB_TOKEN@net:${input.site}"]
+      timeout: 5m
+output: ${stages.send.output}
