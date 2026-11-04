@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -169,7 +170,7 @@ func TestTelegramPhotoIsShownToTheModel(t *testing.T) {
 	}
 }
 
-// Telegram gives a bot at most 20 MiB of a file, so a larger one is named to
+// Telegram gives a bot at most 20 MB of a file, so a larger one is named to
 // the model and not downloaded.
 func TestTelegramLargeFileIsNamedAndNotDownloaded(t *testing.T) {
 	tg := newTelegram(t)
@@ -184,30 +185,41 @@ func TestTelegramLargeFileIsNamedAndNotDownloaded(t *testing.T) {
 	}
 }
 
-// The items of an album are one message, with the caption one of them has.
-// The text sent after it is a message of its own, heard once.
-func TestTelegramAlbumIsOneMessage(t *testing.T) {
+// Each item of an album is a message of its own, with its own caption, and
+// the text sent after it is heard once.
+func TestTelegramAlbumItemsAreMessages(t *testing.T) {
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir, model := telegramProject(t, w, tg)
 	one, two := "\xff\xd8 one", "\xff\xd8 two"
 	tg.files["A1"], tg.files["A2"] = one, two
 	tg.says(
-		map[string]any{"media_group_id": "g1", "photo": photo("A1", len(one))},
-		map[string]any{"media_group_id": "g1", "caption": "which is better?", "photo": photo("A2", len(two))},
+		map[string]any{"media_group_id": "g1", "caption": "before", "photo": photo("A1", len(one))},
+		map[string]any{"media_group_id": "g1", "caption": "after", "photo": photo("A2", len(two))},
 		map[string]any{"text": "thanks"},
 	)
 	w.sync(dir)
-	w.until("two answers", func() bool { return len(tg.said()) >= 2 })
+	w.until("three answers", func() bool { return len(tg.said()) >= 3 })
 	time.Sleep(10 * interval)
-	shown := fmt.Sprint(model.Calls[0].Messages)
-	for _, want := range []string{"alice asks: which is better?", base64.StdEncoding.EncodeToString([]byte(one)), base64.StdEncoding.EncodeToString([]byte(two))} {
-		if !strings.Contains(shown, want) {
-			t.Errorf("%q is not in %s", want, shown)
+	if len(model.Calls) != 3 {
+		t.Fatalf("the model was asked %d times; want each photo, then the text", len(model.Calls))
+	}
+	// A call holds the conversation so far, so each is read by its last
+	// message, and found by its caption.
+	one64, two64 := base64.StdEncoding.EncodeToString([]byte(one)), base64.StdEncoding.EncodeToString([]byte(two))
+	var shown []string
+	for _, c := range model.Calls {
+		shown = append(shown, fmt.Sprint(c.Messages[len(c.Messages)-1]))
+	}
+	for _, want := range [][]string{{"alice asks: before", one64}, {"alice asks: after", two64}, {"alice asks: thanks"}} {
+		if !slices.ContainsFunc(shown, func(s string) bool { return strings.Contains(s, want[0]) && strings.Contains(s, want[len(want)-1]) }) {
+			t.Errorf("no call shows %q", want)
 		}
 	}
-	if len(model.Calls) != 2 || !strings.Contains(fmt.Sprint(model.Calls[1].Messages), "alice asks: thanks") {
-		t.Errorf("the model was asked %d times; want the album, then the text", len(model.Calls))
+	for _, s := range shown {
+		if strings.Contains(s, one64) && strings.Contains(s, two64) {
+			t.Errorf("a call was shown both photos: %s", s)
+		}
 	}
-	w.titled(map[string][]string{"message": {"thanks", "which is better?"}})
+	w.titled(map[string][]string{"message": {"after", "before", "thanks"}})
 }

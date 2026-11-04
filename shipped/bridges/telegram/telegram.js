@@ -25,14 +25,12 @@ function call(method, body) {
 // sets photo, and an animation also sets document, so each is taken once.
 function attachment(m) {
   if (m.photo) {
-    const p = m.photo.slice().sort((a, b) => (b.file_size || 0) - (a.file_size || 0) || b.width * b.height - a.width * a.height)[0]
+    const p = m.photo.reduce((a, b) => (b.width * b.height > a.width * a.height ? b : a))
     return { name: "photo.jpg", type: "image/jpeg", size: p.file_size, id: p.file_id }
   }
-  const kinds = { animation: ["animation.mp4", "video/mp4"], document: ["document", "application/octet-stream"], audio: ["audio.mp3", "audio/mpeg"],
-    voice: ["voice.ogg", "audio/ogg"], video: ["video.mp4", "video/mp4"], video_note: ["video_note.mp4", "video/mp4"] }
-  for (const kind in kinds) {
+  for (const kind of ["animation", "document", "audio", "voice", "video", "video_note"]) {
     const f = m[kind]
-    if (f) return { name: f.file_name || kinds[kind][0], type: f.mime_type || kinds[kind][1], size: f.file_size, id: f.file_id }
+    if (f) return { name: f.file_name || kind, type: f.mime_type || "application/octet-stream", size: f.file_size, id: f.file_id }
   }
   return null
 }
@@ -64,33 +62,14 @@ if (input.do === "hear") {
     }
     const m = u.message
     if (!m || !m.from || m.from.is_bot || m.chat.type !== "private") continue
-    let text = m.text || m.caption || ""
+    const text = m.text || m.caption || ""
     const file = attachment(m)
     if (!text && !file) continue
-    const files = file ? [file] : []
-    // An album comes as an update for each item, with one media_group_id and
-    // the caption on one item. The items that follow within a second each are
-    // taken into this message, and the first update that is not one is left
-    // for the next ask. Asking past an update tells Telegram it was heard, so
-    // a failed ask ends the album here rather than losing this message.
-    while (m.media_group_id) {
-      let next
-      try {
-        next = call("getUpdates", { offset: cursor, timeout: 1, limit: 1, allowed_updates: ask.allowed_updates })[0]
-      } catch (e) {
-        log(e.message)
-        break
-      }
-      const n = next && next.message
-      if (!n || n.chat.id !== m.chat.id || n.media_group_id !== m.media_group_id) break
-      cursor = next.update_id + 1
-      text = text || n.caption || ""
-      const more = attachment(n)
-      if (more) files.push(more)
-    }
+    // Each item of an album comes as its own update, so it is a message of
+    // its own, with its own caption.
     const message = { bridge: "telegram", text: text, chat: String(m.chat.id), from: String(m.from.id), place: "dm",
       answers: m.chat.id + ":" + m.message_id }
-    if (files.length) message.attachments = files
+    if (file) message.attachments = [file]
     emit("message", message)
   }
   return { cursor: cursor }
@@ -98,13 +77,12 @@ if (input.do === "hear") {
 
 if (input.do === "attachments") {
   // Each file's contents: getFile gives its path, downloaded with the token in
-  // the address. Telegram gives a bot at most 20 MiB of a file, so a file over
+  // the address. Telegram gives a bot at most 20 MB of a file, so a file over
   // that or input.most bytes is left as it is.
-  const most = Math.min(input.most, 20 << 20)
+  const most = Math.min(input.most, 20000000)
   return input.attachments.map((a) => {
     if (a.size > most) return { name: a.name, type: a.type, size: a.size }
     const path = call("getFile", { file_id: a.id }).file_path
-    if (!path) throw new Error("Telegram gave no path to download " + a.name)
     const reply = http.get(secrets.text`${api}/file/bot${token}/${path}`, { as: "bytes", timeout: 120 })
     if (reply.status !== 200) throw new Error("Telegram answered the download of " + a.name + " with status " + reply.status)
     return { name: a.name, type: a.type, size: a.size, file: blobs.make(reply.body, { type: a.type }) }
