@@ -37,7 +37,7 @@ func TestCorbieMCPFindsInitAndThePageRook(t *testing.T) {
 
 func TestEveryPageTheBriefingNamesIsThere(t *testing.T) {
 	text, _ := run(t, "", "manual", "rook")
-	named := regexp.MustCompile(`"([a-z-]+)"`).FindAllStringSubmatch(text, -1)
+	named := regexp.MustCompile("`corbie (?:rook )?manual\\s+([a-z-]+)`").FindAllStringSubmatch(text, -1)
 	if len(named) < 5 {
 		t.Fatalf("found only %v", named)
 	}

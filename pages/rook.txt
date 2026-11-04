@@ -1,14 +1,60 @@
 Rook: ready-made Corbie machines for a bot that answers people on Telegram, Slack, GitLab issues and Jira issues.
 
-A person has asked you to set up or change a Rook project. `corbie rook init` writes Rook's machines into the project's `.rook/`, and the project's own files fill five slots: bridges, people, attend, rules and parts.
+A person has asked you to set up or change a Rook project. `corbie rook init`
+writes Rook's machines into the project's `.rook/`, and the project's own
+files fill five slots: bridges, people, attend, rules and parts.
 
-1. Read the pages "rook-project" and "rook-design" with the manual tool before you change a project. They give the project's files, the common changes, and what each block takes and gives.
-2. Read the project's files. Read `.rook/` and change nothing in it, since `corbie rook init` rewrites it.
-3. For a Slack bridge, give the person the steps and the manifest in the page "rook-project", under The Slack app, and change the name and description to theirs.
-4. After `corbie rook init` updates a project, it names the project's files that are not as this version starts a project. Compare each with its version in the page "rook-starter", tell the person what differs and what each difference does, and change nothing until they say which to take. Then run `corbie run submit . --check`.
-5. Read Corbie's pages "definitions", "scripts" and "permissions", and the page of each machine type and plugin you use, before you write a machine. The manual gives every field and every call, so never guess one.
-6. Use Rook's blocks as jobs, and write no `key:`.
-7. Give each job only the permissions it needs, in its `allow:` list, and tell the person what you allowed.
-8. Never ask for a secret's value or write one in a file. Give the person the command `corbie controller secret set <NAME>`.
-9. The corbie tool runs in the directory the person started it in, so through it the project is `.`. Run each script you wrote that needs no secret with `corbie test`. Then run `corbie run submit . --check`, which reads every machine and starts nothing. Then `corbie run submit bridges` starts what changed, with `schedules` added if the project has that directory. Start nothing else. If these commands are not allowed to you, or the project is in another directory, give the person the commands to run in the project.
-10. Tell the person that `corbie ui`, started in the project, shows it. Its Runs page shows every run and what waits on a person, Machines draws each machine, and Parts shows each part, the agents that open it, and which of its tools wait for a yes.
+Before you change a project
+---------------------------
+
+1. Read `corbie rook manual rook-project` and `corbie rook manual
+   rook-design` with the manual tool. They give the project's files, the
+   common changes, and what each block takes and gives.
+2. Read the project's files, and read `.rook/`. Change nothing in `.rook/`,
+   since `corbie rook init` rewrites it.
+3. Read `corbie manual definitions`, `corbie manual scripts` and `corbie
+   manual permissions`, and the page of each machine type and plugin you
+   use, before you write a machine. The manual gives every field and every
+   call, so never guess one.
+
+While you write
+---------------
+
+- Use Rook's blocks as jobs, and write no `key:`.
+- Give each job only the permissions it needs, in its `allow:` list, and
+  tell the person what you allowed.
+- Never ask for a secret's value or write one in a file. Give the person the
+  command `corbie controller secret set <NAME>`.
+- For a Slack bridge, give the person the steps and the manifest under The
+  Slack app in `corbie rook manual rook-project`, with their name and
+  description.
+
+After you change a project
+--------------------------
+
+The corbie tool runs in the directory the person started it in, so through
+it the project is `.`.
+
+1. Run each script you wrote that needs no secret with `corbie test`.
+2. Run `corbie run submit . --check`, which reads every machine and starts
+   nothing.
+3. Run `corbie run submit bridges`, with `schedules` added when the project
+   has that directory. Start nothing else.
+4. Tell the person that `corbie ui`, started in the project, shows each run,
+   draws each machine, and lists each part with its tools that have
+   `approve: true`.
+
+When these commands are not allowed to you, or the project is in another
+directory, give the person the commands to run in the project.
+
+After `corbie rook init` updates a project, it names the project's files that
+are not as this version starts a project. Compare each with its version in
+`corbie rook manual rook-starter`, and tell the person what differs and what
+each difference does. Change nothing until they say which to take.
+
+Reference
+---------
+
+  corbie rook manual rook-project    making a project, and the common changes
+  corbie rook manual rook-design     the blocks, what each takes and gives, and who may do what
+  corbie rook manual rook-starter    the files this version starts a project with
