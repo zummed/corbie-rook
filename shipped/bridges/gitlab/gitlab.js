@@ -72,17 +72,22 @@ if (input.do === "hear") {
       at[p] = Math.max(at[p], e.id)
       if (e.author_id === me.id || !e.author_username) continue
       // An answer is a public note, so what only members can read is not heard.
-      // A note on an issue still waiting is read with it, as its history.
+      // A note on an issue still waiting is read with it, as its history, and
+      // the latest that names the bot is kept for when the issue is heard.
       if (e.note && issues.includes(e.note.noteable_type) && !e.note.system && !e.note.internal && !e.note.confidential) {
         const chat = p + "#" + e.note.noteable_iid
-        if (waiting.some((w) => w.chat === chat)) continue
-        hear({ bridge: "gitlab", text: String(e.note.body || "").trim(), chat: chat, from: String(e.author_username), place: p, at: e.note.id, settings: { site: input.site } })
+        const message = { bridge: "gitlab", text: String(e.note.body || "").trim(), chat: chat, from: String(e.author_username), place: p, at: e.note.id, settings: { site: input.site } }
+        const w = waiting.find((w) => w.chat === chat)
+        if (!w) hear(message)
+        else if (message.text.search(mention) >= 0) w.note = message
       } else if (!e.note && issues.includes(e.target_type) && e.action_name === "opened") {
         waiting.push({ chat: p + "#" + e.target_iid, from: String(e.author_username) })
       }
     }
   }
   // An opened issue is heard once nobody has changed it for settle, as it is then.
+  // When it does not name the bot and a note made while it waited does, that
+  // note is heard in its place.
   const still = []
   for (const w of waiting) {
     const issue = call("GET", issuePath(w.chat), { maybe: true })
@@ -92,7 +97,7 @@ if (input.do === "hear") {
       continue
     }
     const text = ((issue.title || "") + "\n\n" + (issue.description || "")).trim()
-    hear({ bridge: "gitlab", text: text, chat: w.chat, from: w.from, place: project(w.chat), settings: { site: input.site } })
+    hear(w.note && text.search(mention) < 0 ? w.note : { bridge: "gitlab", text: text, chat: w.chat, from: w.from, place: project(w.chat), settings: { site: input.site } })
   }
   // Said only now, when nothing is left to fail: a job that fails keeps the old
   // cursor, and its next ask hears the same again.

@@ -254,6 +254,44 @@ func TestGitLabHearsAnIssueOnceItSettles(t *testing.T) {
 	})
 }
 
+// An opened issue that does not name the bot, with a note that does made while
+// it waits, is answered once it settles: the note is heard, with the issue as its
+// history.
+func TestGitLabHearsANoteMadeWhileItsIssueWaits(t *testing.T) {
+	gl := newGitLab(t)
+	gl.text = "It fails."
+	gl.updated = time.Now().UTC().Format(time.RFC3339)
+	w := newWorld(t)
+	w.secret("GITLAB_TOKEN", "gl-token")
+	dir := pointed(t, "gitlab", gl.Server)
+	setSite(t, dir, "bridges/gitlab.yaml", "gitlab.example.com, projects: [group/project]", strings.TrimPrefix(gl.URL, "http://")+", projects: [group/project], settle: 2m")
+	echoing(t, dir)
+	gl.note(1, 2, "al", "before")
+	w.sync(dir)
+	w.until("the first ask", func() bool { return gl.asked() > 0 })
+	again := func() {
+		before := gl.asked()
+		w.until("GitLab asked again", func() bool {
+			w.set(w.now().Add(31 * time.Second))
+			time.Sleep(5 * interval)
+			return gl.asked() > before
+		})
+	}
+	gl.happens(2, map[string]any{"author_id": 2, "author_username": "al", "target_type": "Issue", "action_name": "opened", "target_iid": 7})
+	again()
+	gl.note(3, 2, "al", "@bot can you look?")
+	gl.mu.Lock()
+	gl.thread = []map[string]any{{"id": 3, "body": "@bot can you look?", "author": map[string]any{"username": "al"}}}
+	gl.updated = time.Now().Add(-10 * time.Minute).UTC().Format(time.RFC3339)
+	gl.mu.Unlock()
+	again()
+	w.until("the answer", func() bool { return len(gl.said()) >= 1 })
+	time.Sleep(10 * interval)
+	if got := gl.said(); len(got) != 1 || !strings.HasPrefix(got[0], "[al: Broken build") || !strings.HasSuffix(got[0], "] can you look?") {
+		t.Fatalf("the bot said %q", got)
+	}
+}
+
 // The ready-made attend asks a model, shown the thread and the message, and gives
 // its answer.
 func TestAttendAsksAModel(t *testing.T) {

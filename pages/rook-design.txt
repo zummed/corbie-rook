@@ -111,8 +111,9 @@ These settings go in a listener's input:
   settle: 2m        GitLab, Jira: hears an opened issue once nobody has changed it for 2 minutes; 0s by default
 
 A message heard by `overhear` that does not name the bot has
-`unaddressed: true`. A comment made on an issue that is still settling is not heard
-by itself, and is in the issue's history.
+`unaddressed: true`. A comment made on an issue that is still settling is in the
+issue's history. When the issue does not name the bot and such a comment does,
+the latest such comment is heard in the issue's place.
 
 A message
 ---------
