@@ -461,3 +461,227 @@ func TestTelegramAgentSendsAPhoto(t *testing.T) {
 		t.Fatalf("the bot sent %+v; want %+v", tg.uploads, want)
 	}
 }
+
+// slackAgentProject makes a project whose Slack bridge reaches the stand-in,
+// and whose helper is the starter's, with a stand-in model.
+func slackAgentProject(t *testing.T, w *world, s *slack) (string, *llmstandin.Server) {
+	t.Helper()
+	w.secret("TEST_KEY", "sk-test")
+	dir := slackProject(t, w, s)
+	model := &llmstandin.Server{Answer: func(llmstandin.Call) llmstandin.Reply { return llmstandin.Reply{Text: "seen"} }}
+	web := httptest.NewServer(model)
+	t.Cleanup(web.Close)
+	realAgent(t, dir, web.URL)
+	return dir, model
+}
+
+// An agent sends a text as a file, typed by its name, in the direct message it
+// was asked in.
+func TestSlackAgentSendsATextAsAFile(t *testing.T) {
+	s := newSlack(t)
+	w := newWorld(t)
+	dir, model := slackAgentProject(t, w, s)
+	model.Answer = sending(`{"name": "report.csv", "text": "a,b\n1,2\n"}`)
+	w.sync(dir)
+	w.until("Slack connected", s.connected)
+	s.says("a", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "ts": "3.0", "text": "the report, please"})
+	w.until("the reply", func() bool { return len(s.posted()) >= 1 })
+	want := upload{Method: "files.completeUploadExternal", To: "D1", Name: "report.csv", Type: "text/csv", Body: "a,b\n1,2\n"}
+	if len(s.shared) != 1 || s.shared[0] != want {
+		t.Fatalf("the bot sent %+v; want %+v", s.shared, want)
+	}
+	if got := s.posted()[0]["markdown_text"]; got != "sent" {
+		t.Errorf("the bot said %v", got)
+	}
+}
+
+// An agent sends back a picture it was shown, in the thread of the channel
+// message it was asked in.
+func TestSlackAgentSendsAPictureInTheThread(t *testing.T) {
+	s := newSlack(t)
+	w := newWorld(t)
+	dir, model := slackAgentProject(t, w, s)
+	setSite(t, dir, "rules.yaml", "  dm: { readers: [asker] }\n", "  dm: { readers: [asker] }\n  \"#help\": { readers: [asker] }\n")
+	model.Answer = sending(`{"name": "cat.png", "blob": "blob1"}`)
+	picture := "\x89PNG picture"
+	s.files = map[string]string{"/files/T1-F1/cat.png": picture}
+	w.sync(dir)
+	w.until("Slack connected", s.connected)
+	s.says("a", map[string]any{"type": "message", "subtype": "file_share", "channel": "C1", "channel_type": "channel", "user": "U1", "ts": "4.0", "text": "<@UBOT> send it back",
+		"files": []any{map[string]any{"id": "F1", "name": "cat.png", "mimetype": "image/png", "size": len(picture), "url_private_download": s.URL + "/files/T1-F1/cat.png"}}})
+	w.until("the reply", func() bool { return len(s.posted()) >= 1 })
+	want := upload{Method: "files.completeUploadExternal", To: "C1/4.0", Name: "cat.png", Type: "image/png", Body: picture}
+	if len(s.shared) != 1 || s.shared[0] != want {
+		t.Fatalf("the bot sent %+v; want %+v", s.shared, want)
+	}
+}
+
+// A token without the scope files:write sends nothing, and the model is given
+// Slack's refusal.
+func TestSlackAgentIsToldASendIsRefused(t *testing.T) {
+	s := newSlack(t)
+	s.noWrite = true
+	w := newWorld(t)
+	dir, model := slackAgentProject(t, w, s)
+	model.Answer = sending(`{"name": "report.csv", "text": "a,b\n"}`)
+	w.sync(dir)
+	w.until("Slack connected", s.connected)
+	s.says("a", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "ts": "3.0", "text": "the report, please"})
+	w.until("the reply", func() bool { return len(s.posted()) >= 1 })
+	if len(s.shared) != 0 {
+		t.Fatalf("the bot sent %+v", s.shared)
+	}
+	if shown := fmt.Sprint(model.Calls[1].Messages); !strings.Contains(shown, "Slack refused files.getUploadURLExternal: missing_scope") {
+		t.Errorf("the model was shown %s", shown)
+	}
+}
+
+// An agent sends a text as a file, typed by its name: it is uploaded to the
+// issue's project, and the bot's first comment on the issue links to it.
+func TestGitLabAgentSendsATextAsAFile(t *testing.T) {
+	gl := newGitLab(t)
+	w := newWorld(t)
+	_, model := gitlabProject(t, w, gl)
+	model.Answer = sending(`{"name": "report.csv", "text": "a,b\n1,2\n"}`)
+	gl.note(2, 2, "al", "@bot the report, please")
+	answered(w, gl)
+	want := upload{Method: "uploads", Field: "file", To: "group/project", Name: "report.csv", Type: "text/csv", Body: "a,b\n1,2\n"}
+	if got := gl.uploads; len(got) != 1 || got[0] != want {
+		t.Fatalf("the bot uploaded %+v; want %+v", got, want)
+	}
+	if got := gl.said(); got[0] != "[report.csv](/uploads/"+secret2+"/report.csv)" {
+		t.Errorf("the bot said %q", got)
+	}
+}
+
+// An agent sends back a picture it was shown, and the comment shows it.
+func TestGitLabAgentSendsAPicture(t *testing.T) {
+	gl := newGitLab(t)
+	picture := "\x89PNG picture"
+	gl.files = map[string]string{"/uploads/" + secret1 + "/shot.png": picture}
+	w := newWorld(t)
+	_, model := gitlabProject(t, w, gl)
+	model.Answer = sending(`{"name": "shot.png", "blob": "blob1"}`)
+	gl.note(2, 2, "al", "@bot send it back\n\n![shot](/uploads/"+secret1+"/shot.png)")
+	answered(w, gl)
+	want := upload{Method: "uploads", Field: "file", To: "group/project", Name: "shot.png", Type: "image/png", Body: picture}
+	if got := gl.uploads; len(got) != 1 || got[0] != want {
+		t.Fatalf("the bot uploaded %+v; want %+v", got, want)
+	}
+	if got := gl.said(); got[0] != "![shot.png](/uploads/"+secret2+"/shot.png)" {
+		t.Errorf("the bot said %q", got)
+	}
+}
+
+// When GitLab refuses the upload, no comment links to it, and the model is
+// told GitLab's status.
+func TestGitLabRefusedUploadIsNotCommented(t *testing.T) {
+	gl := newGitLab(t)
+	gl.full = true
+	w := newWorld(t)
+	_, model := gitlabProject(t, w, gl)
+	model.Answer = sending(`{"name": "report.csv", "text": "a,b\n"}`)
+	gl.note(2, 2, "al", "@bot the report, please")
+	answered(w, gl)
+	if got := gl.said(); !slices.Equal(got, []string{"sent"}) {
+		t.Errorf("the bot said %q", got)
+	}
+	if told := fmt.Sprint(model.Calls[1].Messages); !strings.Contains(told, "413") {
+		t.Errorf("the model was told %s", told)
+	}
+}
+
+// An agent sends a text as a file, typed by its name: it is attached to the
+// issue it was asked on, and a comment links it, before the reply.
+func TestJiraAgentSendsATextAsAFile(t *testing.T) {
+	at := time.Now().Add(time.Second)
+	j := newJira(t)
+	w, model, ask := jiraAnswering(t, j)
+	model.Answer = sending(`{"name": "report.csv", "text": "a,b\n1,2\n"}`)
+	j.comment("1", "acc-1", "[~accountid:acc-bot] the report, please", at)
+	ask()
+	w.until("the reply", func() bool { return len(j.saying()) >= 2 })
+	want := upload{Method: "attachments", Field: "file", To: "OPS-12", Name: "report.csv", Type: "text/csv", Body: "a,b\n1,2\n"}
+	if got := j.attached(); len(got) != 1 || got[0] != want {
+		t.Fatalf("the bot attached %+v; want %+v", got, want)
+	}
+	if got := j.saying(); !slices.Equal(got, []string{"[^report.csv]", "sent"}) {
+		t.Errorf("the bot said %q", got)
+	}
+}
+
+// An agent sends back a picture it was shown, and a comment shows it.
+func TestJiraAgentSendsAPicture(t *testing.T) {
+	at := time.Now().Add(time.Second)
+	picture := "\x89PNG picture"
+	j := newJira(t)
+	j.files = []map[string]any{attachment("10001", "cat.png", "image/png", len(picture), "acc-1", at)}
+	j.contents = map[string]string{"10001": picture}
+	w, model, ask := jiraAnswering(t, j)
+	model.Answer = sending(`{"name": "cat.png", "blob": "blob1"}`)
+	j.comment("1", "acc-1", "[~accountid:acc-bot] send it back !cat.png!", at)
+	ask()
+	w.until("the reply", func() bool { return len(j.saying()) >= 2 })
+	want := upload{Method: "attachments", Field: "file", To: "OPS-12", Name: "cat.png", Type: "image/png", Body: picture}
+	if got := j.attached(); len(got) != 1 || got[0] != want {
+		t.Fatalf("the bot attached %+v; want %+v", got, want)
+	}
+	if got := j.saying(); got[0] != "!cat.png!" {
+		t.Errorf("the bot said %q", got)
+	}
+}
+
+// A file Jira refuses is named in no comment, and the model is told Jira's
+// status.
+func TestJiraRefusedFileIsNotNamed(t *testing.T) {
+	at := time.Now().Add(time.Second)
+	j := newJira(t)
+	j.largest = 4
+	w, model, ask := jiraAnswering(t, j)
+	model.Answer = sending(`{"name": "report.csv", "text": "a,b\n1,2\n"}`)
+	j.comment("1", "acc-1", "[~accountid:acc-bot] the report, please", at)
+	ask()
+	w.until("the reply", func() bool { return len(j.saying()) >= 1 })
+	if got := j.saying(); !slices.Equal(got, []string{"sent"}) {
+		t.Errorf("the bot said %q", got)
+	}
+	if told := fmt.Sprint(model.Calls[1].Messages); !strings.Contains(told, "Jira answered POST /issue/OPS-12/attachments with 413") {
+		t.Errorf("the model was told %s", told)
+	}
+}
+
+// A name is sent with each [, ], |, ! and ^ as _, and the comment names the
+// file as Jira keeps it, which may differ.
+func TestJiraCommentNamesTheFileAsJiraKeepsIt(t *testing.T) {
+	at := time.Now().Add(time.Second)
+	j := newJira(t)
+	j.stored = "report (1).csv"
+	w, model, ask := jiraAnswering(t, j)
+	model.Answer = sending(`{"name": "report [1].csv", "text": "a,b\n1,2\n"}`)
+	j.comment("1", "acc-1", "[~accountid:acc-bot] the report, please", at)
+	ask()
+	w.until("the reply", func() bool { return len(j.saying()) >= 2 })
+	if got := j.attached(); len(got) != 1 || got[0].Name != "report _1_.csv" {
+		t.Fatalf("the bot attached %+v", got)
+	}
+	if got := j.saying(); got[0] != "[^report (1).csv]" {
+		t.Errorf("the bot said %q", got)
+	}
+}
+
+// An image Jira does not show in a comment, such as an SVG, is linked.
+func TestJiraOtherImageIsLinked(t *testing.T) {
+	at := time.Now().Add(time.Second)
+	j := newJira(t)
+	w, model, ask := jiraAnswering(t, j)
+	model.Answer = sending(`{"name": "logo.svg", "text": "<svg/>"}`)
+	j.comment("1", "acc-1", "[~accountid:acc-bot] the logo, please", at)
+	ask()
+	w.until("the reply", func() bool { return len(j.saying()) >= 2 })
+	if got := j.attached(); len(got) != 1 || got[0].Type != "image/svg+xml" {
+		t.Fatalf("the bot attached %+v", got)
+	}
+	if got := j.saying(); got[0] != "[^logo.svg]" {
+		t.Errorf("the bot said %q", got)
+	}
+}

@@ -355,6 +355,12 @@ includes.
   tools `progress`, `send` and `form`.
 - The tool `send` sends a file where the message came from, at once: a blob
   the agent has, or a text it writes, under a name such as `report.csv`.
+
+  Telegram    a photo for a PNG, JPEG or WebP of at most 10 MB, and a document otherwise
+  Slack       a file in the conversation or thread, which the bot sends with the scope files:write
+  GitLab      a comment that links the file, uploaded to the issue's project
+  Jira        an attachment on the issue, and a comment that shows a PNG, JPEG or GIF and links any other
+
 - `${input.format}` in the system text says how to write for the bridge the
   message came from.
 - A part's script can call GitLab or Jira through the bridge's `api.js`. Its
