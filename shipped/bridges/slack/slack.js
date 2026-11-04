@@ -154,9 +154,10 @@ if (input.do === "attachments") {
 if (input.do === "send") {
   // A file in a conversation or its thread, which needs the scope files:write.
   // Slack gives an address on files.slack.com that takes the file's bytes with
-  // no token, then shares the file where it is told.
+  // no token, then shares the file where it is told. A person's member id, as
+  // lookup.yaml gives, is sent to in their direct message with the bot.
   const [to, thread] = String(input.to).split("/")
-  const channel = named(to)
+  const channel = /^[UW]/.test(to) ? call("conversations.open", { users: to }).channel.id : named(to)
   const at = call("files.getUploadURLExternal", null, { filename: input.name, length: String(input.file.size) })
   const reply = http.post(at.upload_url, { body: input.file, timeout: 240 })
   if (reply.status !== 200) throw new Error("Slack answered the upload of " + input.name + " with status " + reply.status)

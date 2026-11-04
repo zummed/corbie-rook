@@ -445,7 +445,7 @@ func TestTelegramAgentSendsATextAsAFile(t *testing.T) {
 	}
 }
 
-// An agent sends back a picture it was shown, as a photo.
+// An agent sends back a picture it was shown.
 func TestTelegramAgentSendsAPhoto(t *testing.T) {
 	tg := newTelegram(t)
 	w := newWorld(t)
@@ -456,7 +456,7 @@ func TestTelegramAgentSendsAPhoto(t *testing.T) {
 	tg.says(map[string]any{"caption": "send it back", "photo": photo("P1", len(cat))})
 	w.sync(dir)
 	w.until("the reply", func() bool { return len(tg.said()) >= 1 })
-	want := upload{Method: "sendPhoto", Field: "photo", To: "1", Name: "cat.jpg", Type: "image/jpeg", Body: cat}
+	want := upload{Method: "sendDocument", Field: "document", To: "1", Name: "cat.jpg", Type: "image/jpeg", Body: cat}
 	if len(tg.uploads) != 1 || tg.uploads[0] != want {
 		t.Fatalf("the bot sent %+v; want %+v", tg.uploads, want)
 	}
@@ -683,5 +683,26 @@ func TestJiraOtherImageIsLinked(t *testing.T) {
 	}
 	if got := j.saying(); got[0] != "[^logo.svg]" {
 		t.Errorf("the bot said %q", got)
+	}
+}
+
+// A machine sends a file to a person by the address lookup.yaml gives, their
+// member id, and Slack puts it in their direct message with the bot.
+func TestSlackSendsAFileToAPerson(t *testing.T) {
+	s := newSlack(t)
+	w := newWorld(t)
+	dir := slackProject(t, w, s)
+	machine := "flow: report\nstages:\n  send:\n    job: { machine: .rook/blocks/send.yaml, input: { address: { bridge: slack, id: U1 }, name: report.csv, text: \"a,b\\n\" } }\n"
+	if err := os.WriteFile(filepath.Join(dir, "on", "report.yaml"), []byte(machine), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w.sync(dir)
+	w.until("the file shared", func() bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return len(s.shared) == 1
+	})
+	if want := (upload{Method: "files.completeUploadExternal", To: "D9", Name: "report.csv", Type: "text/csv", Body: "a,b\n"}); s.shared[0] != want {
+		t.Fatalf("the bot sent %+v; want %+v", s.shared[0], want)
 	}
 }

@@ -148,7 +148,7 @@ if (to.lastIndexOf("#") < 0) throw new Error("GitLab has no issue " + to)
 if (input.do === "send") {
   // The file is uploaded to the issue's project, and the comment is the link
   // GitLab gives for it.
-  const file = call("POST", "/projects/" + encodeURIComponent(project(to)) + "/uploads", { upload: { file: { data: input.file, name: input.name, type: input.file.type } }, timeout: 120 })
+  const file = call("POST", "/projects/" + encodeURIComponent(project(to)) + "/uploads", { upload: { file: { data: input.file, name: input.name } }, timeout: 120 })
   const note = call("POST", issuePath(to) + "/notes", { json: { body: file.markdown } })
   return { sent: "note:" + note.id }
 }

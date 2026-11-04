@@ -152,7 +152,7 @@ if (input.do === "send") {
   // it. Each [, ], |, ! and ^ in the name is sent as _, since they end the markup.
   const issue = "/issue/" + encodeURIComponent(String(input.to))
   const plain = String(input.name).replace(/[\[\]|!^]/g, "_")
-  const name = call("POST", issue + "/attachments", { upload: { file: { data: input.file, name: plain, type: input.file.type } }, headers: { "X-Atlassian-Token": "no-check" }, timeout: 120 })[0].filename
+  const name = call("POST", issue + "/attachments", { upload: { file: { data: input.file, name: plain } }, headers: { "X-Atlassian-Token": "no-check" }, timeout: 120 })[0].filename
   const shown = /^image\/(png|jpeg|gif)$/.test(input.file.type) ? "!" + name + "!" : "[^" + name + "]"
   return { sent: "comment:" + call("POST", issue + "/comment", { json: { body: shown } }).id }
 }

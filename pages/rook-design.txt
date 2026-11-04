@@ -230,8 +230,8 @@ directory.
 - On Slack, an address's `id` may be a channel's `#name`.
 - `chat.yaml` gives the address of each message, and `lookup.yaml` with
   `do: reach` gives one for each person.
-- A message's address can be a channel or an issue, so it goes to `say.yaml`
-  and `status.yaml`. On Slack, its `id` can go to `ask.yaml` as `in`.
+- A message's address can be a channel or an issue, so it goes to `say.yaml`,
+  `send.yaml` and `status.yaml`. On Slack, its `id` can go to `ask.yaml` as `in`.
 - `ask.yaml` takes people by name, as `lookup.yaml` knows them.
 - On `status.yaml`, an empty text clears the status on Slack, and Telegram's
   "typing" ends by itself. A status that fails gives `{ shown: false }`, and
@@ -356,7 +356,7 @@ includes.
 - The tool `send` sends a file where the message came from, at once: a blob
   the agent has, or a text it writes, under a name such as `report.csv`.
 
-  Telegram    a photo for a PNG, JPEG or WebP of at most 10 MB, and a document otherwise
+  Telegram    a document, which Telegram shows with a preview when it is an image
   Slack       a file in the conversation or thread, which the bot sends with the scope files:write
   GitLab      a comment that links the file, uploaded to the issue's project
   Jira        an attachment on the issue, and a comment that shows a PNG, JPEG or GIF and links any other

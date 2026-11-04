@@ -7,11 +7,11 @@ const api = "https://api.telegram.org"
 const token = secrets.get(input.token)
 
 // call calls a method of the Bot API and gives its result, sending body as
-// JSON, or with upload as a form that holds a file. Telegram's refusal is
+// JSON, or with upload as a form that holds a file, which may take four minutes. Telegram's refusal is
 // thrown with its words, so the job fails and says why. No error holds the
 // address called, since it holds the token.
 function call(method, body, upload) {
-  const reply = http.post(secrets.text`${api}/bot${token}/${method}`, Object.assign(upload ? { upload: body } : { json: body }, { as: "text", timeout: 70 }))
+  const reply = http.post(secrets.text`${api}/bot${token}/${method}`, upload ? { upload: body, as: "text", timeout: 240 } : { json: body, as: "text", timeout: 70 })
   let answer
   try {
     answer = JSON.parse(reply.body)
@@ -90,11 +90,9 @@ if (input.do === "attachments") {
 }
 
 if (input.do === "send") {
-  // A file in the chat: an image Telegram shows, of at most 10 MB, as a photo,
-  // and any other as a document.
-  const photo = /^image\/(jpeg|png|webp)$/.test(input.file.type) && input.file.size <= 10000000
-  const field = photo ? "photo" : "document"
-  const m = call(photo ? "sendPhoto" : "sendDocument", { chat_id: String(input.to), [field]: { data: input.file, name: input.name, type: input.file.type } }, true)
+  // A file in the chat, as a document, which Telegram shows an image of. A
+  // photo is not used: Telegram refuses one past 10 MB or of an odd shape.
+  const m = call("sendDocument", { chat_id: String(input.to), document: { data: input.file, name: input.name } }, true)
   return { sent: input.to + ":" + m.message_id }
 }
 

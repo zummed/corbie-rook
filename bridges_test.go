@@ -145,7 +145,7 @@ func (tg *telegram) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reply := func(result any) { json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": result}) }
-	if method == "sendPhoto" || method == "sendDocument" {
+	if method == "sendDocument" {
 		u, err := uploaded(r, method, "chat_id")
 		if err != nil {
 			fmt.Fprintf(w, `{"ok": false, "error_code": 400, "description": %q}`, err.Error())
