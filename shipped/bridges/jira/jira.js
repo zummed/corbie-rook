@@ -1,6 +1,6 @@
-// Jira's script: input.do is hear, for listen.yaml, say, for say.yaml, or history,
-// for history.yaml. It speaks the REST API of the Jira Cloud at input.site through
-// api.js.
+// Jira's script: input.do is hear, for listen.yaml, say, for say.yaml, history,
+// for history.yaml, or attachments, for attachments.yaml. It speaks the REST API
+// of the Jira Cloud at input.site through api.js.
 const call = require("./api.js").api(input.site, input.email)
 
 // open says everyone who can read the issue can read a comment: one with a
@@ -10,6 +10,20 @@ const open = (c) => !c.visibility && c.jsdPublic !== false
 
 // when reads one of Jira's times, as 2026-10-05T09:00:00.000+0000.
 const when = (text) => Date.parse(String(text).replace(/([+-]\d\d)(\d\d)$/, "$1:$2"))
+
+// file describes one of an issue's attachments for a message.
+const file = (a) => ({ name: a.filename, type: a.mimeType || "application/octet-stream", size: a.size, id: String(a.id) })
+
+// names says whether wiki markup shows a file, as !name! or !name|…!, or links to
+// it, as [^name]. An external image, as !https://…!, names no file.
+const names = (body, a) => ["!" + a.filename + "!", "!" + a.filename + "|", "[^" + a.filename + "]"].some((s) => body.includes(s))
+
+// linked gives the issue's files a comment names. Of two with one name, it gives
+// the newest.
+function linked(files, body) {
+  const shown = files.filter((a) => names(body, a)).sort((a, b) => when(a.created) - when(b.created))
+  return [...new Map(shown.map((a) => [a.filename, a])).values()].map(file)
+}
 
 // seconds reads a length of time: a number with s, m or h.
 function seconds(text) {
@@ -38,24 +52,28 @@ if (input.do === "hear") {
     if (named) heard.push(message)
     else if (input.overhear) heard.push(Object.assign(message, { unaddressed: true }))
   }
-  const message = (issue, from, text, at) => ({ bridge: "jira", text: text, chat: issue, at: at, from: from, place: issue.slice(0, issue.lastIndexOf("-")), settings: { site: input.site, email: input.email } })
+  const message = (issue, from, text, at, files) => {
+    const m = { bridge: "jira", text: text, chat: issue, at: at, from: from, place: issue.slice(0, issue.lastIndexOf("-")), settings: { site: input.site, email: input.email } }
+    if (files.length) m.attachments = files
+    return m
+  }
   const minutes = Math.ceil((now - since) / 60000) + 2
   const jql = "project in (" + input.projects.map((p) => JSON.stringify(p)).join(", ") + ") AND updated >= -" + minutes + "m ORDER BY updated ASC"
   // What came at the cursor's own moment is heard unless the job before heard it.
   const things = []
-  const add = (at, id, issue, author, text) => {
-    if (author && author.accountId !== me && (at > since || (at === since && !seen.includes(id)))) things.push({ at: at, id: id, issue: issue, from: author.accountId, text: text })
+  const add = (at, id, issue, author, text, files) => {
+    if (author && author.accountId !== me && (at > since || (at === since && !seen.includes(id)))) things.push({ at: at, id: id, issue: issue, from: author.accountId, text: text, files: files })
   }
   let token
   for (let page = 0; page < 10; page++) {
-    const query = { jql: jql, fields: "summary,description,reporter,created,comment", maxResults: "50" }
+    const query = { jql: jql, fields: "summary,description,reporter,created,comment,attachment", maxResults: "50" }
     if (token) query.nextPageToken = token
     const found = call("GET", "/search/jql", { query: query })
     for (const issue of found.issues || []) {
       const f = issue.fields || {}
-      add(when(f.created), "issue:" + issue.id, issue.key, f.reporter, (f.summary || "") + "\n\n" + (f.description || ""))
+      add(when(f.created), "issue:" + issue.id, issue.key, f.reporter, (f.summary || "") + "\n\n" + (f.description || ""), [])
       // An answer is a public comment, so what only some can read is not heard.
-      for (const c of ((f.comment && f.comment.comments) || []).filter(open)) add(when(c.created), "comment:" + c.id, issue.key, c.author, c.body || "")
+      for (const c of ((f.comment && f.comment.comments) || []).filter(open)) add(when(c.created), "comment:" + c.id, issue.key, c.author, c.body || "", linked(f.attachment || [], c.body || ""))
     }
     token = found.nextPageToken
     if (!token || found.isLast) break
@@ -65,18 +83,23 @@ if (input.do === "hear") {
   // its history.
   for (const t of things) {
     if (t.id.startsWith("issue:")) waiting.push({ chat: t.issue, from: t.from, at: t.id })
-    else if (!waiting.some((w) => w.chat === t.issue)) hear(message(t.issue, t.from, t.text, t.id))
+    else if (!waiting.some((w) => w.chat === t.issue)) hear(message(t.issue, t.from, t.text, t.id, t.files))
   }
-  // An opened issue is heard once nobody has changed it for settle, as it is then.
+  // An opened issue is heard once nobody has changed it for settle, as it is then,
+  // with its files, except one that only a restricted comment names.
   const still = []
   for (const w of waiting) {
-    const f = (call("GET", "/issue/" + encodeURIComponent(w.chat), { query: { fields: "summary,description,updated" }, maybe: true }) || {}).fields
+    const f = (call("GET", "/issue/" + encodeURIComponent(w.chat), { query: { fields: "summary,description,updated,attachment,comment" }, maybe: true }) || {}).fields
     if (!f) continue
     if (now - when(f.updated) < settle * 1000) {
       still.push(w)
       continue
     }
-    hear(message(w.chat, w.from, (f.summary || "") + "\n\n" + (f.description || ""), w.at))
+    const comments = (f.comment && f.comment.comments) || []
+    const everyone = [f.description || ""].concat(comments.filter(open).map((c) => c.body || "")).join("\n")
+    const some = comments.filter((c) => !open(c)).map((c) => c.body || "").join("\n")
+    const files = (f.attachment || []).filter((a) => names(everyone, a) || !names(some, a)).map(file)
+    hear(message(w.chat, w.from, (f.summary || "") + "\n\n" + (f.description || ""), w.at, files))
   }
   for (const m of heard) emit("message", m)
   if (!things.length) return { cursor: Object.assign({}, input.cursor, { waiting: still }) }
@@ -106,6 +129,17 @@ if (input.do === "history") {
     if (Number(c.id) < id) lines.push(name(c.author || {}) + ": " + c.body)
   }
   return lines.length ? require("../../blocks/thread.js").text(lines) : null
+}
+
+if (input.do === "attachments") {
+  // Each file's contents, read from the site itself: by default Jira answers with
+  // a redirect to another host, which the token may not go to, so the call asks
+  // for none and follows none. A file over input.most bytes is left as it is.
+  return input.attachments.map((a) => {
+    if (a.size > input.most) return { name: a.name, type: a.type, size: a.size }
+    const bytes = call("GET", "/attachment/content/" + encodeURIComponent(a.id), { query: { redirect: "false" }, redirects: false, as: "bytes", timeout: 120 })
+    return { name: a.name, type: a.type, size: a.size, file: blobs.make(bytes, { type: a.type }) }
+  })
 }
 
 // say: a comment on the issue, in parts Jira takes, each chart as its table.
