@@ -146,11 +146,14 @@ if (input.do === "attachments") {
 }
 
 if (input.do === "send") {
-  // The file attached to the issue, then a comment that shows it, as !name! for an
-  // image and [^name] for any other, so the issue's readers see it.
+  // The file attached to the issue, then a comment that shows it, so the issue's
+  // readers see it: !name! for a PNG, JPEG or GIF, which Jira shows in the
+  // comment, and [^name] for any other. The comment names the file as Jira keeps
+  // it. Each [, ], |, ! and ^ in the name is sent as _, since they end the markup.
   const issue = "/issue/" + encodeURIComponent(String(input.to))
-  const name = call("POST", issue + "/attachments", { upload: { file: { data: input.file, name: input.name, type: input.file.type } }, headers: { "X-Atlassian-Token": "no-check" }, timeout: 120 })[0].filename
-  const shown = /^image\//.test(input.file.type) ? "!" + name + "!" : "[^" + name + "]"
+  const plain = String(input.name).replace(/[\[\]|!^]/g, "_")
+  const name = call("POST", issue + "/attachments", { upload: { file: { data: input.file, name: plain, type: input.file.type } }, headers: { "X-Atlassian-Token": "no-check" }, timeout: 120 })[0].filename
+  const shown = /^image\/(png|jpeg|gif)$/.test(input.file.type) ? "!" + name + "!" : "[^" + name + "]"
   return { sent: "comment:" + call("POST", issue + "/comment", { json: { body: shown } }).id }
 }
 

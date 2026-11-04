@@ -456,6 +456,7 @@ type jira struct {
 	downloads []string          // each file's id, as it is downloaded
 	uploads   []upload          // each file the bot attached, in order
 	largest   int               // the largest file Jira takes, in bytes; by default any
+	stored    string            // the name Jira keeps a file under; by default the name it was sent
 }
 
 func newJira(t *testing.T) *jira {
@@ -515,7 +516,11 @@ func (j *jira) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		u.To = "OPS-12"
 		j.uploads = append(j.uploads, u)
-		json.NewEncoder(w).Encode([]any{map[string]any{"id": fmt.Sprint(20000 + len(j.uploads)), "filename": u.Name, "mimeType": u.Type, "size": len(u.Body)}})
+		stored := u.Name
+		if j.stored != "" {
+			stored = j.stored
+		}
+		json.NewEncoder(w).Encode([]any{map[string]any{"id": fmt.Sprint(20000 + len(j.uploads)), "filename": stored, "mimeType": u.Type, "size": len(u.Body)}})
 	case r.Method == "POST" && r.URL.Path == "/rest/api/2/issue/OPS-12/comment":
 		var body struct{ Body string }
 		json.NewDecoder(r.Body).Decode(&body)

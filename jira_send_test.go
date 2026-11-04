@@ -66,3 +66,39 @@ func TestJiraRefusedFileIsNotNamed(t *testing.T) {
 		t.Errorf("the model was told %s", told)
 	}
 }
+
+// A name is sent with each [, ], |, ! and ^ as _, and the comment names the
+// file as Jira keeps it, which may differ.
+func TestJiraCommentNamesTheFileAsJiraKeepsIt(t *testing.T) {
+	at := time.Now().Add(time.Second)
+	j := newJira(t)
+	j.stored = "report (1).csv"
+	w, model, ask := jiraAnswering(t, j)
+	model.Answer = sending(`{"name": "report [1].csv", "text": "a,b\n1,2\n"}`)
+	j.comment("1", "acc-1", "[~accountid:acc-bot] the report, please", at)
+	ask()
+	w.until("the reply", func() bool { return len(j.saying()) >= 2 })
+	if got := j.attached(); len(got) != 1 || got[0].Name != "report _1_.csv" {
+		t.Fatalf("the bot attached %+v", got)
+	}
+	if got := j.saying(); got[0] != "[^report (1).csv]" {
+		t.Errorf("the bot said %q", got)
+	}
+}
+
+// An image Jira does not show in a comment, such as an SVG, is linked.
+func TestJiraOtherImageIsLinked(t *testing.T) {
+	at := time.Now().Add(time.Second)
+	j := newJira(t)
+	w, model, ask := jiraAnswering(t, j)
+	model.Answer = sending(`{"name": "logo.svg", "text": "<svg/>"}`)
+	j.comment("1", "acc-1", "[~accountid:acc-bot] the logo, please", at)
+	ask()
+	w.until("the reply", func() bool { return len(j.saying()) >= 2 })
+	if got := j.attached(); len(got) != 1 || got[0].Type != "image/svg+xml" {
+		t.Fatalf("the bot attached %+v", got)
+	}
+	if got := j.saying(); got[0] != "[^logo.svg]" {
+		t.Errorf("the bot said %q", got)
+	}
+}
