@@ -17,7 +17,7 @@ tools:
     args: { text: string }
     job: { machine: .rook/blocks/status.yaml, input: { address: "${input.address}", text: "${args.text}" } }
   look:
-    does: "Get a file from earlier in the thread, one of earlier, by its id: you are shown an image or PDF, and any other file is a blob handle. When the person may mean one of these files, as with 'the screenshot', 'that' or 'above', look at it before answering; never guess what a file holds. Gives nothing for an id not in earlier."
+    does: "Get a file from earlier in the thread, one of earlier, by its id: you are shown an image or PDF, and any other file is a blob handle. When the person may mean one of these files, as with 'the screenshot', 'that' or 'above', look at it before answering; never guess what a file holds. A file it cannot download comes back without contents, and an id not in earlier gives nothing."
     args: { id: string }
     job: { machine: .rook/blocks/attachments.yaml, input: { address: "${input.address}", attachments: "${(input.earlier || []).filter((a) => a.id === args.id)}" } }
   send:

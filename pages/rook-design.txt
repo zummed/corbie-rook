@@ -158,15 +158,17 @@ time, each with a new agent given the conversation so far.
 - When `corbie run submit` starts a bridge again, its next message starts a
   new conversation, with the machines as they are then. A conversation
   already under way finishes with the machines it started with.
-- A new conversation on Slack, GitLab or Jira reads what the thread or issue
-  held before the message: the latest 20 entries, at most 8000 characters,
+- On Slack, GitLab and Jira, each message has the thread or issue read as it
+  was before the message: the latest 20 entries, at most 8000 characters,
   from the first 1000 of a Slack thread. Telegram keeps nothing a bot can
   read, so a conversation there starts with nothing.
+- A new conversation is given that history's text. Every message is given
+  its files.
 - The history holds what was said, and no tool calls or results. When the
   read fails, the message is answered with no history.
-- Every message is given the files earlier in the thread or issue as
-  `earlier`: the latest 20, without their contents. On Jira they are the
-  issue's files, but one a restricted comment names.
+- The history's files go to the agent as `earlier`: the latest 20, without
+  their contents. On Jira they are the issue's files, but one a restricted
+  comment names.
 - Rook reads nothing for a person with no agent.
 - A message's own files are downloaded only to answer it, and an earlier file
   only when the agent looks at it with the tool `look`. Each is at most 32
