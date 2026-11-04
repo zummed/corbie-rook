@@ -101,23 +101,25 @@ if (input.do === "hear") {
 }
 
 if (input.do === "history") {
-  // The issue and its comments before this one. A message that opens an issue
-  // holds the issue itself, and has only the comments made while it waited.
+  // The issue and its comments before this one, with the files each links to.
+  // A message that opens an issue holds the issue itself, and has only the
+  // comments made while it waited.
   const me = call("GET", "/user").username
   const name = (author) => (author.username === me ? "you" : author.username)
-  const lines = []
+  const entries = []
+  const entry = (author, text) => entries.push({ line: name(author || {}) + ": " + text, attachments: attachments(text, project(String(input.to))) })
   if (input.at) {
     const opened = call("GET", issuePath(String(input.to)), { maybe: true })
-    if (opened) lines.push(name(opened.author || {}) + ": " + opened.title + "\n\n" + (opened.description || ""))
+    if (opened) entry(opened.author, opened.title + "\n\n" + (opened.description || ""))
   }
   const notes = call("GET", issuePath(String(input.to)) + "/notes", { query: { sort: "desc", per_page: "30" }, maybe: true }) || []
   // An internal note is left out: the token may read it, and whoever reads the
   // answer may not.
   for (const note of notes.reverse()) {
     if (note.system || note.internal || note.confidential || (input.at && note.id >= input.at)) continue
-    lines.push(name(note.author || {}) + ": " + note.body)
+    entry(note.author, note.body)
   }
-  return lines.length ? require("../../blocks/thread.js").text(lines) : null
+  return require("../../blocks/thread.js").history(entries)
 }
 
 if (input.do === "attachments") {
@@ -132,12 +134,12 @@ if (input.do === "attachments") {
     const head = http.request(address, Object.assign({ method: "HEAD" }, options))
     if (head.status !== 200) throw new Error("GitLab answered the size of " + a.name + " with " + head.status)
     const length = Number(head.headers["content-length"])
-    if (length > input.most) return { name: a.name, type: a.type, size: length }
+    if (length > input.most) return Object.assign({}, a, { size: length })
     const reply = http.get(address, Object.assign({}, options, { as: "bytes", timeout: 120 }))
     if (reply.status !== 200) throw new Error("GitLab answered the download of " + a.name + " with " + reply.status)
     const size = reply.body.length
-    if (size > input.most) return { name: a.name, type: a.type, size: size }
-    return { name: a.name, type: a.type, size: size, file: blobs.make(reply.body, { type: a.type }) }
+    if (size > input.most) return Object.assign({}, a, { size: size })
+    return Object.assign({}, a, { size: size, file: blobs.make(reply.body, { type: a.type }) })
   })
 }
 

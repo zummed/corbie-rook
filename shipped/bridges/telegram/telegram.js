@@ -81,11 +81,11 @@ if (input.do === "attachments") {
   // Each file's contents: getFile gives its path, downloaded with the token in
   // the address. A file over input.most bytes is left as it is.
   return input.attachments.map((a) => {
-    if (a.size > input.most) return { name: a.name, type: a.type, size: a.size }
+    if (a.size > input.most) return a
     const path = call("getFile", { file_id: a.id }).file_path
     const reply = http.get(secrets.text`${api}/file/bot${token}/${path}`, { as: "bytes", timeout: 120 })
     if (reply.status !== 200) throw new Error("Telegram answered the download of " + a.name + " with status " + reply.status)
-    return { name: a.name, type: a.type, size: a.size, file: blobs.make(reply.body, { type: a.type }) }
+    return Object.assign({}, a, { file: blobs.make(reply.body, { type: a.type }) })
   })
 }
 

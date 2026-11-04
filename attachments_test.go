@@ -336,7 +336,8 @@ func TestJiraFileAloneIsAnswered(t *testing.T) {
 
 // A comment has the files it names, and of two with one name the newest. An
 // external image names no file, and one over 32 MiB is described and not
-// downloaded.
+// downloaded. A new conversation has the issue's other files too, as earlier
+// ones, after the comment's own and without them again.
 func TestJiraCommentHasTheFilesItNames(t *testing.T) {
 	at := time.Now().Add(time.Second)
 	j := newJira(t)
@@ -353,7 +354,7 @@ func TestJiraCommentHasTheFilesItNames(t *testing.T) {
 	j.comment("1", "acc-1", "[~accountid:acc-bot] wow! !cat.png! and !dog.png|thumbnail! and !https://example.com/x.png! [^film.mp4]", at)
 	ask()
 	w.until("the answer", func() bool { return len(j.saying()) >= 1 })
-	if got := j.downloaded(); !slices.Equal(got, []string{"2", "4"}) {
+	if got := j.downloaded(); !slices.Equal(got, []string{"2", "4", "1", "7", "5"}) {
 		t.Fatalf("Jira gave the files %v", got)
 	}
 	shown := fmt.Sprint(model.Calls[0].Messages)
@@ -704,5 +705,64 @@ func TestSlackSendsAFileToAPerson(t *testing.T) {
 	})
 	if want := (upload{Method: "files.completeUploadExternal", To: "D9", Name: "report.csv", Type: "text/csv", Body: "a,b\n"}); s.shared[0] != want {
 		t.Fatalf("the bot sent %+v; want %+v", s.shared[0], want)
+	}
+}
+
+// A reply in a Slack thread starts a conversation that has the files earlier in
+// the thread, marked earlier, beside its own.
+func TestSlackThreadGivesItsEarlierFiles(t *testing.T) {
+	s := newSlack(t)
+	w := newWorld(t)
+	w.secret("TEST_KEY", "sk-test")
+	dir := slackProject(t, w, s)
+	model := &llmstandin.Server{Answer: func(llmstandin.Call) llmstandin.Reply { return llmstandin.Reply{Text: "both"} }}
+	web := httptest.NewServer(model)
+	t.Cleanup(web.Close)
+	realAgent(t, dir, web.URL)
+	picture, note := "\x89PNG fox", "a sentence"
+	s.files = map[string]string{"/files/T1-F1/fox.png": picture, "/files/T1-F2/note.txt": note}
+	file := func(id, name, mimetype, body string) []any {
+		return []any{map[string]any{"id": id, "name": name, "mimetype": mimetype, "size": len(body), "url_private_download": s.URL + "/files/T1-" + id + "/" + name}}
+	}
+	s.thread = []map[string]any{{"ts": "1.0", "user": "U1", "text": "", "files": file("F1", "fox.png", "image/png", picture)}}
+	w.sync(dir)
+	w.until("Slack connected", s.connected)
+	s.says("a", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "ts": "2.0", "thread_ts": "1.0", "text": "what are these?",
+		"files": file("F2", "note.txt", "text/plain", note)})
+	w.until("the answer", func() bool { return len(s.posted()) >= 1 })
+	shown := fmt.Sprint(model.Calls[0].Messages)
+	for _, want := range []string{"note.txt", `"earlier":true`, "(files: fox.png)", base64.StdEncoding.EncodeToString([]byte(picture))} {
+		if !strings.Contains(shown, want) {
+			t.Errorf("%q is not in %s", want, shown)
+		}
+	}
+}
+
+// A comment naming the bot on an issue opened with a screenshot has the
+// screenshot, marked earlier. The conversation's next message does not get it
+// again: its model was shown it already.
+func TestGitLabIssueGivesItsEarlierFiles(t *testing.T) {
+	gl := newGitLab(t)
+	picture := "\x89PNG picture"
+	gl.files = map[string]string{"/uploads/" + secret1 + "/shot.png": picture}
+	gl.text = "It fails like this: ![shot](/uploads/" + secret1 + "/shot.png)"
+	w := newWorld(t)
+	_, model := gitlabProject(t, w, gl)
+	gl.note(2, 2, "al", "@bot what is in the screenshot?")
+	answered(w, gl)
+	shown := fmt.Sprint(model.Calls[0].Messages)
+	for _, want := range []string{`"earlier":true`, "shot.png", base64.StdEncoding.EncodeToString([]byte(picture))} {
+		if !strings.Contains(shown, want) {
+			t.Errorf("%q is not in %s", want, shown)
+		}
+	}
+	gl.note(3, 2, "al", "@bot and now?")
+	w.until("the second answer", func() bool {
+		w.set(w.now().Add(31 * time.Second))
+		time.Sleep(5 * interval)
+		return len(gl.said()) >= 2
+	})
+	if got := gl.fetched(); len(got) != 2 {
+		t.Errorf("GitLab was asked for the file %d times (%v); want once, HEAD then GET", len(got), got)
 	}
 }

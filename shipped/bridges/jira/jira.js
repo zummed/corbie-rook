@@ -112,26 +112,27 @@ if (input.do === "hear") {
 }
 
 if (input.do === "history") {
-  // The issue and its comments before this one. A message that opens an issue
-  // holds the issue itself, and has only the comments made while it waited.
+  // The issue and its comments before this one, the issue with its shared
+  // files. A message that opens an issue holds the issue itself and its files,
+  // and has only the comments made while it waited.
   const at = String(input.at || "")
   const comment = at.startsWith("comment:")
   const id = comment ? Number(at.slice("comment:".length)) : Infinity
   const issue = "/issue/" + encodeURIComponent(String(input.to))
   const me = call("GET", "/myself").accountId
   const name = (author) => (author.accountId === me ? "you" : author.displayName || author.accountId)
-  const lines = []
+  const entries = []
   if (comment) {
-    const f = call("GET", issue, { query: { fields: "summary,description,reporter" } }).fields || {}
-    lines.push(name(f.reporter || {}) + ": " + (f.summary || "") + "\n\n" + (f.description || ""))
+    const f = call("GET", issue, { query: { fields: "summary,description,reporter,attachment,comment" } }).fields || {}
+    entries.push({ line: name(f.reporter || {}) + ": " + (f.summary || "") + "\n\n" + (f.description || ""), attachments: shared(f).map(file) })
   }
   const comments = call("GET", issue + "/comment", { query: { orderBy: "-created", maxResults: "30" } }).comments || []
   // A restricted comment is left out: the token may read it, and whoever reads
   // the answer may not.
   for (const c of comments.reverse().filter(open)) {
-    if (Number(c.id) < id) lines.push(name(c.author || {}) + ": " + c.body)
+    if (Number(c.id) < id) entries.push({ line: name(c.author || {}) + ": " + c.body })
   }
-  return lines.length ? require("../../blocks/thread.js").text(lines) : null
+  return require("../../blocks/thread.js").history(entries)
 }
 
 if (input.do === "attachments") {
@@ -139,9 +140,9 @@ if (input.do === "attachments") {
   // a redirect to another host, which the token may not go to, so the call asks
   // for none and follows none. A file over input.most bytes is left as it is.
   return input.attachments.map((a) => {
-    if (a.size > input.most) return { name: a.name, type: a.type, size: a.size }
+    if (a.size > input.most) return a
     const bytes = call("GET", "/attachment/content/" + encodeURIComponent(a.id), { query: { redirect: "false" }, redirects: false, as: "bytes", timeout: 120 })
-    return { name: a.name, type: a.type, size: a.size, file: blobs.make(bytes, { type: a.type }) }
+    return Object.assign({}, a, { file: blobs.make(bytes, { type: a.type }) })
   })
 }
 

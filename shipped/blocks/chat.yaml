@@ -2,7 +2,7 @@
 # bridge's listener sends each message here under a key of its own. Its messages
 # are answered one at a time, each by a new agent given the conversation so far and
 # the message's address, and with no conversation yet, what the service's thread
-# already holds. The files sent with a message are downloaded only to answer it.
+# already holds, with its files. The files are downloaded only to answer it.
 # A message marked unaddressed is answered only if attend.yaml says so, given
 # what was said and a line naming its files. A status shows while the agent
 # works, and an empty reply says nothing.
@@ -45,7 +45,7 @@ states:
               input: { address: "${input.address}", wanted: "${!!stages.who.output.agent && (!!input.event.unaddressed || !(input.last && input.last.conversation))}" }
           attend:
             job:
-              input: { unaddressed: "${!!input.event.unaddressed}", agent: "${!!stages.who.output.agent}", said: "${(input.event.text || '') + ((input.event.attachments || []).length ? (input.event.text ? '\\n' : '') + '(files: ' + input.event.attachments.map((a) => a.name).join(', ') + ')' : '')}", asker: "${stages.who.output.person}", address: "${input.address}", history: "${stages.history.output}" }
+              input: { unaddressed: "${!!input.event.unaddressed}", agent: "${!!stages.who.output.agent}", said: "${(input.event.text || '') + ((input.event.attachments || []).length ? (input.event.text ? '\\n' : '') + '(files: ' + input.event.attachments.map((a) => a.name).join(', ') + ')' : '')}", asker: "${stages.who.output.person}", address: "${input.address}", history: "${(stages.history.output || {}).text}" }
               machine:
                 flow: should-answer
                 input: { unaddressed: boolean, agent: boolean, said: string, asker: "any?", address: map, history: "any?" }
@@ -65,7 +65,14 @@ states:
             job: { script: ./format.js, input: { bridge: "${input.event.bridge}" } }
           attachments:
             when: "${stages.attend.output}"
-            job: { machine: ./attachments.yaml, input: { address: "${input.address}", attachments: "${input.event.attachments}" } }
+            job:
+              machine: ./attachments.yaml
+              input:
+                address: "${input.address}"
+                # A new conversation has the files earlier in the thread too, each only once.
+                attachments: >-
+                  ${((own, earlier) => own.concat(earlier.filter((e) => !own.some((o) => o.id === e.id))))(input.event.attachments || [],
+                  input.last && input.last.conversation ? [] : (stages.history.output || {}).attachments || [])}
           answer:
             when: "${stages.attend.output}"
             job:
@@ -77,7 +84,7 @@ states:
                   asker: "${stages.who.output.person}"
                   home: "${input.dir}"
                   address: "${input.address}"
-                  history: "${input.last && input.last.conversation ? null : stages.history.output}"
+                  history: "${input.last && input.last.conversation ? null : (stages.history.output || {}).text}"
                   attachments: "${stages.attachments.output}"
                   conversation: "${input.last ? input.last.conversation : null}"
                   format: "${stages.format.output}"

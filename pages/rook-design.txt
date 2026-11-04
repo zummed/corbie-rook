@@ -163,6 +163,9 @@ time, each with a new agent given the conversation so far.
   read, so a conversation there starts with nothing.
 - The history holds what was said, and no tool calls or results. When the
   read fails, the message is answered with no history.
+- The history's files go to the agent beside the message's own: the latest
+  10 on its entries, each marked `earlier: true`. On Jira they are the
+  issue's files, but one a restricted comment names.
 - Rook reads nothing for a person with no agent.
 - A message's files are downloaded only to answer it, each of at most 32
   MiB, or 20 MB on Telegram. The agent's prompt is then `{ message,
@@ -171,7 +174,7 @@ time, each with a new agent given the conversation so far.
   each PDF, when its service takes them. Any other file is a handle, and the
   agent reads a text file with Corbie's blob tools.
 - When a download fails, the agent gets each file as the message holds it,
-  with no contents. The history holds no files.
+  with no contents.
 - `attend.yaml` gets the thread before the message, and only for someone with
   an agent. Its `said` ends with a line naming the message's files, as
   `(files: error.png)`. When it fails, the message is not answered. A message
@@ -208,7 +211,7 @@ an agent's place in `answer.yaml`, with the same input and output.
   home            the project's directory
   address         where the message came from
   history         what the thread held before this message, for a new conversation on Slack, GitLab or Jira
-  attachments     the files sent with it, each { name, type, size, file }, or nothing
+  attachments     its files and the history's, each as the message holds it with file, its contents
   conversation    what the last answer gave, or nothing
   format          how to write for the message's bridge: Markdown or not, and how to write a chart, a layout or a diagram
 

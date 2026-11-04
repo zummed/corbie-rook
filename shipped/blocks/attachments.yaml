@@ -1,6 +1,6 @@
 # The files sent with a message, downloaded from the bridge it came from. Each is
-# given as { name, type, size, file }, where file is a blob of its contents. A file
-# over `most` bytes is given without file: 32 MiB, and 20 MB on Telegram, which
+# given as the message holds it, with file, a blob of its contents. A file over
+# `most` bytes is given without file: 32 MiB, and 20 MB on Telegram, which
 # gives a bot no more. When the download fails, each file is given as the message
 # holds it. A message with no files gives null. One stage for each bridge, since a
 # job's machine is named here.
