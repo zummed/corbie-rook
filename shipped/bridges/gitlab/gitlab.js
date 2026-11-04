@@ -13,15 +13,14 @@ const issues = ["Issue", "WorkItem"]
 // to another project or host is not an attachment, nor is a name that could
 // leave the upload's directory: dots only, or an escaped . / or \. GitLab gives
 // no file's type, so its name's extension does.
-const types = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", pdf: "application/pdf", txt: "text/plain", log: "text/plain", md: "text/markdown", csv: "text/csv", json: "application/json" }
 function attachments(text, project) {
+  const type = require("../../blocks/types.js").of
   const found = new Map()
   for (const m of text.matchAll(/\]\(\/uploads\/([0-9a-f]{32})\/([^\/\\()\s?#]+)\)/g)) {
     const name = m[2]
     if (/^\.+$/.test(name) || /%2e|%2f|%5c/i.test(name)) continue
     const id = "/projects/" + encodeURIComponent(project) + "/uploads/" + m[1] + "/" + name
-    const extension = (/\.(\w+)$/.exec(name) || [])[1] || ""
-    found.set(id, { name: name, type: types[extension.toLowerCase()] || "application/octet-stream", id: id })
+    found.set(id, { name: name, type: type(name, "application/octet-stream"), id: id })
   }
   return [...found.values()]
 }

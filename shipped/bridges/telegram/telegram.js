@@ -1,15 +1,17 @@
 // The bot's script: input.do is hear, for listen.yaml, say, for say.yaml,
-// ask, for ask.yaml, close, for close.yaml, status, for status.yaml, or
-// attachments, for attachments.yaml. It speaks Telegram's Bot API with the token of the secret
-// input.token names, which it holds only as a handle.
+// ask, for ask.yaml, close, for close.yaml, status, for status.yaml,
+// attachments, for attachments.yaml, or send, for send.yaml. It speaks
+// Telegram's Bot API with the token of the secret input.token names, which it
+// holds only as a handle.
 const api = "https://api.telegram.org"
 const token = secrets.get(input.token)
 
-// call calls a method of the Bot API and gives its result. Telegram's
-// refusal is thrown with its words, so the job fails and says why. No
-// error holds the address called, since it holds the token.
-function call(method, body) {
-  const reply = http.post(secrets.text`${api}/bot${token}/${method}`, { json: body, as: "text", timeout: 70 })
+// call calls a method of the Bot API and gives its result, sending body as
+// JSON, or with upload as a form that holds a file. Telegram's refusal is
+// thrown with its words, so the job fails and says why. No error holds the
+// address called, since it holds the token.
+function call(method, body, upload) {
+  const reply = http.post(secrets.text`${api}/bot${token}/${method}`, Object.assign(upload ? { upload: body } : { json: body }, { as: "text", timeout: 70 }))
   let answer
   try {
     answer = JSON.parse(reply.body)
@@ -85,6 +87,15 @@ if (input.do === "attachments") {
     if (reply.status !== 200) throw new Error("Telegram answered the download of " + a.name + " with status " + reply.status)
     return { name: a.name, type: a.type, size: a.size, file: blobs.make(reply.body, { type: a.type }) }
   })
+}
+
+if (input.do === "send") {
+  // A file in the chat: an image Telegram shows, of at most 10 MB, as a photo,
+  // and any other as a document.
+  const photo = /^image\/(jpeg|png|webp)$/.test(input.file.type) && input.file.size <= 10000000
+  const field = photo ? "photo" : "document"
+  const m = call(photo ? "sendPhoto" : "sendDocument", { chat_id: String(input.to), [field]: { data: input.file, name: input.name, type: input.file.type } }, true)
+  return { sent: input.to + ":" + m.message_id }
 }
 
 if (input.do === "ask") {

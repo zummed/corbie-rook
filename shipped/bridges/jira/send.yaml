@@ -1,0 +1,7 @@
+flow: jira-send
+input: { to: string, name: string, file: blob, site: "any?", email: "any?" }
+stages:
+  none:
+    when: "${false}"
+    job: { script: ./jira.js }
+output: { sent: none }

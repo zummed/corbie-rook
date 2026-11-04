@@ -93,6 +93,30 @@ type telegram struct {
 	sent    []map[string]any  // each message the bot sent, in order
 	files   map[string]string // what each file_id downloads
 	got     []string          // each file_id getFile was asked for
+	uploads []upload          // each file the bot sent, in order
+}
+
+// An upload is a file a bot sent: the method and field it came by, the
+// conversation it went to, and the file's name, type and contents.
+type upload struct {
+	Method, Field, To, Name, Type, Body string
+}
+
+// uploaded reads the one file of a multipart form.
+func uploaded(r *http.Request, method, to string) (upload, error) {
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
+		return upload{}, err
+	}
+	for field, files := range r.MultipartForm.File {
+		f, err := files[0].Open()
+		if err != nil {
+			return upload{}, err
+		}
+		defer f.Close()
+		body, err := io.ReadAll(f)
+		return upload{Method: method, Field: field, To: r.FormValue(to), Name: files[0].Filename, Type: files[0].Header.Get("Content-Type"), Body: string(body)}, err
+	}
+	return upload{}, fmt.Errorf("the form holds no file")
 }
 
 func newTelegram(t *testing.T) *telegram {
@@ -120,9 +144,21 @@ func (tg *telegram) serve(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"ok": false, "error_code": 401, "description": "Unauthorized"}`)
 		return
 	}
+	reply := func(result any) { json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": result}) }
+	if method == "sendPhoto" || method == "sendDocument" {
+		u, err := uploaded(r, method, "chat_id")
+		if err != nil {
+			fmt.Fprintf(w, `{"ok": false, "error_code": 400, "description": %q}`, err.Error())
+			return
+		}
+		tg.mu.Lock()
+		tg.uploads = append(tg.uploads, u)
+		reply(map[string]any{"message_id": 200 + len(tg.uploads)})
+		tg.mu.Unlock()
+		return
+	}
 	var ask map[string]any
 	json.NewDecoder(r.Body).Decode(&ask)
-	reply := func(result any) { json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": result}) }
 	switch method {
 	case "getUpdates":
 		// It waits for an update at most a third of a second, so that the

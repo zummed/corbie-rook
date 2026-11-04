@@ -1,0 +1,21 @@
+# Sends a file at an address, as say.yaml says a text: `file` is a blob, or else
+# `text` is sent as a file, of the type its name gives. It gives what the bridge
+# sent. One stage for each bridge, since a job's machine is named here.
+flow: send
+input: { address: map, name: string, file: "any?", text: "any?" }
+stages:
+  file:
+    job: { script: ./file.js, files: [./types.js], input: { name: "${input.name}", file: "${input.file}", text: "${input.text}" } }
+  telegram:
+    when: "${input.address.bridge === 'telegram'}"
+    job: { machine: .rook/bridges/telegram/send.yaml, input: { to: "${input.address.id}", name: "${input.name}", file: "${stages.file.output}" } }
+  slack:
+    when: "${input.address.bridge === 'slack'}"
+    job: { machine: .rook/bridges/slack/send.yaml, input: { to: "${input.address.id}", name: "${input.name}", file: "${stages.file.output}" } }
+  gitlab:
+    when: "${input.address.bridge === 'gitlab'}"
+    job: { machine: .rook/bridges/gitlab/send.yaml, input: { to: "${input.address.id}", name: "${input.name}", file: "${stages.file.output}", site: "${input.address.settings.site}" } }
+  jira:
+    when: "${input.address.bridge === 'jira'}"
+    job: { machine: .rook/bridges/jira/send.yaml, input: { to: "${input.address.id}", name: "${input.name}", file: "${stages.file.output}", site: "${input.address.settings.site}", email: "${input.address.settings.email}" } }
+output: "${!stages.telegram.skipped ? stages.telegram.output : !stages.slack.skipped ? stages.slack.output : !stages.gitlab.skipped ? stages.gitlab.output : stages.jira.output}"

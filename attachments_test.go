@@ -414,3 +414,50 @@ func TestSlackOverheardFileIsNamedToAttend(t *testing.T) {
 		t.Fatalf("attend was given %q", said)
 	}
 }
+
+// sending makes a stand-in model that calls send with args on its first turn,
+// and then replies "sent".
+func sending(args string) func(llmstandin.Call) llmstandin.Reply {
+	return func(c llmstandin.Call) llmstandin.Reply {
+		if c.Turn == 1 {
+			return llmstandin.Reply{Calls: []llmstandin.ToolCall{{ID: "t1", Name: "send", Args: args}}}
+		}
+		return llmstandin.Reply{Text: "sent"}
+	}
+}
+
+// An agent sends a text as a file, typed by its name, in the chat it was
+// asked in.
+func TestTelegramAgentSendsATextAsAFile(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorld(t)
+	dir, model := telegramProject(t, w, tg)
+	model.Answer = sending(`{"name": "report.csv", "text": "a,b\n1,2\n"}`)
+	tg.says(map[string]any{"text": "the report, please"})
+	w.sync(dir)
+	w.until("the reply", func() bool { return len(tg.said()) >= 1 })
+	want := upload{Method: "sendDocument", Field: "document", To: "1", Name: "report.csv", Type: "text/csv", Body: "a,b\n1,2\n"}
+	if len(tg.uploads) != 1 || tg.uploads[0] != want {
+		t.Fatalf("the bot sent %+v; want %+v", tg.uploads, want)
+	}
+	if got := tg.said(); got[0] != "sent" {
+		t.Errorf("the bot said %v", got)
+	}
+}
+
+// An agent sends back a picture it was shown, as a photo.
+func TestTelegramAgentSendsAPhoto(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorld(t)
+	dir, model := telegramProject(t, w, tg)
+	model.Answer = sending(`{"name": "cat.jpg", "blob": "blob1"}`)
+	cat := "\xff\xd8 a cat"
+	tg.files["P1"] = cat
+	tg.says(map[string]any{"caption": "send it back", "photo": photo("P1", len(cat))})
+	w.sync(dir)
+	w.until("the reply", func() bool { return len(tg.said()) >= 1 })
+	want := upload{Method: "sendPhoto", Field: "photo", To: "1", Name: "cat.jpg", Type: "image/jpeg", Body: cat}
+	if len(tg.uploads) != 1 || tg.uploads[0] != want {
+		t.Fatalf("the bot sent %+v; want %+v", tg.uploads, want)
+	}
+}
