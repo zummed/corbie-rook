@@ -1,7 +1,13 @@
+# Downloads the files sent with a GitLab comment or issue, each at most `most`
+# bytes, from the GitLab at site.
 flow: gitlab-attachments
-input: { attachments: list, most: number, site: "any?", email: "any?" }
+input: { attachments: list, most: number, site: string }
 stages:
-  none:
-    when: "${false}"
-    job: { script: ./gitlab.js }
-output: ${input.attachments}
+  download:
+    job:
+      script: ./gitlab.js
+      files: [./api.js]
+      input: { do: attachments, attachments: "${input.attachments}", most: "${input.most}", site: "${input.site}" }
+      allow: ["net:${input.site}", "secret:GITLAB_TOKEN@net:${input.site}"]
+      timeout: 5m
+output: ${stages.download.output}

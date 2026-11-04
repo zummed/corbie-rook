@@ -124,7 +124,7 @@ or a part of it.
   answers        the message a reply answers, on Telegram
   settings       the service's host, and Jira's account, which a reply needs
   unaddressed    true for a message that does not name the bot, and absent otherwise
-  attachments    the files sent with it, each { name, type, size, id }, and absent with none
+  attachments    the files sent with it, each { name, type, size, id }, size where the service gives it, and absent with none
 
   Telegram    chat: the chat                                         place: dm
   Slack       chat: the conversation and thread                      place: dm, or #channel

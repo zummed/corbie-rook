@@ -1,12 +1,37 @@
-// GitLab's script: input.do is hear, for listen.yaml, say, for say.yaml, or
-// history, for history.yaml. It speaks the REST API of the GitLab at input.site
-// through api.js.
+// GitLab's script: input.do is hear, for listen.yaml, say, for say.yaml,
+// history, for history.yaml, or attachments, for attachments.yaml. It speaks the
+// REST API of the GitLab at input.site through api.js.
 const call = require("./api.js").api(input.site)
 const project = (chat) => chat.slice(0, chat.lastIndexOf("#"))
 const issuePath = (chat) => "/projects/" + encodeURIComponent(project(chat)) + "/issues/" + chat.slice(chat.lastIndexOf("#") + 1)
 
 // GitLab records an issue made in its web UI as a work item.
 const issues = ["Issue", "WorkItem"]
+
+// The files a text links to. GitLab writes an upload as ![alt](/uploads/<secret>/<name>)
+// or [name](/uploads/<secret>/<name>), a path in the issue's own project; a link
+// to another project or host is not taken. GitLab gives no file's type, so its
+// name's extension does.
+const types = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp", pdf: "application/pdf", txt: "text/plain", log: "text/plain", md: "text/markdown", csv: "text/csv", json: "application/json" }
+function attachments(text, project) {
+  const found = new Map()
+  for (const m of text.matchAll(/\]\(\/uploads\/([0-9a-f]{32})\/([^\/()\s?#]+)\)/g)) {
+    const id = "/projects/" + encodeURIComponent(project) + "/uploads/" + m[1] + "/" + m[2]
+    const name = decoded(m[2])
+    const extension = (/\.(\w+)$/.exec(name) || [])[1] || ""
+    found.set(id, { name: name, type: types[extension.toLowerCase()] || "application/octet-stream", id: id })
+  }
+  return [...found.values()]
+}
+
+// decoded reads a name as a link writes it, percent-encoded or not.
+function decoded(text) {
+  try {
+    return decodeURIComponent(text)
+  } catch {
+    return text
+  }
+}
 
 // seconds reads a length of time: a number with s, m or h.
 function seconds(text) {
@@ -29,6 +54,8 @@ if (input.do === "hear") {
   const hear = (message) => {
     const named = message.text.search(mention) >= 0
     message.text = message.text.replace(mention, "$1").trim()
+    const files = attachments(message.text, message.place)
+    if (files.length) message.attachments = files
     if (named) heard.push(message)
     else if (input.overhear) heard.push(Object.assign(message, { unaddressed: true }))
   }
@@ -99,6 +126,23 @@ if (input.do === "history") {
     lines.push(name(note.author || {}) + ": " + note.body)
   }
   return lines.length ? require("../../blocks/thread.js").text(lines) : null
+}
+
+if (input.do === "attachments") {
+  // Each file's contents, downloaded through the API with the token. A file over
+  // input.most bytes is left as it is. GitLab answers every file as
+  // application/octet-stream, so each keeps the type its name gave it.
+  const request = require("./api.js").request(input.site)
+  return input.attachments.map((a) => {
+    const head = request("HEAD", a.id)
+    if (head.status !== 200) throw new Error("GitLab answered the size of " + a.name + " with " + head.status)
+    const length = head.headers["content-length"]
+    const size = length ? Number(length) : null
+    if (size > input.most) return { name: a.name, type: a.type, size: size }
+    const reply = request("GET", a.id, { as: "bytes", timeout: 120 })
+    if (reply.status !== 200) throw new Error("GitLab answered the download of " + a.name + " with " + reply.status)
+    return { name: a.name, type: a.type, size: size, file: blobs.make(reply.body, { type: a.type }) }
+  })
 }
 
 // say: a comment on the issue, each chart as its table.
