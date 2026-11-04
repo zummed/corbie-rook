@@ -6,6 +6,7 @@
 # text, long, number or choice; the answer gives their values as `values`, by
 # name. Only Slack shows fields, so a question with fields is asked only there.
 flow: ask
+title: "${input.text.split('\\n')[0]}"
 input: { people: list, in: "string?", text: string, choices: list, fields: "list?", within: "string?" }
 stages:
   question:

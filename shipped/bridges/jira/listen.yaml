@@ -4,6 +4,7 @@
 # has changed it for settle. Its first ask marks the time, and hears nothing. It signs in as input.email with the API
 # token that is the secret JIRA_TOKEN.
 statechart: jira-listen
+title: Jira listener
 input:
   dir: string
   site: string

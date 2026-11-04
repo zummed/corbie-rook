@@ -156,6 +156,12 @@ func TestChatAnswersOneMessageAtATime(t *testing.T) {
 		}
 		return told
 	})
+	w.titled(map[string][]string{
+		"telegram-bridge": {"Telegram bridge"},
+		"telegram":        {"Telegram listener"},
+		"chat":            {"dm: hello", "dm: one"},
+		"message":         {"dm: hello", "dm: one", "dm: two"},
+	})
 }
 
 // A message goes to the agent who chose and to no other, and an agent with no
@@ -378,6 +384,7 @@ func TestHeldCallWaitsForItsApprovers(t *testing.T) {
 			t.Errorf("the message was sent after a no: %v", run)
 		}
 	}
+	w.titled(map[string][]string{"helper": {"alice: q"}, "approval": {"Approve tell: q"}, "ask": {"An agent wants to run tell."}})
 }
 
 // workPeople and workRules are a team with a public channel, a channel of its
@@ -691,6 +698,7 @@ func TestAskPersonIsAnsweredByATap(t *testing.T) {
 	if got := w.show(asker).Output; got != "no" {
 		t.Fatalf("the choice was %v", got)
 	}
+	w.titled(map[string][]string{"ask": {"Well?"}, "question": {"Well?"}})
 }
 
 // Every machine of a project with every bridge reads, and only the bridges' own

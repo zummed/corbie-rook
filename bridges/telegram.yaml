@@ -1,5 +1,6 @@
 # The telegram bridge runs while this file is here. Delete it to stop the bridge.
 flow: telegram-bridge
+title: Telegram bridge
 limits: { depth: 16 }   # every conversation counts its levels from here
 stages:
   listen:

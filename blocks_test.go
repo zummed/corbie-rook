@@ -246,6 +246,12 @@ func TestGitLabHearsAnIssueOnceItSettles(t *testing.T) {
 	if len(got) != 1 || !strings.Contains(got[0], "It fails on main.") || !strings.HasPrefix(got[0], "[al: @bot also the tests]") {
 		t.Fatalf("the bot said %q", got)
 	}
+	w.titled(map[string][]string{
+		"gitlab-bridge": {"GitLab bridge"},
+		"gitlab-listen": {"GitLab listener"},
+		"chat":          {"#7 Broken build"},
+		"message":       {"#7 Broken build  It fails on main. @bot help"},
+	})
 }
 
 // The ready-made attend asks a model, shown the thread and the message, and gives
@@ -562,4 +568,5 @@ func TestFormOffSlackGivesANote(t *testing.T) {
 	if got := fmt.Sprint(w.show(former).Output); !strings.Contains(got, "only on Slack") {
 		t.Fatalf("the form gave %s", got)
 	}
+	w.titled(map[string][]string{"form": {"The bug?"}})
 }

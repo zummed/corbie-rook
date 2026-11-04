@@ -5,6 +5,7 @@
 # Its first ask marks where each project stands, and hears nothing. The token is
 # the secret GITLAB_TOKEN.
 statechart: gitlab-listen
+title: GitLab listener
 input:
   dir: string
   site: string

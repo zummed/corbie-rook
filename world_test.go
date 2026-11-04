@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -211,6 +212,33 @@ func (w *world) show(id string) *client.Run {
 		w.t.Fatal(err)
 	}
 	return run
+}
+
+// titles gives the title of every run of a machine, in order.
+func (w *world) titles(machine string) []string {
+	w.t.Helper()
+	runs, err := w.List(context.Background(), client.Filter{Finished: true})
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	var out []string
+	for _, run := range runs {
+		if run.Machine == machine {
+			out = append(out, w.show(run.ID).Title)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// titled fails the test unless the runs of each machine have these titles.
+func (w *world) titled(want map[string][]string) {
+	w.t.Helper()
+	for machine, titles := range want {
+		if got := w.titles(machine); !slices.Equal(got, titles) {
+			w.t.Errorf("the runs of %s have the titles %q", machine, got)
+		}
+	}
 }
 
 func dedent(text string) string {
