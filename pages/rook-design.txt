@@ -124,7 +124,7 @@ or a part of it.
   answers        the message a reply answers, on Telegram
   settings       the service's host, and Jira's account, which a reply needs
   unaddressed    true for a message that does not name the bot, and absent otherwise
-  attachments    the files sent with it, each { name, type, size, id }, size where the service gives it, and absent with none
+  attachments    the files sent with it, each { name, type, size, id }, and absent with none
 
   Telegram    chat: the chat                                         place: dm
   Slack       chat: the conversation and thread                      place: dm, or #channel
@@ -135,9 +135,12 @@ In a channel, each message that is not in a thread starts its own Slack
 thread. An answer holds `bridge`, `question`, `from` and `choice`, and on
 Slack `values`, the form's fields by name.
 
-A Jira file belongs to the issue. A comment has the files its text shows or
-links to by name, and an opened issue all its files except one that only a
-restricted comment names.
+A message's files are these.
+
+  Telegram    its photo, document, audio, voice, video or animation; each item of an album is its own message
+  Slack       the files Slack keeps, which the bot reads with the scope files:read
+  GitLab      each /uploads/ link in the comment or issue, its type from its name and no size
+  Jira        the issue's files the comment names; an opened issue's, but one only a restricted comment names
 
 A conversation
 --------------
@@ -156,11 +159,10 @@ time, each with a new agent given the conversation so far.
 - The history holds what was said, and no tool calls or results. When the
   read fails, the message is answered with no history.
 - Rook reads nothing for a person with no agent.
-- A message's files are downloaded only to answer it, each of at most 32 MiB,
-  or 20 MB on Telegram.
-  The agent's prompt is then `{ message, attachments }`, where each file
-  holds its contents as a blob. The model is shown each image and PDF, and
-  reads any other file with Corbie's blob tools.
+- A message's files are downloaded only to answer it, each of at most 32
+  MiB, or 20 MB on Telegram. The agent's prompt is then `{ message,
+  attachments }`, where each file holds its contents as a blob. The model is
+  shown each image and PDF, and reads any other file with Corbie's blob tools.
 - When a download fails, the agent gets each file as the message holds it,
   with no contents. The history holds no files.
 - `attend.yaml` gets the thread before the message, and only for someone with
