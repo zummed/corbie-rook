@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	llmstandin "github.com/zummed/corbie/plugin/llm/standin"
+	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -81,6 +83,105 @@ func setSite(t *testing.T, dir, file, from, to string) {
 	}
 }
 
+// A telegram stands in for Telegram's Bot API, for the bot with the token
+// "123:abc".
+type telegram struct {
+	*httptest.Server
+	mu      sync.Mutex
+	updates []map[string]any  // each message sent to the bot, in order; its update_id is its place from 1
+	heard   int               // the highest offset asked from, below which every update was heard
+	sent    []map[string]any  // each message the bot sent, in order
+	files   map[string]string // what each file_id downloads
+	got     []string          // each file_id getFile was asked for
+}
+
+func newTelegram(t *testing.T) *telegram {
+	tg := &telegram{files: map[string]string{}}
+	tg.Server = httptest.NewServer(http.HandlerFunc(tg.serve))
+	t.Cleanup(tg.Close)
+	return tg
+}
+
+func (tg *telegram) serve(w http.ResponseWriter, r *http.Request) {
+	if path, ok := strings.CutPrefix(r.URL.Path, "/file/bot123:abc/files/"); ok {
+		tg.mu.Lock()
+		body, ok := tg.files[path]
+		tg.mu.Unlock()
+		if !ok {
+			w.WriteHeader(404)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		fmt.Fprint(w, body)
+		return
+	}
+	method, ok := strings.CutPrefix(r.URL.Path, "/bot123:abc/")
+	if !ok {
+		fmt.Fprint(w, `{"ok": false, "error_code": 401, "description": "Unauthorized"}`)
+		return
+	}
+	var ask map[string]any
+	json.NewDecoder(r.Body).Decode(&ask)
+	reply := func(result any) { json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": result}) }
+	switch method {
+	case "getUpdates":
+		// It waits for an update at most a third of a second, so that the
+		// server closes quickly when the test ends.
+		offset, _ := ask["offset"].(float64)
+		for end := time.Now().Add(min(time.Duration(ask["timeout"].(float64))*time.Second, 300*time.Millisecond)); ; time.Sleep(10 * time.Millisecond) {
+			tg.mu.Lock()
+			tg.heard = max(tg.heard, int(offset))
+			from := max(tg.heard, 1)
+			var out []map[string]any
+			if from <= len(tg.updates) {
+				out = []map[string]any{{"update_id": from, "message": tg.updates[from-1]}}
+			}
+			tg.mu.Unlock()
+			if out != nil || time.Now().After(end) {
+				reply(out)
+				return
+			}
+		}
+	case "getFile":
+		id := ask["file_id"].(string)
+		tg.mu.Lock()
+		tg.got = append(tg.got, id)
+		tg.mu.Unlock()
+		reply(map[string]any{"file_id": id, "file_path": "files/" + id})
+	case "sendMessage":
+		tg.mu.Lock()
+		tg.sent = append(tg.sent, ask)
+		reply(map[string]any{"message_id": 100 + len(tg.sent)})
+		tg.mu.Unlock()
+	case "sendChatAction":
+		reply(true)
+	default:
+		fmt.Fprint(w, `{"ok": false, "error_code": 404, "description": "Not Found"}`)
+	}
+}
+
+// says sends the bot messages from alice, in her chat with it.
+func (tg *telegram) says(messages ...map[string]any) {
+	tg.mu.Lock()
+	defer tg.mu.Unlock()
+	for _, m := range messages {
+		m["message_id"] = 10 + len(tg.updates)
+		m["from"] = map[string]any{"id": 1, "is_bot": false, "first_name": "Alice"}
+		m["chat"] = map[string]any{"id": 1, "type": "private"}
+		tg.updates = append(tg.updates, m)
+	}
+}
+
+func (tg *telegram) said() []string {
+	tg.mu.Lock()
+	defer tg.mu.Unlock()
+	var out []string
+	for _, m := range tg.sent {
+		out = append(out, fmt.Sprint(m["text"]))
+	}
+	return out
+}
+
 // A gitlab stands in for GitLab's REST API on one project.
 type gitlab struct {
 	*httptest.Server
@@ -89,15 +190,18 @@ type gitlab struct {
 	notes   []string
 	failing int // how many asks for events are answered 500
 	asks    int
-	thread  []map[string]any // the issue's comments, oldest first
-	reads   int              // how many times the comments were read
-	broken  bool             // the comments cannot be read
-	text    string           // issue 7's description, by default "It fails."
-	updated string           // when issue 7 last changed, by default never said
+	thread  []map[string]any  // the issue's comments, oldest first
+	reads   int               // how many times the comments were read
+	broken  bool              // the comments cannot be read
+	text    string            // issue 7's description, by default "It fails."
+	updated string            // when issue 7 last changed, by default never said
+	files   map[string]string // the files uploaded, by path under the project, as /uploads/<secret>/<name>
+	sizes   map[string]int    // the size HEAD gives, where it is not the file's own; -1 for none
+	fetches []string          // each call for a file, as "GET <path>"
 }
 
 func newGitLab(t *testing.T) *gitlab {
-	gl := &gitlab{}
+	gl := &gitlab{files: map[string]string{}, sizes: map[string]int{}}
 	gl.Server = httptest.NewServer(http.HandlerFunc(gl.serve))
 	t.Cleanup(gl.Close)
 	return gl
@@ -106,6 +210,27 @@ func newGitLab(t *testing.T) *gitlab {
 func (gl *gitlab) serve(w http.ResponseWriter, r *http.Request) {
 	gl.mu.Lock()
 	defer gl.mu.Unlock()
+	if strings.Contains(r.URL.Path, "/uploads/") {
+		gl.fetches = append(gl.fetches, r.Method+" "+r.URL.EscapedPath())
+		path, ours := strings.CutPrefix(r.URL.EscapedPath(), "/api/v4/projects/group%2Fproject")
+		body, found := gl.files[path]
+		if r.Header.Get("PRIVATE-TOKEN") != "gl-token" || !ours || !found {
+			w.WriteHeader(404)
+			return
+		}
+		size, given := gl.sizes[path]
+		if !given || r.Method != "HEAD" {
+			size = len(body)
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		if size >= 0 {
+			w.Header().Set("Content-Length", strconv.Itoa(size))
+		}
+		if r.Method == "GET" {
+			io.WriteString(w, body)
+		}
+		return
+	}
 	if r.Header.Get("PRIVATE-TOKEN") != "gl-token" {
 		w.WriteHeader(401)
 		return
@@ -178,6 +303,12 @@ func (gl *gitlab) asked() int {
 	gl.mu.Lock()
 	defer gl.mu.Unlock()
 	return gl.asks
+}
+
+func (gl *gitlab) fetched() []string {
+	gl.mu.Lock()
+	defer gl.mu.Unlock()
+	return append([]string{}, gl.fetches...)
 }
 
 // A comment naming the bot on an issue is answered there, without the name, a
@@ -278,11 +409,15 @@ func TestGitLabIssueGoneStopsNothing(t *testing.T) {
 // A jira stands in for Jira Cloud's REST API on one project.
 type jira struct {
 	*httptest.Server
-	mu       sync.Mutex
-	comments []map[string]any
-	said     []string
-	asks     int
-	reads    int
+	mu        sync.Mutex
+	comments  []map[string]any
+	said      []string
+	asks      int
+	reads     int
+	files     []map[string]any  // the issue's fields.attachment, by default none
+	contents  map[string]string // each file's contents, by id
+	fields    map[string]any    // other fields of the issue, given instead of these
+	downloads []string          // each file's id, as it is downloaded
 }
 
 func newJira(t *testing.T) *jira {
@@ -302,14 +437,25 @@ func (j *jira) serve(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/rest/api/2/myself":
 		fmt.Fprint(w, `{"accountId": "acc-bot"}`)
+	case strings.HasPrefix(r.URL.Path, "/rest/api/2/attachment/content/"):
+		if r.URL.Query().Get("redirect") != "false" {
+			http.Redirect(w, r, "http://media.example.com/file", http.StatusSeeOther)
+			return
+		}
+		id := strings.TrimPrefix(r.URL.Path, "/rest/api/2/attachment/content/")
+		j.downloads = append(j.downloads, id)
+		w.Header().Set("Content-Type", "application/octet-stream")
+		fmt.Fprint(w, j.contents[id])
 	case r.URL.Path == "/rest/api/2/search/jql":
 		j.asks++
-		json.NewEncoder(w).Encode(map[string]any{"isLast": true, "issues": []any{map[string]any{"id": "10", "key": "OPS-12", "fields": map[string]any{
+		json.NewEncoder(w).Encode(map[string]any{"isLast": true, "issues": []any{map[string]any{"id": "10", "key": "OPS-12", "fields": j.withFiles(map[string]any{
 			"summary": "Broken", "description": "", "created": "2020-01-01T00:00:00.000+0000",
 			"reporter": map[string]any{"accountId": "acc-1"}, "comment": map[string]any{"comments": j.comments},
-		}}}})
+		})}}})
 	case r.Method == "GET" && r.URL.Path == "/rest/api/2/issue/OPS-12":
-		fmt.Fprint(w, `{"fields": {"summary": "Broken", "description": "It fails.", "reporter": {"accountId": "acc-1", "displayName": "Al"}}}`)
+		json.NewEncoder(w).Encode(map[string]any{"fields": j.withFiles(map[string]any{
+			"summary": "Broken", "description": "It fails.", "reporter": map[string]any{"accountId": "acc-1", "displayName": "Al"},
+		})})
 	case r.Method == "GET" && r.URL.Path == "/rest/api/2/issue/OPS-12/comment":
 		j.reads++
 		comments := append([]map[string]any{}, j.comments...)
@@ -325,10 +471,27 @@ func (j *jira) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// withFiles adds the issue's files and the fields given instead to fields.
+func (j *jira) withFiles(fields map[string]any) map[string]any {
+	if j.files != nil {
+		fields["attachment"] = j.files
+	}
+	maps.Copy(fields, j.fields)
+	return fields
+}
+
 func (j *jira) comment(id, author, body string, at time.Time) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	j.comments = append(j.comments, map[string]any{"id": id, "body": body, "created": at.UTC().Format("2006-01-02T15:04:05.000+0000"), "author": map[string]any{"accountId": author}})
+	j.comments = append(j.comments, map[string]any{"id": id, "body": body, "created": jiraTime(at), "author": map[string]any{"accountId": author}})
+}
+
+func jiraTime(at time.Time) string { return at.UTC().Format("2006-01-02T15:04:05.000+0000") }
+
+func (j *jira) downloaded() []string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return slices.Clone(j.downloads)
 }
 
 func (j *jira) saying() []string {
@@ -418,11 +581,11 @@ type slack struct {
 	socket  *websocket.Conn
 	posts   []map[string]any
 	acks    []string
-	thread  []map[string]any // what the conversation holds, oldest first
-	reads   []string         // the methods that read it
-	status  []map[string]any // each status set, in order
-	updates []map[string]any // each message changed, in order
-	refuse  bool             // a message with blocks is refused
+	thread  []map[string]any  // what the conversation holds, oldest first
+	reads   []string          // the methods that read it
+	status  []map[string]any  // each status set, in order
+	updates []map[string]any  // each message changed, in order
+	refuse  bool              // a message with blocks is refused
 	files   map[string]string // what each path under /files/ downloads
 }
 
