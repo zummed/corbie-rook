@@ -156,8 +156,8 @@ time, each with a new agent given the conversation so far.
   The agent's prompt is then `{ message, attachments }`, where each file
   holds its contents as a blob. The model is shown each image and PDF, and
   reads any other file with Corbie's blob tools.
-- When a download fails, the agent gets each file's name, type and size,
-  and no contents. The history holds no files.
+- When a download fails, the agent gets each file as the message holds it,
+  with no contents. The history holds no files.
 - `attend.yaml` gets the thread before the message, and only for someone with
   an agent. When it fails, the message is not answered. A message with
   `unaddressed: true` never gets a refusal.

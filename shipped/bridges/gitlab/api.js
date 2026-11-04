@@ -6,19 +6,13 @@
 // call(method, path, options) calls GitLab and gives its answer; a refusal is
 // thrown with GitLab's status, so the job fails and says why. No error holds the
 // address called. A thing gone or out of the token's sight is null where
-// options.maybe says so. request gives the same call's whole reply, as
-// http.request does, and throws nothing for a refusal.
-exports.request = (site) => {
+// options.maybe says so.
+exports.api = (site) => {
   const base = "https://" + site + "/api/v4"
   const token = secrets.get("GITLAB_TOKEN")
-  return (method, path, options) => http.request(base + path, Object.assign({ method: method, headers: { "PRIVATE-TOKEN": token }, as: "text", timeout: 30 }, options))
-}
-
-exports.api = (site) => {
-  const request = exports.request(site)
   return (method, path, options) => {
     const { maybe, ...rest } = options || {}
-    const reply = request(method, path, rest)
+    const reply = http.request(base + path, Object.assign({ method: method, headers: { "PRIVATE-TOKEN": token }, as: "text", timeout: 30 }, rest))
     if (maybe && (reply.status === 403 || reply.status === 404)) return null
     if (reply.status < 200 || reply.status >= 300) throw new Error("GitLab answered " + method + " " + path.split("?")[0] + " with " + reply.status)
     return reply.body ? JSON.parse(reply.body) : null

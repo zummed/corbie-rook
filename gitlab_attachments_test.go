@@ -23,7 +23,7 @@ type uploads struct {
 	gl    *gitlab
 	mu    sync.Mutex
 	files map[string]string // by path under the project, as /uploads/<secret>/<name>
-	sizes map[string]int    // the size HEAD gives, where it is not the file's own
+	sizes map[string]int    // the size HEAD gives, where it is not the file's own; -1 for none
 	asks  []string          // each call for a file, as "GET <path>"
 }
 
@@ -53,7 +53,9 @@ func (u *uploads) serve(w http.ResponseWriter, r *http.Request) {
 		size = len(body)
 	}
 	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Header().Set("Content-Length", strconv.Itoa(size))
+	if size >= 0 {
+		w.Header().Set("Content-Length", strconv.Itoa(size))
+	}
 	if r.Method == "GET" {
 		io.WriteString(w, body)
 	}
@@ -130,26 +132,35 @@ func TestGitLabFileWithNoWordsIsAnswered(t *testing.T) {
 }
 
 // An opened issue's files are those its description uploaded to its own
-// project, each once: a link to another project or host is not downloaded, and
-// a file over 32 MiB is named to the model and not downloaded.
+// project, each once: a link to another project or host, or a name that could
+// leave the upload's directory, is not downloaded. A file over 32 MiB, by HEAD
+// or by what GET gave, is named to the model and not shown.
 func TestGitLabTakesOnlyTheIssuesOwnFiles(t *testing.T) {
 	gl := newGitLab(t)
 	picture := "\x89PNG picture"
-	shot, big := "/uploads/"+secret1+"/shot.png", "/uploads/"+secret2+"/big.zip"
-	u := newUploads(t, gl, map[string]string{shot: picture, big: "a zip"})
+	shot, big, long := "/uploads/"+secret1+"/shot.png", "/uploads/"+secret2+"/big.zip", "/uploads/"+secret2+"/long.log"
+	u := newUploads(t, gl, map[string]string{shot: picture, big: "a zip", long: strings.Repeat("x", 32<<20+1)})
 	u.sizes[big] = 64 << 20
-	gl.text = "@bot see ![shot](" + shot + ") and again ![shot](" + shot + ") and [big.zip](" + big + ")\n" +
-		"![x](/group/other/uploads/" + secret2 + "/x.png) ![y](https://elsewhere.example" + shot + ") ![z](/-/project/5" + shot + ")"
+	u.sizes[long] = -1
+	gl.text = "@bot see ![shot](" + shot + ") and again ![shot](" + shot + ") and [big.zip](" + big + ") and [long.log](" + long + ")\n" +
+		"![x](/group/other/uploads/" + secret2 + "/x.png) ![y](https://elsewhere.example/uploads/" + secret2 + "/y.png) ![z](/-/project/5/uploads/" + secret2 + "/z.png)\n" +
+		"[up](/uploads/" + secret2 + "/..) [up](/uploads/" + secret2 + "/%2E%2E) [up](/uploads/" + secret2 + "/a%2Fb)"
 	w := newWorld(t)
 	_, model := gitlabProject(t, w, u)
 	gl.happens(2, map[string]any{"author_id": 2, "author_username": "al", "target_type": "Issue", "action_name": "opened", "target_iid": 7})
 	answered(w, gl)
-	want := []string{"HEAD /api/v4/projects/group%2Fproject" + shot, "GET /api/v4/projects/group%2Fproject" + shot, "HEAD /api/v4/projects/group%2Fproject" + big}
+	p := "/api/v4/projects/group%2Fproject"
+	want := []string{"HEAD " + p + shot, "GET " + p + shot, "HEAD " + p + big, "HEAD " + p + long, "GET " + p + long}
 	if got := u.asked(); !slices.Equal(got, want) {
 		t.Errorf("GitLab was asked for %q; want %q", got, want)
 	}
 	shown := fmt.Sprint(model.Calls[0].Messages)
-	if !strings.Contains(shown, "big.zip") || !strings.Contains(shown, strconv.Itoa(64<<20)) || !strings.Contains(shown, base64.StdEncoding.EncodeToString([]byte(picture))) {
-		t.Errorf("the model was shown %s", shown)
+	for _, want := range []string{"big.zip", strconv.Itoa(64 << 20), "long.log", strconv.Itoa(32<<20 + 1), base64.StdEncoding.EncodeToString([]byte(picture))} {
+		if !strings.Contains(shown, want) {
+			t.Errorf("%q is not in what the model was shown", want)
+		}
+	}
+	if strings.Contains(shown, "xxxxxxxx") {
+		t.Error("the model was shown long.log's contents")
 	}
 }
