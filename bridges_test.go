@@ -617,12 +617,22 @@ type slack struct {
 	socket  *websocket.Conn
 	posts   []map[string]any
 	acks    []string
-	thread  []map[string]any  // what the conversation holds, oldest first
-	reads   []string          // the methods that read it
-	status  []map[string]any  // each status set, in order
-	updates []map[string]any  // each message changed, in order
-	refuse  bool              // a message with blocks is refused
-	files   map[string]string // what each path under /files/ downloads
+	thread  []map[string]any      // what the conversation holds, oldest first
+	reads   []string              // the methods that read it
+	status  []map[string]any      // each status set, in order
+	updates []map[string]any      // each message changed, in order
+	refuse  bool                  // a message with blocks is refused
+	files   map[string]string     // what each path under /files/ downloads
+	shared  []upload              // each file the bot sent, in order
+	noWrite bool                  // the token lacks the scope files:write
+	sending map[string]*slackFile // each file asked for, by its ID
+}
+
+// A slackFile is a file files.getUploadURLExternal was asked for: the name and
+// length it was given, and what came to its address.
+type slackFile struct {
+	name, length string
+	got          *upload
 }
 
 func newSlack(t *testing.T) *slack {
@@ -636,6 +646,25 @@ func (s *slack) serve(w http.ResponseWriter, r *http.Request) {
 	token := "xoxb-bot"
 	if r.URL.Path == "/api/apps.connections.open" {
 		token = "xapp-app"
+	}
+	if id, ok := strings.CutPrefix(r.URL.Path, "/upload/v1/"); ok {
+		// The address Slack gives for a file's bytes, as many as it was told.
+		// The bot token is not needed there, and is refused.
+		if r.Header.Get("Authorization") != "" {
+			w.WriteHeader(403)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		f := s.sending[id]
+		if err != nil || f == nil || f.length != strconv.Itoa(len(body)) {
+			w.WriteHeader(400)
+			return
+		}
+		f.got = &upload{Name: f.name, Type: r.Header.Get("Content-Type"), Body: string(body)}
+		fmt.Fprintf(w, "OK - %d", len(body))
+		return
 	}
 	if r.URL.Path != "/socket" && r.Header.Get("Authorization") != "Bearer "+token {
 		fmt.Fprint(w, `{"ok": false, "error": "invalid_auth"}`)
@@ -720,6 +749,41 @@ func (s *slack) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		s.posts = append(s.posts, post)
 		fmt.Fprint(w, `{"ok": true, "ts": "1.1"}`)
+	case "/api/files.getUploadURLExternal":
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.noWrite {
+			fmt.Fprint(w, `{"ok": false, "error": "missing_scope", "needed": "files:write"}`)
+			return
+		}
+		q := r.URL.Query()
+		if s.sending == nil {
+			s.sending = map[string]*slackFile{}
+		}
+		id := "F" + strconv.Itoa(100+len(s.sending))
+		s.sending[id] = &slackFile{name: q.Get("filename"), length: q.Get("length")}
+		json.NewEncoder(w).Encode(map[string]any{"ok": true, "upload_url": s.URL + "/upload/v1/" + id, "file_id": id})
+	case "/api/files.completeUploadExternal":
+		var done struct {
+			Files []struct {
+				ID    string `json:"id"`
+				Title string `json:"title"`
+			} `json:"files"`
+			Channel string `json:"channel_id"`
+			Thread  string `json:"thread_ts"`
+		}
+		json.NewDecoder(r.Body).Decode(&done)
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if len(done.Files) != 1 || s.sending[done.Files[0].ID] == nil || s.sending[done.Files[0].ID].got == nil {
+			fmt.Fprint(w, `{"ok": false, "error": "file_not_found"}`)
+			return
+		}
+		// The file is shared in the conversation, or with thread_ts in its thread.
+		u := *s.sending[done.Files[0].ID].got
+		u.Method, u.To = "files.completeUploadExternal", strings.TrimSuffix(done.Channel+"/"+done.Thread, "/")
+		s.shared = append(s.shared, u)
+		json.NewEncoder(w).Encode(map[string]any{"ok": true, "files": done.Files})
 	case "/api/assistant.threads.setStatus":
 		var status map[string]any
 		json.NewDecoder(r.Body).Decode(&status)
