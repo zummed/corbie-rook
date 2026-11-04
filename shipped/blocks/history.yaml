@@ -1,5 +1,6 @@
 # What was said before a message in the thread or on the issue an address names,
-# for a bridge whose service keeps it: a text, or nothing. It is only context, so
+# for a bridge whose service keeps it: { text, attachments } as thread.js gives
+# it, or nothing. It is only context, so
 # a failure gives nothing and the message is still answered. Telegram keeps nothing
 # a bot can read.
 flow: history

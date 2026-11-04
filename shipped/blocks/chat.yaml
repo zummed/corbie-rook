@@ -65,14 +65,18 @@ states:
             job: { script: ./format.js, input: { bridge: "${input.event.bridge}" } }
           attachments:
             when: "${stages.attend.output}"
+            job: { machine: ./attachments.yaml, input: { address: "${input.address}", attachments: "${input.event.attachments}" } }
+          # A new conversation has the files earlier in the thread too, but one that
+          # follows a failed answer does not, since a file there may be its cause.
+          earlier:
+            when: "${stages.attend.output}"
             job:
               machine: ./attachments.yaml
               input:
                 address: "${input.address}"
-                # A new conversation has the files earlier in the thread too, each only once.
                 attachments: >-
-                  ${((own, earlier) => own.concat(earlier.filter((e) => !own.some((o) => o.id === e.id))))(input.event.attachments || [],
-                  input.last && input.last.conversation ? [] : (stages.history.output || {}).attachments || [])}
+                  ${input.last && (input.last.conversation || input.last.failed) ? null :
+                  ((stages.history.output || {}).attachments || []).filter((e) => !(input.event.attachments || []).some((o) => o.id === e.id))}
           answer:
             when: "${stages.attend.output}"
             job:
@@ -85,7 +89,7 @@ states:
                   home: "${input.dir}"
                   address: "${input.address}"
                   history: "${input.last && input.last.conversation ? null : (stages.history.output || {}).text}"
-                  attachments: "${stages.attachments.output}"
+                  attachments: "${(stages.attachments.output || []).concat(stages.earlier.output || [])}"
                   conversation: "${input.last ? input.last.conversation : null}"
                   format: "${stages.format.output}"
           say:
@@ -99,5 +103,6 @@ states:
             job: { machine: ./say.yaml, input: { address: "${input.address}", text: That could not be answered. Ask again in a while. } }
         output:
           conversation: "${stages.answer.failed ? null : stages.answer.skipped ? (input.last ? input.last.conversation : null) : (stages.answer.output || {}).conversation}"
+          failed: "${stages.answer.failed}"
     on: { done: waiting, failed: waiting }
   over: { end: done }

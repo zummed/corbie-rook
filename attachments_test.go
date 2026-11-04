@@ -337,7 +337,7 @@ func TestJiraFileAloneIsAnswered(t *testing.T) {
 // A comment has the files it names, and of two with one name the newest. An
 // external image names no file, and one over 32 MiB is described and not
 // downloaded. A new conversation has the issue's other files too, as earlier
-// ones, after the comment's own and without them again.
+// ones, without the comment's own again.
 func TestJiraCommentHasTheFilesItNames(t *testing.T) {
 	at := time.Now().Add(time.Second)
 	j := newJira(t)
@@ -354,7 +354,7 @@ func TestJiraCommentHasTheFilesItNames(t *testing.T) {
 	j.comment("1", "acc-1", "[~accountid:acc-bot] wow! !cat.png! and !dog.png|thumbnail! and !https://example.com/x.png! [^film.mp4]", at)
 	ask()
 	w.until("the answer", func() bool { return len(j.saying()) >= 1 })
-	if got := j.downloaded(); !slices.Equal(got, []string{"2", "4", "1", "7", "5"}) {
+	if got := j.downloaded(); !slices.Equal(slices.Sorted(slices.Values(got)), []string{"1", "2", "4", "5", "7"}) {
 		t.Fatalf("Jira gave the files %v", got)
 	}
 	shown := fmt.Sprint(model.Calls[0].Messages)
@@ -764,5 +764,52 @@ func TestGitLabIssueGivesItsEarlierFiles(t *testing.T) {
 	})
 	if got := gl.fetched(); len(got) != 2 {
 		t.Errorf("GitLab was asked for the file %d times (%v); want once, HEAD then GET", len(got), got)
+	}
+}
+
+// An earlier file that cannot be downloaded leaves the message's own files as
+// they are.
+func TestGitLabBrokenEarlierFileKeepsTheMessagesOwn(t *testing.T) {
+	gl := newGitLab(t)
+	picture := "\x89PNG picture"
+	gl.files = map[string]string{"/uploads/" + secret2 + "/now.png": picture}
+	gl.text = "Before: ![gone](/uploads/" + secret1 + "/gone.png)"
+	w := newWorld(t)
+	_, model := gitlabProject(t, w, gl)
+	gl.note(2, 2, "al", "@bot and this one? ![now](/uploads/"+secret2+"/now.png)")
+	answered(w, gl)
+	if shown := fmt.Sprint(model.Calls[0].Messages); !strings.Contains(shown, base64.StdEncoding.EncodeToString([]byte(picture))) {
+		t.Errorf("the model was not shown the message's own picture: %s", shown)
+	}
+}
+
+// After an answer fails, the next message is answered without the files
+// earlier on the issue, since one of them may be what failed.
+func TestGitLabFailedAnswerLeavesOutEarlierFiles(t *testing.T) {
+	gl := newGitLab(t)
+	gl.files = map[string]string{"/uploads/" + secret1 + "/shot.png": "\x89PNG picture"}
+	gl.text = "It fails like this: ![shot](/uploads/" + secret1 + "/shot.png)"
+	w := newWorld(t)
+	_, model := gitlabProject(t, w, gl)
+	model.Answer = func(c llmstandin.Call) llmstandin.Reply {
+		if c.Turn == 1 {
+			return llmstandin.Reply{Error: "this image cannot be read"}
+		}
+		return llmstandin.Reply{Text: "seen"}
+	}
+	gl.note(2, 2, "al", "@bot what is in the screenshot?")
+	answered(w, gl)
+	if got := gl.said(); !strings.Contains(got[0], "could not be answered") {
+		t.Fatalf("the bot said %v", got)
+	}
+	before := len(gl.fetched())
+	gl.note(3, 2, "al", "@bot try again")
+	w.until("the second answer", func() bool {
+		w.set(w.now().Add(31 * time.Second))
+		time.Sleep(5 * interval)
+		return len(gl.said()) >= 2
+	})
+	if got := gl.fetched(); len(got) != before {
+		t.Errorf("the second message downloaded %v", got[before:])
 	}
 }
