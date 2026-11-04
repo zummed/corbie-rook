@@ -1,0 +1,21 @@
+# The files sent with a message, downloaded from the bridge it came from. Each is
+# given as { name, type, size, file }, where file is a blob of its contents. A file
+# over 32 MiB is given without file, and so is every file when the download fails.
+# A message with no files gives null. One stage for each bridge, since a job's
+# machine is named here.
+flow: attachments
+input: { address: map, attachments: "any?" }
+stages:
+  telegram:
+    when: "${!!(input.attachments || []).length && input.address.bridge === 'telegram'}"
+    job: { machine: .rook/bridges/telegram/attachments.yaml, input: { attachments: "${input.attachments}", most: 33554432 } }
+  slack:
+    when: "${!!(input.attachments || []).length && input.address.bridge === 'slack'}"
+    job: { machine: .rook/bridges/slack/attachments.yaml, input: { attachments: "${input.attachments}", most: 33554432 } }
+  gitlab:
+    when: "${!!(input.attachments || []).length && input.address.bridge === 'gitlab'}"
+    job: { machine: .rook/bridges/gitlab/attachments.yaml, input: { attachments: "${input.attachments}", most: 33554432, site: "${input.address.settings.site}" } }
+  jira:
+    when: "${!!(input.attachments || []).length && input.address.bridge === 'jira'}"
+    job: { machine: .rook/bridges/jira/attachments.yaml, input: { attachments: "${input.attachments}", most: 33554432, site: "${input.address.settings.site}", email: "${input.address.settings.email}" } }
+output: "${stages.telegram.failed || stages.slack.failed || stages.gitlab.failed || stages.jira.failed ? input.attachments : !stages.telegram.skipped ? stages.telegram.output : !stages.slack.skipped ? stages.slack.output : !stages.gitlab.skipped ? stages.gitlab.output : !stages.jira.skipped ? stages.jira.output : input.attachments || null}"

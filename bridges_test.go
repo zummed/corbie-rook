@@ -423,6 +423,7 @@ type slack struct {
 	status  []map[string]any // each status set, in order
 	updates []map[string]any // each message changed, in order
 	refuse  bool             // a message with blocks is refused
+	files   map[string]string // what each path under /files/ downloads
 }
 
 func newSlack(t *testing.T) *slack {
@@ -439,6 +440,18 @@ func (s *slack) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.URL.Path != "/socket" && r.Header.Get("Authorization") != "Bearer "+token {
 		fmt.Fprint(w, `{"ok": false, "error": "invalid_auth"}`)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/files/") {
+		s.mu.Lock()
+		body, ok := s.files[r.URL.Path]
+		s.mu.Unlock()
+		if !ok {
+			w.WriteHeader(404)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		fmt.Fprint(w, body)
 		return
 	}
 	switch r.URL.Path {
@@ -556,7 +569,7 @@ func (s *slack) acked() int {
 func slackProject(t *testing.T, w *world, s *slack) string {
 	w.secret("SLACK_TOKEN", "xoxb-bot")
 	w.secret("SLACK_APP_TOKEN", "xapp-app")
-	return pointed(t, "slack", s.Server, "slack.com", "wss-primary.slack.com", "wss-backup.slack.com")
+	return pointed(t, "slack", s.Server, "files.slack.com", "slack.com", "wss-primary.slack.com", "wss-backup.slack.com")
 }
 
 // A direct message is answered, a message naming the bot in a channel is answered

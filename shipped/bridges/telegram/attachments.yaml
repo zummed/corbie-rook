@@ -1,0 +1,7 @@
+flow: telegram-attachments
+input: { attachments: list, most: number, site: "any?", email: "any?" }
+stages:
+  none:
+    when: "${false}"
+    job: { script: ./telegram.js }
+output: ${input.attachments}

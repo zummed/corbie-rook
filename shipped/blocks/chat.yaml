@@ -2,7 +2,7 @@
 # bridge's listener sends each message here under a key of its own. Its messages
 # are answered one at a time, each by a new agent given the conversation so far and
 # the message's address, and with no conversation yet, what the service's thread
-# already holds. A message marked unaddressed is answered only if attend.yaml says
+# already holds. The files sent with a message are downloaded only to answer it. A message marked unaddressed is answered only if attend.yaml says
 # so. A status shows while the agent works, and an empty reply says nothing.
 # Anyone with no agent who names the bot is told the bot is not theirs, and a
 # question the agent fails on is told so and ends the conversation, so one the
@@ -10,11 +10,11 @@
 # next message starts a new conversation with the machines as they are then.
 # Its title is where it is and the first line said: "#help: …", "dm: …", "#7 …"
 # for a GitLab issue, "OPS-1 …" for a Jira one. A message's title is all that
-# was said.
+# was said, or the names of the files sent with it.
 statechart: chat
 title: >-
   ${input.event.bridge === 'gitlab' ? input.event.chat.slice(input.event.chat.lastIndexOf('#')) + ' ' :
-  input.event.bridge === 'jira' ? input.event.chat + ' ' : input.event.place + ': '}${String(input.event.text || '').split('\n')[0]}
+  input.event.bridge === 'jira' ? input.event.chat + ' ' : input.event.place + ': '}${String(input.event.text || (input.event.attachments || []).map((a) => a.name).join(', ')).split('\n')[0]}
 initial: waiting
 states:
   waiting:
@@ -30,7 +30,7 @@ states:
         address: "${ { bridge: event.data.event.bridge, id: event.data.event.chat, answers: event.data.event.answers, at: event.data.event.at, settings: event.data.event.settings } }"
       machine:
         flow: message
-        title: "${input.event.text || ''}"
+        title: "${input.event.text || (input.event.attachments || []).map((a) => a.name).join(', ')}"
         input: { event: any, dir: string, address: map, last: "any?" }
         stages:
           who:
@@ -61,6 +61,9 @@ states:
           format:
             when: "${stages.attend.output}"
             job: { script: ./format.js, input: { bridge: "${input.event.bridge}" } }
+          attachments:
+            when: "${stages.attend.output}"
+            job: { machine: ./attachments.yaml, input: { address: "${input.address}", attachments: "${input.event.attachments}" } }
           answer:
             when: "${stages.attend.output}"
             job:
@@ -73,6 +76,7 @@ states:
                   home: "${input.dir}"
                   address: "${input.address}"
                   history: "${input.last && input.last.conversation ? null : stages.history.output}"
+                  attachments: "${stages.attachments.output}"
                   conversation: "${input.last ? input.last.conversation : null}"
                   format: "${stages.format.output}"
           say:

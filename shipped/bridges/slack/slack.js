@@ -1,6 +1,6 @@
 // Slack's script: input.do is hear, for listen.yaml, say, for say.yaml, ask, for
-// ask.yaml, close, for close.yaml, history, for history.yaml, or status, for
-// status.yaml. It speaks
+// ask.yaml, close, for close.yaml, history, for history.yaml, status, for
+// status.yaml, or attachments, for attachments.yaml. It speaks
 // Slack's Web API with the bot token SLACK_TOKEN and listens with the app-level
 // token SLACK_APP_TOKEN, holding each as a handle.
 const api = "https://slack.com/api"
@@ -89,7 +89,10 @@ if (input.do === "hear") {
     if (e.bot_id || !e.user || e.user === me) return
     const text = e.text || ""
     const direct = e.channel_type === "im"
-    if (!text) return
+    // Only a file Slack keeps is downloaded: a hidden, deleted or external one
+    // has no address there.
+    const files = (e.files || []).filter((f) => String(f.url_private_download || "").startsWith("https://files.slack.com/"))
+    if (!text && !files.length) return
     let unaddressed = false
     if (!direct && !text.includes(mention)) {
       if (!input.overhear || !e.thread_ts) return
@@ -104,6 +107,7 @@ if (input.do === "hear") {
     const place = direct ? "dm" : "#" + call("conversations.info", null, { channel: e.channel }).channel.name
     const chat = e.channel + (direct && !e.thread_ts ? "" : "/" + (e.thread_ts || e.ts))
     const message = { bridge: "slack", text: text.replaceAll(mention, "").trim(), chat: chat, from: e.user, place: place, at: e.ts }
+    if (files.length) message.attachments = files.map((f) => ({ name: f.name || f.title || f.id, type: f.mimetype || "application/octet-stream", size: f.size, id: f.url_private_download }))
     if (unaddressed) message.unaddressed = true
     emit("message", message)
   }
@@ -132,6 +136,19 @@ if (input.do === "hear") {
   }
   socket.close()
   return {}
+}
+
+if (input.do === "attachments") {
+  // Each file's contents, downloaded from its address with the bot token, which
+  // needs the scope files:read. A file over input.most bytes is left as it is.
+  return input.attachments.map((a) => {
+    if (a.size > input.most) return { name: a.name, type: a.type, size: a.size }
+    const reply = http.get(a.id, { headers: { Authorization: secrets.text`Bearer ${secrets.get("SLACK_TOKEN")}` }, as: "bytes", timeout: 120 })
+    // Slack answers a token that may not read the file with its sign-in page.
+    const type = reply.headers["content-type"] || ""
+    if (reply.status !== 200 || (/^text\/html/.test(type) && !/^text\/html/.test(a.type))) throw new Error("Slack answered the download of " + a.name + " with status " + reply.status + " and " + (type || "no type"))
+    return { name: a.name, type: a.type, size: a.size, file: blobs.make(reply.body, { type: a.type }) }
+  })
 }
 
 if (input.do === "ask") {

@@ -168,7 +168,8 @@ nothing on the internet connects to this computer.
             "groups:read",
             "channels:history",
             "groups:history",
-            "im:history"
+            "im:history",
+            "files:read"
           ]
         }
       },
@@ -192,6 +193,7 @@ nothing on the internet connects to this computer.
   im:write                                          opens a direct message to ask a question
   channels:read, groups:read                        reads a channel's name, as rules.yaml names places
   channels:history, groups:history, im:history      hears messages, and reads a thread's history
+  files:read                                        downloads the files sent with a message
 
 The bot hears a direct message, and a message that names it in a channel it
 was invited to.
