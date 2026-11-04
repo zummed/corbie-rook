@@ -19,24 +19,22 @@ import (
 //go:embed all:shipped all:starter all:bridges
 var files embed.FS
 
-//go:embed rook.txt
-var briefing string
+//go:embed pages
+var pages embed.FS
 
-//go:embed README.md
-var readme string
-
-//go:embed DESIGN.md
-var design string
-
-// Pages are Rook's pages of the manual. corbie mcp, allowed rook init, tells a
-// model the page rook.
+// Pages are Rook's pages of the manual: each file in pages/, whose first line
+// is its summary, and the starting files. corbie mcp, allowed rook init, tells
+// a model the page rook.
 func Pages() []manual.Page {
-	return []manual.Page{
-		{Name: "rook", Group: "Rook", Summary: "Rook: what to do in a project, for a model.", Text: briefing},
-		{Name: "rook-project", Group: "Rook", Summary: "Project: installing Rook, a project's files and the common changes.", Text: readme},
-		{Name: "rook-design", Group: "Rook", Summary: "Design: the blocks, what each takes and gives, and who may do what.", Text: design},
-		{Name: "rook-starter", Group: "Rook", Summary: "Starting files: the files this version writes into a new project, and each bridge's file.", Text: starterPage()},
+	var out []manual.Page
+	for _, name := range []string{"rook", "rook-project", "rook-design"} {
+		text, _ := pages.ReadFile("pages/" + name + ".txt")
+		summary, _, _ := strings.Cut(string(text), "\n")
+		out = append(out, manual.Page{Name: name, Group: "Rook", Summary: summary, Text: string(text)})
 	}
+	text := starterPage()
+	summary, _, _ := strings.Cut(text, "\n")
+	return append(out, manual.Page{Name: "rook-starter", Group: "Rook", Summary: summary, Text: text})
 }
 
 // Starting gives the path in a project of each file this version starts a project
@@ -58,11 +56,14 @@ func Starting() map[string]string {
 // starterPage gives every starting file, under its path in a project.
 func starterPage() string {
 	var b strings.Builder
-	b.WriteString("# Starting files\n\nThe files this version of Rook writes into a new project, and each bridge's file. Compare a project's files with these after corbie rook init updates it.\n")
+	b.WriteString("Rook starting files: the files this version writes into a new project, and each bridge's file.\n\nCompare a project's files with these after corbie rook init updates it.\n")
 	starting := Starting()
 	for _, rel := range slices.Sorted(maps.Keys(starting)) {
 		text, _ := files.ReadFile(starting[rel])
-		fmt.Fprintf(&b, "\n## %s\n\n```yaml\n%s```\n", rel, text)
+		fmt.Fprintf(&b, "\n%s\n%s\n\n", rel, strings.Repeat("-", len(rel)))
+		for _, line := range strings.Split(strings.TrimRight(string(text), "\n"), "\n") {
+			fmt.Fprintf(&b, "    %s\n", line)
+		}
 	}
 	return b.String()
 }

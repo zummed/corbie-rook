@@ -387,8 +387,8 @@ func TestHeldCallWaitsForItsApprovers(t *testing.T) {
 	w.titled(map[string][]string{"helper": {"alice: q"}, "approval": {"Approve tell: q"}, "ask": {"An agent wants to run tell."}})
 }
 
-// workPeople and workRules are a team with a public channel, a channel of its
-// own, and an agent for anyone.
+// workPeople is a team, platform, for the rules rook-design shows: a public
+// channel, a channel of the team's own, and an agent for anyone.
 const workPeople = `
 	people:
 	  sam: { slack: U1 }
@@ -398,15 +398,16 @@ const workPeople = `
 	  platform: [sam, ana]
 `
 
-const workRules = `
-	places:
-	  "#help": { readers: [anyone] }
-	  "#platform": { readers: [platform] }
-	  dm: { readers: [asker] }
-	agents:
-	  - { name: team, for: [platform] }
-	  - { name: support, for: [anyone] }
-`
+// pageRules is the rules.yaml rook-design shows.
+func pageRules(t *testing.T) string {
+	for _, ex := range examples(t, "rook-design") {
+		if ex.path == "rules.yaml" {
+			return ex.text
+		}
+	}
+	t.Fatal("rook-design shows no rules.yaml")
+	return ""
+}
 
 // who gives the first agent the asker and everyone who reads the answer may each
 // use, and no agent when there is none. An empty table is the starter's own.
@@ -435,8 +436,9 @@ func TestWhoGivesAnAgentTheAskerAndTheReadersMayUse(t *testing.T) {
 		dir := copyStarter(t)
 		removeListener(t, dir)
 		if table != "" {
-			for name, text := range map[string]string{"people.yaml": table, "rules.yaml": workRules} {
-				if err := os.WriteFile(filepath.Join(dir, name), []byte(dedent(text)), 0o644); err != nil {
+			// The rules are the example rook-design shows.
+			for name, text := range map[string]string{"people.yaml": dedent(table), "rules.yaml": pageRules(t)} {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -778,7 +780,7 @@ func TestInitAgainKeepsThePersonsFiles(t *testing.T) {
 	if differ, err := rook.Differ(dir); err != nil || !reflect.DeepEqual(differ, []string{"bridges/slack.yaml", "people.yaml"}) {
 		t.Errorf("the files not as Rook starts them are %v, %v", differ, err)
 	}
-	if text := rook.Pages()[3].Text; !strings.Contains(text, "\n## agents/helper.yaml\n\n```yaml\n") || !strings.Contains(text, "\n## bridges/jira.yaml\n") {
+	if text := rook.Pages()[3].Text; !strings.Contains(text, "\nagents/helper.yaml\n------------------\n\n    # ") || !strings.Contains(text, "\nbridges/jira.yaml\n") {
 		t.Error("the page rook-starter lacks a starting file")
 	}
 	if got, _ := os.ReadFile(filepath.Join(dir, ".rook/blocks/tell.yaml")); string(got) == "changed" {

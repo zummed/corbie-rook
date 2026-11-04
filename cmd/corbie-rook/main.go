@@ -34,11 +34,11 @@ It rewrites .rook, Rook's ready-made machines. The first time, it writes the
 starting files. It changes no file of yours, so run it again after updating
 Rook.
 
-  --bridges <names>   the bridges to start, separated by commas: telegram,
-                      slack, gitlab, jira. Each gets a file in bridges/, and a
-                      bridge runs while its file is there
+  --bridges <names>   the bridges to add, separated by commas: telegram,
+                      slack, gitlab, jira. Each gets a file in bridges/
 
-Then set the secrets it names, and run corbie run submit bridges in the directory.`,
+Then set the secrets it names, and run corbie run submit bridges in the
+directory. A bridge runs from then while its file is there.`,
 }
 
 func cmdInit(e *cli.Env, args []string) error {
@@ -89,9 +89,18 @@ func cmdInit(e *cli.Env, args []string) error {
 			fmt.Fprintf(e.Out, "  corbie controller secret set %s\n", secret)
 		}
 	}
+	// corbie run submit needs each directory it is given, so a project with
+	// no bridge is told to add one, and schedules is named once it is there.
+	if _, err := os.Stat(filepath.Join(dir, "bridges")); err != nil {
+		fmt.Fprintf(e.Out, "  corbie rook init %s --bridges <names>\n", dir)
+	}
 	if updating {
 		fmt.Fprintf(e.Out, "  %scorbie run submit . --check\n", in)
 	}
-	fmt.Fprintf(e.Out, "  %scorbie run submit bridges\n", in)
+	submit := "bridges"
+	if _, err := os.Stat(filepath.Join(dir, "schedules")); err == nil {
+		submit += " schedules"
+	}
+	fmt.Fprintf(e.Out, "  %scorbie run submit %s\n", in, submit)
 	return nil
 }

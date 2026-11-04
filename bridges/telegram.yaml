@@ -1,4 +1,5 @@
-# The telegram bridge runs while this file is here. Delete it to stop the bridge.
+# The telegram bridge runs while this file is here. To stop it, delete
+# the file and run corbie run submit bridges.
 flow: telegram-bridge
 title: Telegram bridge
 limits: { depth: 16 }   # every conversation counts its levels from here
