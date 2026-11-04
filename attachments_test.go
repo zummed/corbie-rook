@@ -2,10 +2,12 @@ package rook_test
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -336,8 +338,8 @@ func TestJiraFileAloneIsAnswered(t *testing.T) {
 
 // A comment has the files it names, and of two with one name the newest. An
 // external image names no file, and one over 32 MiB is described and not
-// downloaded. A new conversation has the issue's other files too, as earlier
-// ones, without the comment's own again.
+// downloaded. A new conversation is given the issue's other files too, as earlier
+// ones, without their contents and without the comment's own again.
 func TestJiraCommentHasTheFilesItNames(t *testing.T) {
 	at := time.Now().Add(time.Second)
 	j := newJira(t)
@@ -354,11 +356,11 @@ func TestJiraCommentHasTheFilesItNames(t *testing.T) {
 	j.comment("1", "acc-1", "[~accountid:acc-bot] wow! !cat.png! and !dog.png|thumbnail! and !https://example.com/x.png! [^film.mp4]", at)
 	ask()
 	w.until("the answer", func() bool { return len(j.saying()) >= 1 })
-	if got := j.downloaded(); !slices.Equal(slices.Sorted(slices.Values(got)), []string{"1", "2", "4", "5", "7"}) {
+	if got := j.downloaded(); !slices.Equal(slices.Sorted(slices.Values(got)), []string{"2", "4"}) {
 		t.Fatalf("Jira gave the files %v", got)
 	}
 	shown := fmt.Sprint(model.Calls[0].Messages)
-	for _, want := range []string{"video/mp4", "67108864"} {
+	for _, want := range []string{"video/mp4", "67108864", `"earlier":[`, `"name":"bird.png"`} {
 		if !strings.Contains(shown, want) {
 			t.Errorf("%q is not in %s", want, shown)
 		}
@@ -708,14 +710,32 @@ func TestSlackSendsAFileToAPerson(t *testing.T) {
 	}
 }
 
-// A reply in a Slack thread starts a conversation that has the files earlier in
-// the thread, marked earlier, beside its own.
+// looking makes a stand-in model that, on its first turn, calls look with the id
+// its prompt gives the earlier file named name, and then replies "seen".
+func looking(name string) func(llmstandin.Call) llmstandin.Reply {
+	return func(c llmstandin.Call) llmstandin.Reply {
+		if c.Turn > 1 {
+			return llmstandin.Reply{Text: "seen"}
+		}
+		file := regexp.MustCompile(`\{[^{}]*"name":"` + regexp.QuoteMeta(name) + `"[^{}]*\}`).FindString(fmt.Sprint(c.Messages))
+		id := regexp.MustCompile(`"id":"([^"]*)"`).FindStringSubmatch(file)
+		if id == nil {
+			return llmstandin.Reply{Text: "no " + name + " in the prompt"}
+		}
+		args, _ := json.Marshal(map[string]string{"id": id[1]})
+		return llmstandin.Reply{Calls: []llmstandin.ToolCall{{ID: "t1", Name: "look", Args: string(args)}}}
+	}
+}
+
+// A reply in a Slack thread starts a conversation that is given the files earlier
+// in the thread without their contents, beside its own. The model is shown an
+// earlier picture when it looks at it.
 func TestSlackThreadGivesItsEarlierFiles(t *testing.T) {
 	s := newSlack(t)
 	w := newWorld(t)
 	w.secret("TEST_KEY", "sk-test")
 	dir := slackProject(t, w, s)
-	model := &llmstandin.Server{Answer: func(llmstandin.Call) llmstandin.Reply { return llmstandin.Reply{Text: "both"} }}
+	model := &llmstandin.Server{Answer: looking("fox.png")}
 	web := httptest.NewServer(model)
 	t.Cleanup(web.Close)
 	realAgent(t, dir, web.URL)
@@ -730,17 +750,27 @@ func TestSlackThreadGivesItsEarlierFiles(t *testing.T) {
 	s.says("a", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "ts": "2.0", "thread_ts": "1.0", "text": "what are these?",
 		"files": file("F2", "note.txt", "text/plain", note)})
 	w.until("the answer", func() bool { return len(s.posted()) >= 1 })
-	shown := fmt.Sprint(model.Calls[0].Messages)
-	for _, want := range []string{"note.txt", `"earlier":true`, "(files: fox.png)", base64.StdEncoding.EncodeToString([]byte(picture))} {
-		if !strings.Contains(shown, want) {
-			t.Errorf("%q is not in %s", want, shown)
+	if got := s.posted(); !strings.Contains(fmt.Sprint(got), "seen") {
+		t.Fatalf("the bot said %v", got)
+	}
+	encoded := base64.StdEncoding.EncodeToString([]byte(picture))
+	first := fmt.Sprint(model.Calls[0].Messages)
+	for _, want := range []string{"note.txt", `"earlier":[`, "(files: fox.png)"} {
+		if !strings.Contains(first, want) {
+			t.Errorf("%q is not in %s", want, first)
 		}
+	}
+	if strings.Contains(first, encoded) {
+		t.Errorf("the model was shown the earlier picture before it looked: %s", first)
+	}
+	if shown := fmt.Sprint(model.Calls[1].Messages); !strings.Contains(shown, encoded) {
+		t.Errorf("the model was not shown the picture it looked at: %s", shown)
 	}
 }
 
-// A comment naming the bot on an issue opened with a screenshot has the
-// screenshot, marked earlier. The conversation's next message does not get it
-// again: its model was shown it already.
+// A comment naming the bot on an issue opened with a screenshot is given the
+// screenshot, which is downloaded only when the model looks at it. The
+// conversation's next message is given it again, and downloads nothing.
 func TestGitLabIssueGivesItsEarlierFiles(t *testing.T) {
 	gl := newGitLab(t)
 	picture := "\x89PNG picture"
@@ -748,13 +778,11 @@ func TestGitLabIssueGivesItsEarlierFiles(t *testing.T) {
 	gl.text = "It fails like this: ![shot](/uploads/" + secret1 + "/shot.png)"
 	w := newWorld(t)
 	_, model := gitlabProject(t, w, gl)
-	gl.note(2, 2, "al", "@bot what is in the screenshot?")
+	model.Answer = looking("shot.png")
+	gl.note(2, 2, "al", "@bot what is wrong here?")
 	answered(w, gl)
-	shown := fmt.Sprint(model.Calls[0].Messages)
-	for _, want := range []string{`"earlier":true`, "shot.png", base64.StdEncoding.EncodeToString([]byte(picture))} {
-		if !strings.Contains(shown, want) {
-			t.Errorf("%q is not in %s", want, shown)
-		}
+	if shown := fmt.Sprint(model.Calls[1].Messages); !strings.Contains(shown, base64.StdEncoding.EncodeToString([]byte(picture))) {
+		t.Errorf("the model was not shown the screenshot it looked at: %s", shown)
 	}
 	gl.note(3, 2, "al", "@bot and now?")
 	w.until("the second answer", func() bool {
@@ -762,54 +790,71 @@ func TestGitLabIssueGivesItsEarlierFiles(t *testing.T) {
 		time.Sleep(5 * interval)
 		return len(gl.said()) >= 2
 	})
+	if shown := fmt.Sprint(model.Calls[2].Messages); !strings.Contains(shown, `"name":"shot.png"`) {
+		t.Errorf("the second message was not given the screenshot: %s", shown)
+	}
 	if got := gl.fetched(); len(got) != 2 {
 		t.Errorf("GitLab was asked for the file %d times (%v); want once, HEAD then GET", len(got), got)
 	}
 }
 
-// An earlier file that cannot be downloaded leaves the message's own files as
-// they are.
-func TestGitLabBrokenEarlierFileKeepsTheMessagesOwn(t *testing.T) {
+// A file posted on the issue while a conversation is under way, by a comment
+// that does not name the bot, is given to the conversation's next message.
+func TestGitLabLaterFileIsGivenToTheConversation(t *testing.T) {
 	gl := newGitLab(t)
-	picture := "\x89PNG picture"
-	gl.files = map[string]string{"/uploads/" + secret2 + "/now.png": picture}
-	gl.text = "Before: ![gone](/uploads/" + secret1 + "/gone.png)"
 	w := newWorld(t)
 	_, model := gitlabProject(t, w, gl)
-	gl.note(2, 2, "al", "@bot and this one? ![now](/uploads/"+secret2+"/now.png)")
+	gl.note(2, 2, "al", "@bot hello")
 	answered(w, gl)
-	if shown := fmt.Sprint(model.Calls[0].Messages); !strings.Contains(shown, base64.StdEncoding.EncodeToString([]byte(picture))) {
-		t.Errorf("the model was not shown the message's own picture: %s", shown)
-	}
-}
-
-// After an answer fails, the next message is answered without the files
-// earlier on the issue, since one of them may be what failed.
-func TestGitLabFailedAnswerLeavesOutEarlierFiles(t *testing.T) {
-	gl := newGitLab(t)
-	gl.files = map[string]string{"/uploads/" + secret1 + "/shot.png": "\x89PNG picture"}
-	gl.text = "It fails like this: ![shot](/uploads/" + secret1 + "/shot.png)"
-	w := newWorld(t)
-	_, model := gitlabProject(t, w, gl)
-	model.Answer = func(c llmstandin.Call) llmstandin.Reply {
-		if c.Turn == 1 {
-			return llmstandin.Reply{Error: "this image cannot be read"}
-		}
-		return llmstandin.Reply{Text: "seen"}
-	}
-	gl.note(2, 2, "al", "@bot what is in the screenshot?")
-	answered(w, gl)
-	if got := gl.said(); !strings.Contains(got[0], "could not be answered") {
-		t.Fatalf("the bot said %v", got)
-	}
-	before := len(gl.fetched())
-	gl.note(3, 2, "al", "@bot try again")
+	gl.mu.Lock()
+	gl.thread = []map[string]any{{"id": 3, "body": "the error: ![later](/uploads/" + secret2 + "/later.png)", "author": map[string]any{"username": "bo"}}}
+	gl.mu.Unlock()
+	gl.note(4, 2, "al", "@bot can you check it?")
 	w.until("the second answer", func() bool {
 		w.set(w.now().Add(31 * time.Second))
 		time.Sleep(5 * interval)
 		return len(gl.said()) >= 2
 	})
-	if got := gl.fetched(); len(got) != before {
-		t.Errorf("the second message downloaded %v", got[before:])
+	if shown := fmt.Sprint(model.Calls[1].Messages); !strings.Contains(shown, `"name":"later.png"`) {
+		t.Errorf("the second message was not given the later file: %s", shown)
+	}
+}
+
+// An earlier file that cannot be downloaded is given to the model as the issue
+// holds it, with no contents, and the message is still answered.
+func TestGitLabBrokenEarlierFileIsAnswered(t *testing.T) {
+	gl := newGitLab(t)
+	gl.text = "Before: ![gone](/uploads/" + secret1 + "/gone.png)"
+	w := newWorld(t)
+	_, model := gitlabProject(t, w, gl)
+	model.Answer = looking("gone.png")
+	gl.note(2, 2, "al", "@bot what was that?")
+	answered(w, gl)
+	if got := gl.said(); !strings.Contains(got[0], "seen") {
+		t.Fatalf("the bot said %v", got)
+	}
+	if shown := fmt.Sprint(model.Calls[1].Messages); !strings.Contains(shown, `"name":"gone.png"`) {
+		t.Errorf("the model was not given the file it looked at: %s", shown)
+	}
+}
+
+// A Jira issue with more comments than the history's text holds still gives its
+// files.
+func TestJiraLongIssueGivesItsFiles(t *testing.T) {
+	at := time.Now().Add(time.Second)
+	j := newJira(t)
+	j.files = []map[string]any{attachment("1", "shot.png", "image/png", 7, "acc-1", at.Add(-time.Hour))}
+	w, model, ask := jiraAnswering(t, j)
+	for n := 2; n < 27; n++ {
+		j.comment(strconv.Itoa(n), "acc-1", "comment "+strconv.Itoa(n), at.Add(-time.Minute))
+	}
+	j.comment("30", "acc-1", "[~accountid:acc-bot] what is wrong?", at)
+	ask()
+	w.until("the answer", func() bool { return len(j.saying()) >= 1 })
+	if shown := fmt.Sprint(model.Calls[0].Messages); !strings.Contains(shown, `"name":"shot.png"`) {
+		t.Errorf("the model was not given the issue's file: %s", shown)
+	}
+	if got := j.downloaded(); len(got) != 0 {
+		t.Errorf("Jira gave the files %v", got)
 	}
 }

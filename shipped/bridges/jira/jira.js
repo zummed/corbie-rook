@@ -87,13 +87,19 @@ if (input.do === "hear") {
   }
   things.sort((a, b) => a.at - b.at)
   // An opened issue waits. A comment on an issue still waiting is read with it, as
-  // its history.
+  // its history, and the latest that names the bot is kept for when the issue is
+  // heard.
   for (const t of things) {
     if (t.id.startsWith("issue:")) waiting.push({ chat: t.issue, from: t.from, at: t.id })
-    else if (!waiting.some((w) => w.chat === t.issue)) hear(message(t.issue, t.from, t.text, t.id, t.files))
+    else {
+      const w = waiting.find((w) => w.chat === t.issue)
+      if (!w) hear(message(t.issue, t.from, t.text, t.id, t.files))
+      else if (t.text.includes(mention)) w.comment = message(t.issue, t.from, t.text, t.id, t.files)
+    }
   }
   // An opened issue is heard once nobody has changed it for settle, as it is then,
-  // with its shared files.
+  // with its shared files. When it does not name the bot and a comment made while
+  // it waited does, that comment is heard in its place.
   const still = []
   for (const w of waiting) {
     const f = (call("GET", "/issue/" + encodeURIComponent(w.chat), { query: { fields: "summary,description,updated,attachment,comment" }, maybe: true }) || {}).fields
@@ -102,7 +108,8 @@ if (input.do === "hear") {
       still.push(w)
       continue
     }
-    hear(message(w.chat, w.from, (f.summary || "") + "\n\n" + (f.description || ""), w.at, shared(f).map(file)))
+    const text = (f.summary || "") + "\n\n" + (f.description || "")
+    hear(w.comment && !text.includes(mention) ? w.comment : message(w.chat, w.from, text, w.at, shared(f).map(file)))
   }
   for (const m of heard) emit("message", m)
   if (!things.length) return { cursor: Object.assign({}, input.cursor, { waiting: still }) }

@@ -111,8 +111,9 @@ These settings go in a listener's input:
   settle: 2m        GitLab, Jira: hears an opened issue once nobody has changed it for 2 minutes; 0s by default
 
 A message heard by `overhear` that does not name the bot has
-`unaddressed: true`. A comment made on an issue that is still settling is not heard
-by itself, and is in the issue's history.
+`unaddressed: true`. A comment made on an issue that is still settling is in the
+issue's history. When the issue does not name the bot and such a comment does,
+the latest such comment is heard in the issue's place.
 
 A message
 ---------
@@ -157,19 +158,23 @@ time, each with a new agent given the conversation so far.
 - When `corbie run submit` starts a bridge again, its next message starts a
   new conversation, with the machines as they are then. A conversation
   already under way finishes with the machines it started with.
-- A new conversation on Slack, GitLab or Jira reads what the thread or issue
-  held before the message: the latest 20 entries, at most 8000 characters,
+- On Slack, GitLab and Jira, each message has the thread or issue read as it
+  was before the message: the latest 20 entries, at most 8000 characters,
   from the first 1000 of a Slack thread. Telegram keeps nothing a bot can
   read, so a conversation there starts with nothing.
+- A new conversation is given that history's text. Every message is given
+  its files.
 - The history holds what was said, and no tool calls or results. When the
   read fails, the message is answered with no history.
-- The history's files go to the agent beside the message's own: the latest
-  10 on its entries, each marked `earlier: true`. On Jira they are the
-  issue's files, but one a restricted comment names.
+- The history's files go to the agent as `earlier`: the latest 20, without
+  their contents. On Jira they are the issue's files, but one a restricted
+  comment names.
 - Rook reads nothing for a person with no agent.
-- A message's files are downloaded only to answer it, each of at most 32
-  MiB, or 20 MB on Telegram. The agent's prompt is then `{ message,
-  attachments }`, where each file holds its contents as a blob.
+- A message's own files are downloaded only to answer it, and an earlier file
+  only when the agent looks at it with the tool `look`. Each is at most 32
+  MiB, or 20 MB on Telegram.
+- With files, the agent's prompt is `{ message, attachments, earlier }`. Each
+  file in `attachments` holds its contents as a blob.
 - The model is shown each PNG, JPEG, GIF or WebP image of at most 5 MiB, and
   each PDF, when its service takes them. Any other file is a handle, and the
   agent reads a text file with Corbie's blob tools.
@@ -355,7 +360,8 @@ includes.
 - An agent that answers messages includes `.rook/agents/base.yaml`, and
   writes its own model, system text and parts.
 - `base.yaml` gives the agent its input, its prompt, the conversation, and the
-  tools `progress`, `send` and `form`.
+  tools `progress`, `look`, `send` and `form`.
+- The tool `look` gets a file from `earlier` by its id, with its contents.
 - The tool `send` sends a file where the message came from, at once: a blob
   the agent has, or a text it writes, under a name such as `report.csv`.
 

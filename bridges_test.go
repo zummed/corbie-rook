@@ -626,6 +626,47 @@ func TestJiraIssuesAreAnswered(t *testing.T) {
 	}
 }
 
+// An opened issue that does not name the bot, with a comment that does made
+// while it waits, is answered once it settles: the comment is heard.
+func TestJiraHearsACommentMadeWhileItsIssueWaits(t *testing.T) {
+	j := newJira(t)
+	w := newWorld(t)
+	w.secret("JIRA_TOKEN", "jira-token")
+	dir := pointed(t, "jira", j.Server)
+	setSite(t, dir, "bridges/jira.yaml", "example.atlassian.net, email", strings.TrimPrefix(j.URL, "http://")+", settle: 2m, email")
+	w.sync(dir)
+	next := func() {
+		before := j.asked()
+		w.until("Jira asked again", func() bool {
+			w.set(w.now().Add(31 * time.Second))
+			time.Sleep(5 * interval)
+			return j.asked() > before
+		})
+	}
+	next()
+	at := time.Now().Add(time.Second)
+	j.mu.Lock()
+	j.fields = map[string]any{"created": jiraTime(at), "updated": jiraTime(time.Now()), "description": "It fails."}
+	j.mu.Unlock()
+	j.comment("1", "acc-1", "[~accountid:acc-bot] can you look?", at.Add(time.Second))
+	next()
+	next()
+	time.Sleep(10 * interval)
+	if got := j.saying(); len(got) != 0 {
+		t.Fatalf("the bot said %v before the issue settled", got)
+	}
+	j.mu.Lock()
+	j.fields["updated"] = jiraTime(time.Now().Add(-10 * time.Minute))
+	j.mu.Unlock()
+	next()
+	w.until("the answer", func() bool { return len(j.saying()) >= 1 })
+	next()
+	time.Sleep(10 * interval)
+	if got := j.saying(); len(got) != 1 || !strings.Contains(got[0], "can you look?") {
+		t.Fatalf("the bot said %v", got)
+	}
+}
+
 // A comment made at the same moment as the last one heard is heard, and the one
 // before it is not heard twice.
 func TestJiraHearsTwoCommentsAtOneMoment(t *testing.T) {
@@ -993,8 +1034,9 @@ func echoing(t *testing.T, dir string) {
 
 // A chat with no conversation yet is told what the issue holds before the message,
 // and not what came after or GitLab's own notes. A later message has the
-// conversation, and reads nothing more.
-func TestGitLabChatReadsTheIssueOnce(t *testing.T) {
+// conversation, and is told nothing more: the issue is read again only for its
+// files.
+func TestGitLabChatTellsTheIssueOnce(t *testing.T) {
 	gl := newGitLab(t)
 	w := newWorld(t)
 	w.secret("GITLAB_TOKEN", "gl-token")
@@ -1040,7 +1082,7 @@ func TestGitLabChatReadsTheIssueOnce(t *testing.T) {
 	again(2)
 	gl.mu.Lock()
 	defer gl.mu.Unlock()
-	if gl.reads != 1 || !strings.HasPrefix(gl.notes[1], "[null] ") {
+	if gl.reads != 2 || !strings.HasPrefix(gl.notes[1], "[null] ") {
 		t.Fatalf("read %d times, and said %v", gl.reads, gl.notes)
 	}
 	w.titled(map[string][]string{"chat": {"#7 go on"}, "message": {"and again", "go on"}})
