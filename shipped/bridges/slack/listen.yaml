@@ -4,6 +4,7 @@
 # press of a button goes to the run that waits for it. A job ends after four
 # minutes, and the next connects again.
 statechart: slack-listen
+title: Slack listener
 input: { dir: string, overhear: "boolean?" }
 initial: hearing
 states:

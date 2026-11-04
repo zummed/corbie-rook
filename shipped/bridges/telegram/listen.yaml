@@ -1,6 +1,7 @@
 # Telegram: asks for each new update. Each message goes to its chat's run, which is started if the chat has none. Each
 # tap on a button goes to the run that waits for it.
 statechart: telegram
+title: Telegram listener
 input: { dir: string }
 initial: hearing
 states:

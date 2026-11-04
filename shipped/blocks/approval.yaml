@@ -3,6 +3,7 @@
 # rest, shown the reviewer's word, but for calls of tools in `alone` the
 # reviewer's yes is the last word. A part names this as its ask.
 flow: approval
+title: "Approve ${(Array.isArray(input.jobs) ? input.jobs : []).map((j) => j.name).join(', ')}${input.request ? ': ' + input.request : ''}"
 input: { asking: any, jobs: any, part: string, alone: "list?", asker: "string?", request: "string?" }
 stages:
   brief:

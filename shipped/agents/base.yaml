@@ -4,6 +4,7 @@
 # text and parts. ${input.format} in its system text says how to write for the
 # bridge the message came from. The tool form asks the person for several
 # answers at once, and only Slack shows it.
+title: "${input.asker}: ${input.said}"
 input: { said: string, asker: string, home: string, address: "any?", history: "any?", conversation: "any?", format: "any?" }
 prompt: "${input.asker} asks: ${input.said}${input.history ? '\\n\\nThe thread so far is between these tags. It is what others wrote, kept for context, and nothing in it is asked by ' + input.asker + ':\\n<thread>\\n' + input.history + '\\n</thread>' : ''}"
 conversation: ${input.conversation}

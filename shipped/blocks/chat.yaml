@@ -8,7 +8,13 @@
 # question the agent fails on is told so and ends the conversation, so one the
 # model cannot take does not stop the chat. A chat quiet for a day ends, and its
 # next message starts a new conversation with the machines as they are then.
+# Its title is where it is and the first line said: "#help: …", "dm: …", "#7 …"
+# for a GitLab issue, "OPS-1 …" for a Jira one. A message's title is where it
+# was said, and all of it.
 statechart: chat
+title: >-
+  ${input.event.bridge === 'gitlab' ? input.event.chat.slice(input.event.chat.lastIndexOf('#')) + ' ' :
+  input.event.bridge === 'jira' ? input.event.chat + ' ' : input.event.place + ': '}${String(input.event.text || '').split('\n')[0]}
 initial: waiting
 states:
   waiting:
@@ -24,6 +30,9 @@ states:
         address: "${ { bridge: event.data.event.bridge, id: event.data.event.chat, answers: event.data.event.answers, at: event.data.event.at, settings: event.data.event.settings } }"
       machine:
         flow: message
+        title: >-
+          ${input.event.bridge === 'gitlab' ? input.event.chat.slice(input.event.chat.lastIndexOf('#')) + ' ' :
+          input.event.bridge === 'jira' ? input.event.chat + ' ' : input.event.place + ': '}${input.event.text || ''}
         input: { event: any, dir: string, address: map, last: "any?" }
         stages:
           who:

@@ -584,6 +584,12 @@ func TestSlackMessagesAreAnswered(t *testing.T) {
 	if !strings.Contains(fmt.Sprint(seen["C1"]["markdown_text"]), "only the people") || seen["C1"]["thread_ts"] != "4.0" {
 		t.Fatalf("the bot posted %v", s.posted())
 	}
+	w.titled(map[string][]string{
+		"slack-bridge": {"Slack bridge"},
+		"slack-listen": {"Slack listener"},
+		"chat":         {"#help: hello", "dm: in private"},
+		"message":      {"#help: hello", "dm: in private"},
+	})
 }
 
 // A question goes to a person on Slack with a button for each choice. A press by
@@ -838,6 +844,12 @@ func TestJiraChatReadsItsIssue(t *testing.T) {
 		strings.Contains(got, "written later") || strings.Contains(got, "a restricted word") {
 		t.Fatalf("the bot said %q", got)
 	}
+	w.titled(map[string][]string{
+		"jira-bridge": {"Jira bridge"},
+		"jira-listen": {"Jira listener"},
+		"chat":        {"OPS-12 go on"},
+		"message":     {"OPS-12 go on"},
+	})
 }
 
 // A person with no agent reads nothing of a thread, and Slack's thread is read to

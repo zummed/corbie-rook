@@ -6,6 +6,7 @@
 # seven days. Each
 # message it posted then shows the answer, and its buttons go.
 statechart: question
+title: "${input.text.split('\\n')[0]}"
 input: { people: list, in: "string?", text: string, choices: list, fields: "list?", within: "string?" }
 initial: asking
 states:

@@ -56,6 +56,7 @@ A bridge's file starts its listener, and the bridge runs while the file is there
 ```yaml
 # bridges/gitlab.yaml
 flow: gitlab-bridge
+title: GitLab bridge
 limits: { depth: 16 }   # every conversation counts its levels from here
 stages:
   listen:
@@ -109,6 +110,15 @@ A comment on an issue that is still waiting is not heard on its own, and is in t
 ## A conversation
 
 A conversation is a run. Its messages are answered one at a time, each by a new agent given the conversation so far.
+
+| Run | Its title |
+|---|---|
+| a conversation | where it is and the first line said: `#help: …`, `dm: …`, `#7 …` for a GitLab issue, `OPS-1 …` for a Jira one |
+| a message | where it was said, and all of it |
+| an agent answering | the asker's name and what they said |
+| a question, a form | the first line of what is asked |
+| an approval | `Approve`, the tools held, and what the asker said |
+| a bridge, its listener | `Slack bridge`, `Slack listener` |
 
 - A conversation quiet for a day ends, and the next message starts afresh.
 - After `corbie run submit` starts a bridge again, its next message starts a new conversation, with the machines as they are then. A conversation already under way finishes with the machines it started with.

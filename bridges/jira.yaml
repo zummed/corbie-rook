@@ -5,6 +5,7 @@
 # it for two minutes, as it is then, and `overhear: true` to hear every issue and
 # comment, each weighed by attend.yaml.
 flow: jira-bridge
+title: Jira bridge
 limits: { depth: 16 }   # every conversation counts its levels from here
 stages:
   listen:

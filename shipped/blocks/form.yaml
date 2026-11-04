@@ -3,6 +3,7 @@
 # cancel, or no after an hour unanswered, and `values`, by field name. Only
 # Slack shows forms; on another bridge it gives a note saying so.
 flow: form
+title: "${input.text.split('\\n')[0]}"
 input: { address: map, asker: string, text: string, fields: list }
 stages:
   question:
