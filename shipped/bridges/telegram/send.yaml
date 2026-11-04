@@ -1,0 +1,11 @@
+# Sends a file in a Telegram chat, under a name.
+flow: send
+input: { to: string, name: string, file: blob }
+stages:
+  send:
+    job:
+      script: ./telegram.js
+      input: { do: send, token: TELEGRAM_TOKEN, to: "${input.to}", name: "${input.name}", file: "${input.file}" }
+      allow: [net:api.telegram.org, "secret:TELEGRAM_TOKEN@net:api.telegram.org"]
+      timeout: 5m
+output: ${stages.send.output}

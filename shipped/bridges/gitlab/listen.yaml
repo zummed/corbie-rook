@@ -17,7 +17,7 @@ states:
   hearing:
     job:
       script: ./gitlab.js
-      files: [./api.js]
+      files: [./api.js, .rook/blocks/types.js]
       input: { do: hear, site: "${input.site}", projects: "${input.projects}", overhear: "${input.overhear || false}", settle: "${input.settle || '0s'}", cursor: "${states.hearing.output ? states.hearing.output.cursor : null}" }
       allow: ["net:${input.site}", "secret:GITLAB_TOKEN@net:${input.site}"]
       timeout: 2m

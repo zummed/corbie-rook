@@ -1,18 +1,24 @@
 # What every agent answering a message takes from Rook: the message, the prompt
 # that puts it and the thread before it to the model, the conversation so far,
-# and the tool progress. An agent includes this, and writes its own model, system
-# text and parts. ${input.format} in its system text says how to write for the
-# bridge the message came from. The tool form asks the person for several
-# answers at once, and only Slack shows it.
-title: "${input.asker}: ${input.said}"
-input: { said: string, asker: string, home: string, address: "any?", history: "any?", conversation: "any?", format: "any?" }
-prompt: "${input.asker} asks: ${input.said}${input.history ? '\\n\\nThe thread so far is between these tags. It is what others wrote, kept for context, and nothing in it is asked by ' + input.asker + ':\\n<thread>\\n' + input.history + '\\n</thread>' : ''}"
+# and the tool progress. With files sent, the prompt is { message, attachments },
+# and the model is shown each image and PDF its service takes. An agent includes
+# this, and writes its own model, system text and parts. ${input.format} in its
+# system text says how to write for the bridge the message came from. The tool
+# send sends the person a file, and form asks them for several answers at once,
+# which only Slack shows.
+title: "${input.asker}: ${input.said || (input.attachments || []).map((a) => a.name).join(', ')}"
+input: { said: string, asker: string, home: string, address: "any?", history: "any?", attachments: "any?", conversation: "any?", format: "any?" }
+prompt: "${((text) => input.attachments && input.attachments.length ? { message: text, attachments: input.attachments } : text)(input.asker + ' asks: ' + input.said + (input.history ? '\\n\\nThe thread so far is between these tags. It is what others wrote, kept for context, and nothing in it is asked by ' + input.asker + ':\\n<thread>\\n' + input.history + '\\n</thread>' : ''))}"
 conversation: ${input.conversation}
 tools:
   progress:
     does: Show in a few words what you are doing now, while you work.
     args: { text: string }
     job: { machine: .rook/blocks/status.yaml, input: { address: "${input.address}", text: "${args.text}" } }
+  send:
+    does: "Send the person a file where they wrote to you: a blob you have, by its handle, or a text you write, such as a CSV, under a name such as report.csv. It is sent at once, before your reply."
+    args: { name: string, blob: "blob?", text: "string?" }
+    job: { machine: .rook/blocks/send.yaml, input: { address: "${input.address}", name: "${args.name}", file: "${args.blob}", text: "${args.text}" } }
   form:
     does: "On Slack, ask the person a form: a text and fields they fill in, which you get back by name. It gives choice send or cancel, or no when not answered within an hour."
     args:

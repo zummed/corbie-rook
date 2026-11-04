@@ -43,6 +43,8 @@ The machines in `.rook/` read these files by name: `rules.yaml`,
 
   bridges/<name>/listen.yaml           hears the service, and sends each message by key
   bridges/<name>/say.yaml              says a text; every bridge has one
+  bridges/<name>/send.yaml             sends a file; every bridge has one
+  bridges/<name>/attachments.yaml      downloads a message's files; every bridge has one
   bridges/<name>/history.yaml          reads a thread; Slack, GitLab and Jira
   bridges/<name>/ask.yaml, close.yaml  asks with buttons, and shows the answer; Telegram and Slack
   bridges/<name>/status.yaml           shows a status; Telegram and Slack
@@ -50,6 +52,9 @@ The machines in `.rook/` read these files by name: `rules.yaml`,
   blocks/chat.yaml                     one conversation, a message at a time
   blocks/who.yaml                      the person a message is from, and the agent they get there
   blocks/say.yaml, tell.yaml           says a text at an address, or to a person
+  blocks/send.yaml, file.js            sends a file at an address, for the tool send
+  blocks/attachments.yaml              downloads a message's files to answer it
+  blocks/types.js                      a file's media type by its name
   blocks/ask.yaml                      asks people, and gives their answer
   blocks/status.yaml                   shows a status at an address
   blocks/history.yaml, thread.js       what a thread held before a message
@@ -124,6 +129,7 @@ or a part of it.
   answers        the message a reply answers, on Telegram
   settings       the service's host, and Jira's account, which a reply needs
   unaddressed    true for a message that does not name the bot, and absent otherwise
+  attachments    the files sent with it, each { name, type, size, id }, and absent with none
 
   Telegram    chat: the chat                                         place: dm
   Slack       chat: the conversation and thread                      place: dm, or #channel
@@ -133,6 +139,13 @@ or a part of it.
 In a channel, each message that is not in a thread starts its own Slack
 thread. An answer holds `bridge`, `question`, `from` and `choice`, and on
 Slack `values`, the form's fields by name.
+
+A message's files are these.
+
+  Telegram    its photo, document, audio, voice, video or animation; each item of an album is its own message
+  Slack       the files Slack keeps, which the bot reads with the scope files:read
+  GitLab      each /uploads/ link in the comment or issue, its type from its name and no size
+  Jira        the issue's files the comment names; an opened issue's, but one only a restricted comment names
 
 A conversation
 --------------
@@ -150,10 +163,22 @@ time, each with a new agent given the conversation so far.
   read, so a conversation there starts with nothing.
 - The history holds what was said, and no tool calls or results. When the
   read fails, the message is answered with no history.
+- The history's files go to the agent beside the message's own: the latest
+  10 on its entries, each marked `earlier: true`. On Jira they are the
+  issue's files, but one a restricted comment names.
 - Rook reads nothing for a person with no agent.
+- A message's files are downloaded only to answer it, each of at most 32
+  MiB, or 20 MB on Telegram. The agent's prompt is then `{ message,
+  attachments }`, where each file holds its contents as a blob.
+- The model is shown each PNG, JPEG, GIF or WebP image of at most 5 MiB, and
+  each PDF, when its service takes them. Any other file is a handle, and the
+  agent reads a text file with Corbie's blob tools.
+- When a download fails, the agent gets each file as the message holds it,
+  with no contents.
 - `attend.yaml` gets the thread before the message, and only for someone with
-  an agent. When it fails, the message is not answered. A message with
-  `unaddressed: true` never gets a refusal.
+  an agent. Its `said` ends with a line naming the message's files, as
+  `(files: error.png)`. When it fails, the message is not answered. A message
+  with `unaddressed: true` never gets a refusal.
 - While an agent works, `chat.yaml` shows `Working on it.` under a Slack
   thread and "typing" on Telegram. A reply clears it on Slack, and so does
   an answer that says nothing.
@@ -166,8 +191,8 @@ time, each with a new agent given the conversation so far.
   answers only the people it belongs to.`
 
   a conversation          where it is and the first line said: #help: …, dm: …, #7 … on GitLab, OPS-1 … on Jira
-  a message               all that was said
-  an agent answering      the asker's name and what they said
+  a message               all that was said, or the names of its files
+  an agent answering      the asker's name and what they said, or the names of its files
   a question, a form      the first line of what is asked
   an approval             Approve, the tools held, and what the asker said
   a bridge, its listener  Slack bridge, Slack listener
@@ -186,6 +211,7 @@ an agent's place in `answer.yaml`, with the same input and output.
   home            the project's directory
   address         where the message came from
   history         what the thread held before this message, for a new conversation on Slack, GitLab or Jira
+  attachments     its files and the history's, each as the message holds it with file, its contents
   conversation    what the last answer gave, or nothing
   format          how to write for the message's bridge: Markdown or not, and how to write a chart, a layout or a diagram
 
@@ -198,6 +224,7 @@ directory.
 
   .rook/blocks/tell.yaml      person, text: says a text to a person named in lookup.yaml
   .rook/blocks/say.yaml       address, text: says a text at an address
+  .rook/blocks/send.yaml      address, name, file or text: sends a blob, or a text as a file, at an address
   .rook/blocks/ask.yaml       people, in, text, choices, fields, within: asks, and gives choice and values
   .rook/blocks/status.yaml    address, text: shows a status under a Slack thread or as "typing" on Telegram
 
@@ -206,8 +233,8 @@ directory.
 - On Slack, an address's `id` may be a channel's `#name`.
 - `chat.yaml` gives the address of each message, and `lookup.yaml` with
   `do: reach` gives one for each person.
-- A message's address can be a channel or an issue, so it goes to `say.yaml`
-  and `status.yaml`. On Slack, its `id` can go to `ask.yaml` as `in`.
+- A message's address can be a channel or an issue, so it goes to `say.yaml`,
+  `send.yaml` and `status.yaml`. On Slack, its `id` can go to `ask.yaml` as `in`.
 - `ask.yaml` takes people by name, as `lookup.yaml` knows them.
 - On `status.yaml`, an empty text clears the status on Slack, and Telegram's
   "typing" ends by itself. A status that fails gives `{ shown: false }`, and
@@ -328,7 +355,15 @@ includes.
 - An agent that answers messages includes `.rook/agents/base.yaml`, and
   writes its own model, system text and parts.
 - `base.yaml` gives the agent its input, its prompt, the conversation, and the
-  tools `progress` and `form`.
+  tools `progress`, `send` and `form`.
+- The tool `send` sends a file where the message came from, at once: a blob
+  the agent has, or a text it writes, under a name such as `report.csv`.
+
+  Telegram    a document, which Telegram shows with a preview when it is an image
+  Slack       a file in the conversation or thread, which the bot sends with the scope files:write
+  GitLab      a comment that links the file, uploaded to the issue's project
+  Jira        an attachment on the issue, and a comment that shows a PNG, JPEG or GIF and links any other
+
 - `${input.format}` in the system text says how to write for the bridge the
   message came from.
 - A part's script can call GitLab or Jira through the bridge's `api.js`. Its

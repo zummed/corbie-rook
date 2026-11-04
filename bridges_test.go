@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	llmstandin "github.com/zummed/corbie/plugin/llm/standin"
+	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -81,6 +83,141 @@ func setSite(t *testing.T, dir, file, from, to string) {
 	}
 }
 
+// A telegram stands in for Telegram's Bot API, for the bot with the token
+// "123:abc".
+type telegram struct {
+	*httptest.Server
+	mu      sync.Mutex
+	updates []map[string]any  // each message sent to the bot, in order; its update_id is its place from 1
+	heard   int               // the highest offset asked from, below which every update was heard
+	sent    []map[string]any  // each message the bot sent, in order
+	files   map[string]string // what each file_id downloads
+	got     []string          // each file_id getFile was asked for
+	uploads []upload          // each file the bot sent, in order
+}
+
+// An upload is a file a bot sent: the method and field it came by, the
+// conversation it went to, and the file's name, type and contents.
+type upload struct {
+	Method, Field, To, Name, Type, Body string
+}
+
+// uploaded reads the one file of a multipart form.
+func uploaded(r *http.Request, method, to string) (upload, error) {
+	if err := r.ParseMultipartForm(1 << 20); err != nil {
+		return upload{}, err
+	}
+	for field, files := range r.MultipartForm.File {
+		f, err := files[0].Open()
+		if err != nil {
+			return upload{}, err
+		}
+		defer f.Close()
+		body, err := io.ReadAll(f)
+		return upload{Method: method, Field: field, To: r.FormValue(to), Name: files[0].Filename, Type: files[0].Header.Get("Content-Type"), Body: string(body)}, err
+	}
+	return upload{}, fmt.Errorf("the form holds no file")
+}
+
+func newTelegram(t *testing.T) *telegram {
+	tg := &telegram{files: map[string]string{}}
+	tg.Server = httptest.NewServer(http.HandlerFunc(tg.serve))
+	t.Cleanup(tg.Close)
+	return tg
+}
+
+func (tg *telegram) serve(w http.ResponseWriter, r *http.Request) {
+	if path, ok := strings.CutPrefix(r.URL.Path, "/file/bot123:abc/files/"); ok {
+		tg.mu.Lock()
+		body, ok := tg.files[path]
+		tg.mu.Unlock()
+		if !ok {
+			w.WriteHeader(404)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		fmt.Fprint(w, body)
+		return
+	}
+	method, ok := strings.CutPrefix(r.URL.Path, "/bot123:abc/")
+	if !ok {
+		fmt.Fprint(w, `{"ok": false, "error_code": 401, "description": "Unauthorized"}`)
+		return
+	}
+	reply := func(result any) { json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": result}) }
+	if method == "sendDocument" {
+		u, err := uploaded(r, method, "chat_id")
+		if err != nil {
+			fmt.Fprintf(w, `{"ok": false, "error_code": 400, "description": %q}`, err.Error())
+			return
+		}
+		tg.mu.Lock()
+		tg.uploads = append(tg.uploads, u)
+		reply(map[string]any{"message_id": 200 + len(tg.uploads)})
+		tg.mu.Unlock()
+		return
+	}
+	var ask map[string]any
+	json.NewDecoder(r.Body).Decode(&ask)
+	switch method {
+	case "getUpdates":
+		// It waits for an update at most a third of a second, so that the
+		// server closes quickly when the test ends.
+		offset, _ := ask["offset"].(float64)
+		for end := time.Now().Add(min(time.Duration(ask["timeout"].(float64))*time.Second, 300*time.Millisecond)); ; time.Sleep(10 * time.Millisecond) {
+			tg.mu.Lock()
+			tg.heard = max(tg.heard, int(offset))
+			from := max(tg.heard, 1)
+			var out []map[string]any
+			if from <= len(tg.updates) {
+				out = []map[string]any{{"update_id": from, "message": tg.updates[from-1]}}
+			}
+			tg.mu.Unlock()
+			if out != nil || time.Now().After(end) {
+				reply(out)
+				return
+			}
+		}
+	case "getFile":
+		id := ask["file_id"].(string)
+		tg.mu.Lock()
+		tg.got = append(tg.got, id)
+		tg.mu.Unlock()
+		reply(map[string]any{"file_id": id, "file_path": "files/" + id})
+	case "sendMessage":
+		tg.mu.Lock()
+		tg.sent = append(tg.sent, ask)
+		reply(map[string]any{"message_id": 100 + len(tg.sent)})
+		tg.mu.Unlock()
+	case "sendChatAction":
+		reply(true)
+	default:
+		fmt.Fprint(w, `{"ok": false, "error_code": 404, "description": "Not Found"}`)
+	}
+}
+
+// says sends the bot messages from alice, in her chat with it.
+func (tg *telegram) says(messages ...map[string]any) {
+	tg.mu.Lock()
+	defer tg.mu.Unlock()
+	for _, m := range messages {
+		m["message_id"] = 10 + len(tg.updates)
+		m["from"] = map[string]any{"id": 1, "is_bot": false, "first_name": "Alice"}
+		m["chat"] = map[string]any{"id": 1, "type": "private"}
+		tg.updates = append(tg.updates, m)
+	}
+}
+
+func (tg *telegram) said() []string {
+	tg.mu.Lock()
+	defer tg.mu.Unlock()
+	var out []string
+	for _, m := range tg.sent {
+		out = append(out, fmt.Sprint(m["text"]))
+	}
+	return out
+}
+
 // A gitlab stands in for GitLab's REST API on one project.
 type gitlab struct {
 	*httptest.Server
@@ -89,15 +226,20 @@ type gitlab struct {
 	notes   []string
 	failing int // how many asks for events are answered 500
 	asks    int
-	thread  []map[string]any // the issue's comments, oldest first
-	reads   int              // how many times the comments were read
-	broken  bool             // the comments cannot be read
-	text    string           // issue 7's description, by default "It fails."
-	updated string           // when issue 7 last changed, by default never said
+	thread  []map[string]any  // the issue's comments, oldest first
+	reads   int               // how many times the comments were read
+	broken  bool              // the comments cannot be read
+	text    string            // issue 7's description, by default "It fails."
+	updated string            // when issue 7 last changed, by default never said
+	files   map[string]string // the files uploaded, by path under the project, as /uploads/<secret>/<name>
+	sizes   map[string]int    // the size HEAD gives, where it is not the file's own; -1 for none
+	fetches []string          // each call for a file, as "GET <path>"
+	uploads []upload          // each file the bot uploaded, To being its project
+	full    bool              // an upload is refused with 413
 }
 
 func newGitLab(t *testing.T) *gitlab {
-	gl := &gitlab{}
+	gl := &gitlab{files: map[string]string{}, sizes: map[string]int{}}
 	gl.Server = httptest.NewServer(http.HandlerFunc(gl.serve))
 	t.Cleanup(gl.Close)
 	return gl
@@ -106,6 +248,27 @@ func newGitLab(t *testing.T) *gitlab {
 func (gl *gitlab) serve(w http.ResponseWriter, r *http.Request) {
 	gl.mu.Lock()
 	defer gl.mu.Unlock()
+	if strings.Contains(r.URL.Path, "/uploads/") {
+		gl.fetches = append(gl.fetches, r.Method+" "+r.URL.EscapedPath())
+		path, ours := strings.CutPrefix(r.URL.EscapedPath(), "/api/v4/projects/group%2Fproject")
+		body, found := gl.files[path]
+		if r.Header.Get("PRIVATE-TOKEN") != "gl-token" || !ours || !found {
+			w.WriteHeader(404)
+			return
+		}
+		size, given := gl.sizes[path]
+		if !given || r.Method != "HEAD" {
+			size = len(body)
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		if size >= 0 {
+			w.Header().Set("Content-Length", strconv.Itoa(size))
+		}
+		if r.Method == "GET" {
+			io.WriteString(w, body)
+		}
+		return
+	}
 	if r.Header.Get("PRIVATE-TOKEN") != "gl-token" {
 		w.WriteHeader(401)
 		return
@@ -147,6 +310,23 @@ func (gl *gitlab) serve(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"title": "Help @bot", "description": "It broke."}`)
 	case strings.HasSuffix(r.URL.Path, "/issues/9"):
 		w.WriteHeader(404)
+	case r.Method == "POST" && r.URL.EscapedPath() == "/api/v4/projects/group%2Fproject/uploads":
+		if gl.full {
+			w.WriteHeader(413)
+			return
+		}
+		u, err := uploaded(r, "uploads", "")
+		if err != nil {
+			w.WriteHeader(400)
+			return
+		}
+		u.To = "group/project"
+		gl.uploads = append(gl.uploads, u)
+		link := "[" + u.Name + "](/uploads/" + secret2 + "/" + u.Name + ")"
+		if strings.HasPrefix(u.Type, "image/") {
+			link = "!" + link
+		}
+		json.NewEncoder(w).Encode(map[string]any{"id": len(gl.uploads), "alt": u.Name, "url": "/uploads/" + secret2 + "/" + u.Name, "markdown": link})
 	case r.Method == "POST" && strings.Contains(r.URL.EscapedPath(), "group%2Fproject/issues/7/notes"):
 		var body struct{ Body string }
 		json.NewDecoder(r.Body).Decode(&body)
@@ -178,6 +358,12 @@ func (gl *gitlab) asked() int {
 	gl.mu.Lock()
 	defer gl.mu.Unlock()
 	return gl.asks
+}
+
+func (gl *gitlab) fetched() []string {
+	gl.mu.Lock()
+	defer gl.mu.Unlock()
+	return append([]string{}, gl.fetches...)
 }
 
 // A comment naming the bot on an issue is answered there, without the name, a
@@ -278,11 +464,18 @@ func TestGitLabIssueGoneStopsNothing(t *testing.T) {
 // A jira stands in for Jira Cloud's REST API on one project.
 type jira struct {
 	*httptest.Server
-	mu       sync.Mutex
-	comments []map[string]any
-	said     []string
-	asks     int
-	reads    int
+	mu        sync.Mutex
+	comments  []map[string]any
+	said      []string
+	asks      int
+	reads     int
+	files     []map[string]any  // the issue's fields.attachment, by default none
+	contents  map[string]string // each file's contents, by id
+	fields    map[string]any    // other fields of the issue, given instead of these
+	downloads []string          // each file's id, as it is downloaded
+	uploads   []upload          // each file the bot attached, in order
+	largest   int               // the largest file Jira takes, in bytes; by default any
+	stored    string            // the name Jira keeps a file under; by default the name it was sent
 }
 
 func newJira(t *testing.T) *jira {
@@ -302,19 +495,51 @@ func (j *jira) serve(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/rest/api/2/myself":
 		fmt.Fprint(w, `{"accountId": "acc-bot"}`)
+	case strings.HasPrefix(r.URL.Path, "/rest/api/2/attachment/content/"):
+		if r.URL.Query().Get("redirect") != "false" {
+			http.Redirect(w, r, "http://media.example.com/file", http.StatusSeeOther)
+			return
+		}
+		id := strings.TrimPrefix(r.URL.Path, "/rest/api/2/attachment/content/")
+		j.downloads = append(j.downloads, id)
+		w.Header().Set("Content-Type", "application/octet-stream")
+		fmt.Fprint(w, j.contents[id])
 	case r.URL.Path == "/rest/api/2/search/jql":
 		j.asks++
-		json.NewEncoder(w).Encode(map[string]any{"isLast": true, "issues": []any{map[string]any{"id": "10", "key": "OPS-12", "fields": map[string]any{
+		json.NewEncoder(w).Encode(map[string]any{"isLast": true, "issues": []any{map[string]any{"id": "10", "key": "OPS-12", "fields": j.withFiles(map[string]any{
 			"summary": "Broken", "description": "", "created": "2020-01-01T00:00:00.000+0000",
 			"reporter": map[string]any{"accountId": "acc-1"}, "comment": map[string]any{"comments": j.comments},
-		}}}})
+		})}}})
 	case r.Method == "GET" && r.URL.Path == "/rest/api/2/issue/OPS-12":
-		fmt.Fprint(w, `{"fields": {"summary": "Broken", "description": "It fails.", "reporter": {"accountId": "acc-1", "displayName": "Al"}}}`)
+		json.NewEncoder(w).Encode(map[string]any{"fields": j.withFiles(map[string]any{
+			"summary": "Broken", "description": "It fails.", "reporter": map[string]any{"accountId": "acc-1", "displayName": "Al"},
+		})})
 	case r.Method == "GET" && r.URL.Path == "/rest/api/2/issue/OPS-12/comment":
 		j.reads++
 		comments := append([]map[string]any{}, j.comments...)
 		slices.Reverse(comments)
 		json.NewEncoder(w).Encode(map[string]any{"comments": comments})
+	case r.Method == "POST" && r.URL.Path == "/rest/api/2/issue/OPS-12/attachments":
+		if r.Header.Get("X-Atlassian-Token") != "no-check" {
+			w.WriteHeader(403)
+			return
+		}
+		u, err := uploaded(r, "attachments", "")
+		if err != nil {
+			w.WriteHeader(400)
+			return
+		}
+		if j.largest > 0 && len(u.Body) > j.largest {
+			w.WriteHeader(413)
+			return
+		}
+		u.To = "OPS-12"
+		j.uploads = append(j.uploads, u)
+		stored := u.Name
+		if j.stored != "" {
+			stored = j.stored
+		}
+		json.NewEncoder(w).Encode([]any{map[string]any{"id": fmt.Sprint(20000 + len(j.uploads)), "filename": stored, "mimeType": u.Type, "size": len(u.Body)}})
 	case r.Method == "POST" && r.URL.Path == "/rest/api/2/issue/OPS-12/comment":
 		var body struct{ Body string }
 		json.NewDecoder(r.Body).Decode(&body)
@@ -325,10 +550,33 @@ func (j *jira) serve(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// withFiles adds the issue's files and the fields given instead to fields.
+func (j *jira) withFiles(fields map[string]any) map[string]any {
+	if j.files != nil {
+		fields["attachment"] = j.files
+	}
+	maps.Copy(fields, j.fields)
+	return fields
+}
+
 func (j *jira) comment(id, author, body string, at time.Time) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	j.comments = append(j.comments, map[string]any{"id": id, "body": body, "created": at.UTC().Format("2006-01-02T15:04:05.000+0000"), "author": map[string]any{"accountId": author}})
+	j.comments = append(j.comments, map[string]any{"id": id, "body": body, "created": jiraTime(at), "author": map[string]any{"accountId": author}})
+}
+
+func jiraTime(at time.Time) string { return at.UTC().Format("2006-01-02T15:04:05.000+0000") }
+
+func (j *jira) downloaded() []string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return slices.Clone(j.downloads)
+}
+
+func (j *jira) attached() []upload {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return slices.Clone(j.uploads)
 }
 
 func (j *jira) saying() []string {
@@ -418,11 +666,22 @@ type slack struct {
 	socket  *websocket.Conn
 	posts   []map[string]any
 	acks    []string
-	thread  []map[string]any // what the conversation holds, oldest first
-	reads   []string         // the methods that read it
-	status  []map[string]any // each status set, in order
-	updates []map[string]any // each message changed, in order
-	refuse  bool             // a message with blocks is refused
+	thread  []map[string]any      // what the conversation holds, oldest first
+	reads   []string              // the methods that read it
+	status  []map[string]any      // each status set, in order
+	updates []map[string]any      // each message changed, in order
+	refuse  bool                  // a message with blocks is refused
+	files   map[string]string     // what each path under /files/ downloads
+	shared  []upload              // each file the bot sent, in order
+	noWrite bool                  // the token lacks the scope files:write
+	sending map[string]*slackFile // each file asked for, by its ID
+}
+
+// A slackFile is a file files.getUploadURLExternal was asked for: the name and
+// length it was given, and what came to its address.
+type slackFile struct {
+	name, length string
+	got          *upload
 }
 
 func newSlack(t *testing.T) *slack {
@@ -437,8 +696,39 @@ func (s *slack) serve(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/api/apps.connections.open" {
 		token = "xapp-app"
 	}
+	if id, ok := strings.CutPrefix(r.URL.Path, "/upload/v1/"); ok {
+		// The address Slack gives for a file's bytes, as many as it was told.
+		// The bot token is not needed there, and is refused.
+		if r.Header.Get("Authorization") != "" {
+			w.WriteHeader(403)
+			return
+		}
+		body, err := io.ReadAll(r.Body)
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		f := s.sending[id]
+		if err != nil || f == nil || f.length != strconv.Itoa(len(body)) {
+			w.WriteHeader(400)
+			return
+		}
+		f.got = &upload{Name: f.name, Type: r.Header.Get("Content-Type"), Body: string(body)}
+		fmt.Fprintf(w, "OK - %d", len(body))
+		return
+	}
 	if r.URL.Path != "/socket" && r.Header.Get("Authorization") != "Bearer "+token {
 		fmt.Fprint(w, `{"ok": false, "error": "invalid_auth"}`)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/files/") {
+		s.mu.Lock()
+		body, ok := s.files[r.URL.Path]
+		s.mu.Unlock()
+		if !ok {
+			w.WriteHeader(404)
+			return
+		}
+		w.Header().Set("Content-Type", "application/octet-stream")
+		fmt.Fprint(w, body)
 		return
 	}
 	switch r.URL.Path {
@@ -508,6 +798,41 @@ func (s *slack) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		s.posts = append(s.posts, post)
 		fmt.Fprint(w, `{"ok": true, "ts": "1.1"}`)
+	case "/api/files.getUploadURLExternal":
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if s.noWrite {
+			fmt.Fprint(w, `{"ok": false, "error": "missing_scope", "needed": "files:write"}`)
+			return
+		}
+		q := r.URL.Query()
+		if s.sending == nil {
+			s.sending = map[string]*slackFile{}
+		}
+		id := "F" + strconv.Itoa(100+len(s.sending))
+		s.sending[id] = &slackFile{name: q.Get("filename"), length: q.Get("length")}
+		json.NewEncoder(w).Encode(map[string]any{"ok": true, "upload_url": s.URL + "/upload/v1/" + id, "file_id": id})
+	case "/api/files.completeUploadExternal":
+		var done struct {
+			Files []struct {
+				ID    string `json:"id"`
+				Title string `json:"title"`
+			} `json:"files"`
+			Channel string `json:"channel_id"`
+			Thread  string `json:"thread_ts"`
+		}
+		json.NewDecoder(r.Body).Decode(&done)
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if len(done.Files) != 1 || s.sending[done.Files[0].ID] == nil || s.sending[done.Files[0].ID].got == nil {
+			fmt.Fprint(w, `{"ok": false, "error": "file_not_found"}`)
+			return
+		}
+		// The file is shared in the conversation, or with thread_ts in its thread.
+		u := *s.sending[done.Files[0].ID].got
+		u.Method, u.To = "files.completeUploadExternal", strings.TrimSuffix(done.Channel+"/"+done.Thread, "/")
+		s.shared = append(s.shared, u)
+		json.NewEncoder(w).Encode(map[string]any{"ok": true, "files": done.Files})
 	case "/api/assistant.threads.setStatus":
 		var status map[string]any
 		json.NewDecoder(r.Body).Decode(&status)
@@ -556,7 +881,7 @@ func (s *slack) acked() int {
 func slackProject(t *testing.T, w *world, s *slack) string {
 	w.secret("SLACK_TOKEN", "xoxb-bot")
 	w.secret("SLACK_APP_TOKEN", "xapp-app")
-	return pointed(t, "slack", s.Server, "slack.com", "wss-primary.slack.com", "wss-backup.slack.com")
+	return pointed(t, "slack", s.Server, "files.slack.com", "slack.com", "wss-primary.slack.com", "wss-backup.slack.com")
 }
 
 // A direct message is answered, a message naming the bot in a channel is answered

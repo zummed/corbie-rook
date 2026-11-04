@@ -1,14 +1,17 @@
 // The bot's script: input.do is hear, for listen.yaml, say, for say.yaml,
-// ask, for ask.yaml, close, for close.yaml, or status, for status.yaml. It speaks Telegram's Bot API with the token of the secret
-// input.token names, which it holds only as a handle.
+// ask, for ask.yaml, close, for close.yaml, status, for status.yaml,
+// attachments, for attachments.yaml, or send, for send.yaml. It speaks
+// Telegram's Bot API with the token of the secret input.token names, which it
+// holds only as a handle.
 const api = "https://api.telegram.org"
 const token = secrets.get(input.token)
 
-// call calls a method of the Bot API and gives its result. Telegram's
-// refusal is thrown with its words, so the job fails and says why. No
-// error holds the address called, since it holds the token.
-function call(method, body) {
-  const reply = http.post(secrets.text`${api}/bot${token}/${method}`, { json: body, as: "text", timeout: 70 })
+// call calls a method of the Bot API and gives its result, sending body as
+// JSON, or with upload as a form that holds a file, which may take four minutes. Telegram's refusal is
+// thrown with its words, so the job fails and says why. No error holds the
+// address called, since it holds the token.
+function call(method, body, upload) {
+  const reply = http.post(secrets.text`${api}/bot${token}/${method}`, upload ? { upload: body, as: "text", timeout: 240 } : { json: body, as: "text", timeout: 70 })
   let answer
   try {
     answer = JSON.parse(reply.body)
@@ -17,6 +20,21 @@ function call(method, body) {
   }
   if (!answer.ok) throw new Error("Telegram refused " + method + ": " + answer.error_code + " " + answer.description)
   return answer.result
+}
+
+// The file a message carries, as a message's attachments give it, or null. A
+// photo comes in several sizes, and the largest is taken. A live photo also
+// sets photo, and an animation also sets document, so each is taken once.
+function attachment(m) {
+  if (m.photo) {
+    const p = m.photo.reduce((a, b) => (b.width * b.height > a.width * a.height ? b : a))
+    return { name: "photo.jpg", type: "image/jpeg", size: p.file_size, id: p.file_id }
+  }
+  for (const kind of ["animation", "document", "audio", "voice", "video", "video_note"]) {
+    const f = m[kind]
+    if (f) return { name: f.file_name || kind, type: f.mime_type || "application/octet-stream", size: f.file_size, id: f.file_id }
+  }
+  return null
 }
 
 if (input.do === "hear") {
@@ -47,11 +65,35 @@ if (input.do === "hear") {
     const m = u.message
     if (!m || !m.from || m.from.is_bot || m.chat.type !== "private") continue
     const text = m.text || m.caption || ""
-    if (!text) continue
-    emit("message", { bridge: "telegram", text: text, chat: String(m.chat.id), from: String(m.from.id), place: "dm",
-      answers: m.chat.id + ":" + m.message_id })
+    const file = attachment(m)
+    if (!text && !file) continue
+    // Each item of an album comes as its own update, so it is a message of
+    // its own, with its own caption.
+    const message = { bridge: "telegram", text: text, chat: String(m.chat.id), from: String(m.from.id), place: "dm",
+      answers: m.chat.id + ":" + m.message_id }
+    if (file) message.attachments = [file]
+    emit("message", message)
   }
   return { cursor: cursor }
+}
+
+if (input.do === "attachments") {
+  // Each file's contents: getFile gives its path, downloaded with the token in
+  // the address. A file over input.most bytes is left as it is.
+  return input.attachments.map((a) => {
+    if (a.size > input.most) return a
+    const path = call("getFile", { file_id: a.id }).file_path
+    const reply = http.get(secrets.text`${api}/file/bot${token}/${path}`, { as: "bytes", timeout: 120 })
+    if (reply.status !== 200) throw new Error("Telegram answered the download of " + a.name + " with status " + reply.status)
+    return Object.assign({}, a, { file: blobs.make(reply.body, { type: a.type }) })
+  })
+}
+
+if (input.do === "send") {
+  // A file in the chat, as a document, which Telegram shows an image of. A
+  // photo is not used: Telegram refuses one past 10 MB or of an odd shape.
+  const m = call("sendDocument", { chat_id: String(input.to), document: { data: input.file, name: input.name } }, true)
+  return { sent: input.to + ":" + m.message_id }
 }
 
 if (input.do === "ask") {

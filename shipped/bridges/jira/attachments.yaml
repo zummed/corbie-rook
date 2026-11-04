@@ -1,0 +1,13 @@
+# Downloads the files on a Jira issue that a message has, each at most `most`
+# bytes.
+flow: jira-attachments
+input: { attachments: list, most: number, site: string, email: string }
+stages:
+  download:
+    job:
+      script: ./jira.js
+      files: [./api.js]
+      input: { do: attachments, attachments: "${input.attachments}", most: "${input.most}", site: "${input.site}", email: "${input.email}" }
+      allow: ["net:${input.site}", "secret:JIRA_TOKEN@net:${input.site}"]
+      timeout: 5m
+output: ${stages.download.output}

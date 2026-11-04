@@ -1,0 +1,12 @@
+# Sends a file on Slack, under a name: `to` is a conversation, a channel's
+# #name, or either with /thread.
+flow: slack-send
+input: { to: string, name: string, file: blob }
+stages:
+  send:
+    job:
+      script: ./slack.js
+      input: { do: send, to: "${input.to}", name: "${input.name}", file: "${input.file}" }
+      allow: [net:slack.com, net:files.slack.com, "secret:SLACK_TOKEN@net:slack.com"]
+      timeout: 5m
+output: ${stages.send.output}

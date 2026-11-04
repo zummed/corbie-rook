@@ -1,8 +1,8 @@
 // Slack's script: input.do is hear, for listen.yaml, say, for say.yaml, ask, for
-// ask.yaml, close, for close.yaml, history, for history.yaml, or status, for
-// status.yaml. It speaks
-// Slack's Web API with the bot token SLACK_TOKEN and listens with the app-level
-// token SLACK_APP_TOKEN, holding each as a handle.
+// ask.yaml, close, for close.yaml, history, for history.yaml, status, for
+// status.yaml, attachments, for attachments.yaml, or send, for send.yaml. It
+// speaks Slack's Web API with the bot token SLACK_TOKEN and listens with the
+// app-level token SLACK_APP_TOKEN, holding each as a handle.
 const api = "https://slack.com/api"
 const listenFor = 4 * 60 * 1000
 const longest = 12000
@@ -43,6 +43,12 @@ function named(to) {
   }
   throw new Error("Slack has no channel " + to + " the bot can see")
 }
+
+// described gives the files of a message Slack keeps, as a message's
+// attachments give them. A hidden, deleted or external file has no address
+// there, and is left out.
+const described = (files) => (files || []).filter((f) => String(f.url_private_download || "").startsWith("https://files.slack.com/"))
+  .map((f) => ({ name: f.name || f.title || f.id, type: f.mimetype || "application/octet-stream", size: f.size, id: f.url_private_download }))
 
 if (input.do === "hear") {
   const me = call("auth.test").user_id
@@ -89,7 +95,8 @@ if (input.do === "hear") {
     if (e.bot_id || !e.user || e.user === me) return
     const text = e.text || ""
     const direct = e.channel_type === "im"
-    if (!text) return
+    const files = described(e.files)
+    if (!text && !files.length) return
     let unaddressed = false
     if (!direct && !text.includes(mention)) {
       if (!input.overhear || !e.thread_ts) return
@@ -104,6 +111,7 @@ if (input.do === "hear") {
     const place = direct ? "dm" : "#" + call("conversations.info", null, { channel: e.channel }).channel.name
     const chat = e.channel + (direct && !e.thread_ts ? "" : "/" + (e.thread_ts || e.ts))
     const message = { bridge: "slack", text: text.replaceAll(mention, "").trim(), chat: chat, from: e.user, place: place, at: e.ts }
+    if (files.length) message.attachments = files
     if (unaddressed) message.unaddressed = true
     emit("message", message)
   }
@@ -132,6 +140,33 @@ if (input.do === "hear") {
   }
   socket.close()
   return {}
+}
+
+if (input.do === "attachments") {
+  // Each file's contents, downloaded from its address with the bot token, which
+  // needs the scope files:read. A file over input.most bytes is left as it is.
+  return input.attachments.map((a) => {
+    if (a.size > input.most) return a
+    const reply = http.get(a.id, { headers: { Authorization: secrets.text`Bearer ${secrets.get("SLACK_TOKEN")}` }, as: "bytes", timeout: 120 })
+    // Slack answers a token that may not read the file with its sign-in page.
+    const type = reply.headers["content-type"] || ""
+    if (reply.status !== 200 || (/^text\/html/.test(type) && !/^text\/html/.test(a.type))) throw new Error("Slack answered the download of " + a.name + " with status " + reply.status + " and " + (type || "no type"))
+    return Object.assign({}, a, { file: blobs.make(reply.body, { type: a.type }) })
+  })
+}
+
+if (input.do === "send") {
+  // A file in a conversation or its thread, which needs the scope files:write.
+  // Slack gives an address on files.slack.com that takes the file's bytes with
+  // no token, then shares the file where it is told. A person's member id, as
+  // lookup.yaml gives, is sent to in their direct message with the bot.
+  const [to, thread] = String(input.to).split("/")
+  const channel = /^[UW]/.test(to) ? call("conversations.open", { users: to }).channel.id : named(to)
+  const at = call("files.getUploadURLExternal", null, { filename: input.name, length: String(input.file.size) })
+  const reply = http.post(at.upload_url, { body: input.file, timeout: 240 })
+  if (reply.status !== 200) throw new Error("Slack answered the upload of " + input.name + " with status " + reply.status)
+  call("files.completeUploadExternal", Object.assign({ files: [{ id: at.file_id, title: input.name }], channel_id: channel }, thread ? { thread_ts: thread } : {}))
+  return { sent: channel + ":" + at.file_id }
 }
 
 if (input.do === "ask") {
@@ -166,8 +201,8 @@ if (input.do === "close") {
 }
 
 if (input.do === "history") {
-  // A thread's replies, or a direct message's latest. Only what came before the
-  // message counts: it is what is being answered.
+  // A thread's replies, or a direct message's latest, with their files. Only
+  // what came before the message counts: it is what is being answered.
   const me = call("auth.test").user_id
   const [channel, thread] = String(input.to).split("/")
   const asked = { channel: channel, latest: String(input.at), inclusive: "false", limit: thread ? "200" : "30" }
@@ -185,11 +220,11 @@ if (input.do === "history") {
   } else {
     found = call("conversations.history", null, asked).messages || []
   }
-  const said = found.filter((m) => m.text && Number(m.ts) < Number(input.at))
+  const said = found.filter((m) => (m.text || described(m.files).length) && Number(m.ts) < Number(input.at))
   said.sort((a, b) => Number(a.ts) - Number(b.ts))
   const name = (m) => (m.user === me ? "you" : "<@" + (m.user || m.bot_id || "someone") + ">")
   const you = new RegExp("<@" + me + ">", "g")
-  return require("../../blocks/thread.js").text(said.map((m) => name(m) + ": " + m.text.replace(you, "you")))
+  return require("../../blocks/thread.js").history(said.map((m) => ({ line: name(m) + ": " + String(m.text || "").replace(you, "you"), attachments: described(m.files) })))
 }
 
 if (input.do === "status") {

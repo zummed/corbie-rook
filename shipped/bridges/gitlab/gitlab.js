@@ -1,12 +1,29 @@
-// GitLab's script: input.do is hear, for listen.yaml, say, for say.yaml, or
-// history, for history.yaml. It speaks the REST API of the GitLab at input.site
-// through api.js.
+// GitLab's script: input.do is hear, for listen.yaml, say, for say.yaml,
+// history, for history.yaml, attachments, for attachments.yaml, or send, for
+// send.yaml. It speaks the REST API of the GitLab at input.site through api.js.
 const call = require("./api.js").api(input.site)
 const project = (chat) => chat.slice(0, chat.lastIndexOf("#"))
 const issuePath = (chat) => "/projects/" + encodeURIComponent(project(chat)) + "/issues/" + chat.slice(chat.lastIndexOf("#") + 1)
 
 // GitLab records an issue made in its web UI as a work item.
 const issues = ["Issue", "WorkItem"]
+
+// The files a text links to. GitLab writes an upload as ![alt](/uploads/<secret>/<name>)
+// or [name](/uploads/<secret>/<name>), a path in the issue's own project; a link
+// to another project or host is not an attachment, nor is a name that could
+// leave the upload's directory: dots only, or an escaped . / or \. GitLab gives
+// no file's type, so its name's extension does.
+function attachments(text, project) {
+  const type = require("../../blocks/types.js").of
+  const found = new Map()
+  for (const m of text.matchAll(/\]\(\/uploads\/([0-9a-f]{32})\/([^\/\\()\s?#]+)\)/g)) {
+    const name = m[2]
+    if (/^\.+$/.test(name) || /%2e|%2f|%5c/i.test(name)) continue
+    const id = "/projects/" + encodeURIComponent(project) + "/uploads/" + m[1] + "/" + name
+    found.set(id, { name: name, type: type(name, "application/octet-stream"), id: id })
+  }
+  return [...found.values()]
+}
 
 // seconds reads a length of time: a number with s, m or h.
 function seconds(text) {
@@ -29,6 +46,8 @@ if (input.do === "hear") {
   const hear = (message) => {
     const named = message.text.search(mention) >= 0
     message.text = message.text.replace(mention, "$1").trim()
+    const files = attachments(message.text, message.place)
+    if (files.length) message.attachments = files
     if (named) heard.push(message)
     else if (input.overhear) heard.push(Object.assign(message, { unaddressed: true }))
   }
@@ -82,28 +101,61 @@ if (input.do === "hear") {
 }
 
 if (input.do === "history") {
-  // The issue and its comments before this one. A message that opens an issue
-  // holds the issue itself, and has only the comments made while it waited.
+  // The issue and its comments before this one, with the files each links to.
+  // A message that opens an issue holds the issue itself, and has only the
+  // comments made while it waited.
   const me = call("GET", "/user").username
   const name = (author) => (author.username === me ? "you" : author.username)
-  const lines = []
+  const entries = []
+  const entry = (author, text) => entries.push({ line: name(author || {}) + ": " + text, attachments: attachments(text, project(String(input.to))) })
   if (input.at) {
     const opened = call("GET", issuePath(String(input.to)), { maybe: true })
-    if (opened) lines.push(name(opened.author || {}) + ": " + opened.title + "\n\n" + (opened.description || ""))
+    if (opened) entry(opened.author, opened.title + "\n\n" + (opened.description || ""))
   }
   const notes = call("GET", issuePath(String(input.to)) + "/notes", { query: { sort: "desc", per_page: "30" }, maybe: true }) || []
   // An internal note is left out: the token may read it, and whoever reads the
   // answer may not.
   for (const note of notes.reverse()) {
     if (note.system || note.internal || note.confidential || (input.at && note.id >= input.at)) continue
-    lines.push(name(note.author || {}) + ": " + note.body)
+    entry(note.author, note.body)
   }
-  return lines.length ? require("../../blocks/thread.js").text(lines) : null
+  return require("../../blocks/thread.js").history(entries)
 }
 
-// say: a comment on the issue, each chart as its table.
+if (input.do === "attachments") {
+  // Each file's contents, downloaded through the API with the token. A file over
+  // input.most bytes, by HEAD's Content-Length or by what GET gave, has no file.
+  // GitLab answers every file as application/octet-stream, so each keeps the
+  // type its name gave it.
+  const site = input.site
+  const options = { headers: { "PRIVATE-TOKEN": secrets.get("GITLAB_TOKEN") }, timeout: 30 }
+  return input.attachments.map((a) => {
+    const address = "https://" + site + "/api/v4" + a.id
+    const head = http.request(address, Object.assign({ method: "HEAD" }, options))
+    if (head.status !== 200) throw new Error("GitLab answered the size of " + a.name + " with " + head.status)
+    const length = Number(head.headers["content-length"])
+    if (length > input.most) return Object.assign({}, a, { size: length })
+    const reply = http.get(address, Object.assign({}, options, { as: "bytes", timeout: 120 }))
+    if (reply.status !== 200) throw new Error("GitLab answered the download of " + a.name + " with " + reply.status)
+    const size = reply.body.length
+    if (size > input.most) return Object.assign({}, a, { size: size })
+    return Object.assign({}, a, { size: size, file: blobs.make(reply.body, { type: a.type }) })
+  })
+}
+
+// say and send: a comment on the issue.
 const to = String(input.to)
 if (to.lastIndexOf("#") < 0) throw new Error("GitLab has no issue " + to)
+
+if (input.do === "send") {
+  // The file is uploaded to the issue's project, and the comment is the link
+  // GitLab gives for it.
+  const file = call("POST", "/projects/" + encodeURIComponent(project(to)) + "/uploads", { upload: { file: { data: input.file, name: input.name } }, timeout: 120 })
+  const note = call("POST", issuePath(to) + "/notes", { json: { body: file.markdown } })
+  return { sent: "note:" + note.id }
+}
+
+// say: the text as a comment, each chart as its table.
 if (!input.text) throw new Error("there is nothing to say")
 const note = call("POST", issuePath(to) + "/notes", { json: { body: require("../../blocks/rich.js").plain(String(input.text)) } })
 return { sent: "note:" + note.id }

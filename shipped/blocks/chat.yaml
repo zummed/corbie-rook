@@ -2,19 +2,21 @@
 # bridge's listener sends each message here under a key of its own. Its messages
 # are answered one at a time, each by a new agent given the conversation so far and
 # the message's address, and with no conversation yet, what the service's thread
-# already holds. A message marked unaddressed is answered only if attend.yaml says
-# so. A status shows while the agent works, and an empty reply says nothing.
+# already holds, with its files. The files are downloaded only to answer it.
+# A message marked unaddressed is answered only if attend.yaml says so, given
+# what was said and a line naming its files. A status shows while the agent
+# works, and an empty reply says nothing.
 # Anyone with no agent who names the bot is told the bot is not theirs, and a
 # question the agent fails on is told so and ends the conversation, so one the
 # model cannot take does not stop the chat. A chat quiet for a day ends, and its
 # next message starts a new conversation with the machines as they are then.
 # Its title is where it is and the first line said: "#help: …", "dm: …", "#7 …"
 # for a GitLab issue, "OPS-1 …" for a Jira one. A message's title is all that
-# was said.
+# was said, or the names of the files sent with it.
 statechart: chat
 title: >-
   ${input.event.bridge === 'gitlab' ? input.event.chat.slice(input.event.chat.lastIndexOf('#')) + ' ' :
-  input.event.bridge === 'jira' ? input.event.chat + ' ' : input.event.place + ': '}${String(input.event.text || '').split('\n')[0]}
+  input.event.bridge === 'jira' ? input.event.chat + ' ' : input.event.place + ': '}${String(input.event.text || (input.event.attachments || []).map((a) => a.name).join(', ')).split('\n')[0]}
 initial: waiting
 states:
   waiting:
@@ -30,7 +32,7 @@ states:
         address: "${ { bridge: event.data.event.bridge, id: event.data.event.chat, answers: event.data.event.answers, at: event.data.event.at, settings: event.data.event.settings } }"
       machine:
         flow: message
-        title: "${input.event.text || ''}"
+        title: "${input.event.text || (input.event.attachments || []).map((a) => a.name).join(', ')}"
         input: { event: any, dir: string, address: map, last: "any?" }
         stages:
           who:
@@ -43,7 +45,7 @@ states:
               input: { address: "${input.address}", wanted: "${!!stages.who.output.agent && (!!input.event.unaddressed || !(input.last && input.last.conversation))}" }
           attend:
             job:
-              input: { unaddressed: "${!!input.event.unaddressed}", agent: "${!!stages.who.output.agent}", said: "${input.event.text}", asker: "${stages.who.output.person}", address: "${input.address}", history: "${stages.history.output}" }
+              input: { unaddressed: "${!!input.event.unaddressed}", agent: "${!!stages.who.output.agent}", said: "${(input.event.text || '') + ((input.event.attachments || []).length ? (input.event.text ? '\\n' : '') + '(files: ' + input.event.attachments.map((a) => a.name).join(', ') + ')' : '')}", asker: "${stages.who.output.person}", address: "${input.address}", history: "${(stages.history.output || {}).text}" }
               machine:
                 flow: should-answer
                 input: { unaddressed: boolean, agent: boolean, said: string, asker: "any?", address: map, history: "any?" }
@@ -61,6 +63,20 @@ states:
           format:
             when: "${stages.attend.output}"
             job: { script: ./format.js, input: { bridge: "${input.event.bridge}" } }
+          attachments:
+            when: "${stages.attend.output}"
+            job: { machine: ./attachments.yaml, input: { address: "${input.address}", attachments: "${input.event.attachments}" } }
+          # A new conversation has the files earlier in the thread too, but one that
+          # follows a failed answer does not, since a file there may be its cause.
+          earlier:
+            when: "${stages.attend.output}"
+            job:
+              machine: ./attachments.yaml
+              input:
+                address: "${input.address}"
+                attachments: >-
+                  ${input.last && (input.last.conversation || input.last.failed) ? null :
+                  ((stages.history.output || {}).attachments || []).filter((e) => !(input.event.attachments || []).some((o) => o.id === e.id))}
           answer:
             when: "${stages.attend.output}"
             job:
@@ -72,7 +88,8 @@ states:
                   asker: "${stages.who.output.person}"
                   home: "${input.dir}"
                   address: "${input.address}"
-                  history: "${input.last && input.last.conversation ? null : stages.history.output}"
+                  history: "${input.last && input.last.conversation ? null : (stages.history.output || {}).text}"
+                  attachments: "${(stages.attachments.output || []).concat(stages.earlier.output || [])}"
                   conversation: "${input.last ? input.last.conversation : null}"
                   format: "${stages.format.output}"
           say:
@@ -86,5 +103,6 @@ states:
             job: { machine: ./say.yaml, input: { address: "${input.address}", text: That could not be answered. Ask again in a while. } }
         output:
           conversation: "${stages.answer.failed ? null : stages.answer.skipped ? (input.last ? input.last.conversation : null) : (stages.answer.output || {}).conversation}"
+          failed: "${stages.answer.failed}"
     on: { done: waiting, failed: waiting }
   over: { end: done }
