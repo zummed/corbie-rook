@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"maps"
 	"net/http/httptest"
 	"os"
@@ -46,12 +47,34 @@ const helperStub = `
 // stubReviewer stands in for the reviewer, and leaves every call to a person.
 const stubReviewer = "statechart: reviewer\ninput: { context: string }\ninitial: e\nstates:\n  e: { end: done, output: { reply: { says: refer, note: why } } }\n"
 
-// realAgent puts the starter's helper back in a project, with a stand-in model
+// exampleProject makes a project as rook.Init does, and puts testdata's files in
+// it: two people, the agents helper and team, and the part messages.
+func exampleProject(dir string, bridges []string) error {
+	if err := rook.Init(dir, bridges); err != nil {
+		return err
+	}
+	return filepath.WalkDir("testdata", func(name string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
+		text, err := os.ReadFile(name)
+		if err != nil {
+			return err
+		}
+		to := filepath.Join(dir, strings.TrimPrefix(name, "testdata/"))
+		if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(to, text, 0o644)
+	})
+}
+
+// realAgent puts testdata's helper back in a project, with a stand-in model
 // at an address.
 func realAgent(t *testing.T, dir, address string) {
 	t.Helper()
 	for _, name := range []string{"agents/helper.yaml"} {
-		text, err := os.ReadFile(filepath.Join("starter", name))
+		text, err := os.ReadFile(filepath.Join("testdata", name))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -68,7 +91,7 @@ func realAgent(t *testing.T, dir, address string) {
 func copyStarter(t *testing.T) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "project")
-	if err := rook.Init(dir, []string{"telegram"}); err != nil {
+	if err := exampleProject(dir, []string{"telegram"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Mkdir(filepath.Join(dir, "on"), 0o755); err != nil {
@@ -199,11 +222,11 @@ func TestAnswerStartsTheAgentWhoChose(t *testing.T) {
 // Every agent rules.yaml lists has a stage that starts it: with none, a message
 // to it would get no answer.
 func TestEveryAgentCanBeStarted(t *testing.T) {
-	people, err := os.ReadFile("starter/rules.yaml")
+	people, err := os.ReadFile("testdata/rules.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	answer, err := os.ReadFile("starter/answer.yaml")
+	answer, err := os.ReadFile("testdata/answer.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +357,7 @@ func TestHeldCallWaitsForItsApprovers(t *testing.T) {
 	web := httptest.NewServer(model)
 	t.Cleanup(web.Close)
 	realAgent(t, dir, web.URL)
-	if err := os.WriteFile(filepath.Join(dir, "agents/reviewer.yaml"), []byte(stubReviewer), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".rook/agents/reviewer.yaml"), []byte(stubReviewer), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	draft, _, err := client.ReadMachine(dir, "agents/helper.yaml")
@@ -481,7 +504,7 @@ func TestApprovalGoesToTheReviewerThenAPerson(t *testing.T) {
 	}
 	for name, text := range map[string]string{
 		"people.yaml": strings.ReplaceAll(string(people), "alice: { telegram: \"1\" }", "alice: { telegram: \"1\" }\n  carol: { telegram: \"3\" }"),
-		"agents/reviewer.yaml": `
+		".rook/agents/reviewer.yaml": `
 			statechart: reviewer
 			input: { context: string }
 			initial: e
@@ -558,8 +581,8 @@ func TestApprovalAsksThePartsApprovers(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, text := range map[string]string{
-		"rules.yaml":           strings.Replace(string(rules), "  messages: [alice]\n", "  messages: [bob]\n", 1),
-		"agents/reviewer.yaml": stubReviewer,
+		"rules.yaml":                 strings.Replace(string(rules), "  messages: [alice]\n", "  messages: [bob]\n", 1),
+		".rook/agents/reviewer.yaml": stubReviewer,
 		"on/try.yaml": dedent(`
 			flow: try
 			stages:
@@ -758,7 +781,7 @@ func TestInitAgainKeepsThePersonsFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, name := range []string{"agents/team.yaml", "attend.yaml"} {
+	for _, name := range []string{"attend.yaml", "AGENTS.md"} {
 		if err := os.Remove(filepath.Join(dir, name)); err != nil {
 			t.Fatal(err)
 		}
@@ -771,16 +794,18 @@ func TestInitAgainKeepsThePersonsFiles(t *testing.T) {
 			t.Errorf("%s is now %q", name, got)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(dir, "agents/team.yaml")); err == nil {
-		t.Error("a starting file the person removed came back")
+	for _, name := range []string{"attend.yaml", "AGENTS.md"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
+			t.Errorf("%s, which init writes when it is not there, was not written", name)
+		}
 	}
-	if _, err := os.Stat(filepath.Join(dir, "attend.yaml")); err != nil {
-		t.Error("a file .rook reads by name was not written")
+	if got, _ := os.ReadFile(filepath.Join(dir, ".rook/AGENTS.md")); !strings.HasPrefix(string(got), "Rook: ") {
+		t.Errorf(".rook/AGENTS.md is %q, and not the page rook", got)
 	}
 	if differ, err := rook.Differ(dir); err != nil || !reflect.DeepEqual(differ, []string{"bridges/slack.yaml", "people.yaml"}) {
 		t.Errorf("the files not as Rook starts them are %v, %v", differ, err)
 	}
-	if text := rook.Pages()[3].Text; !strings.Contains(text, "\nagents/helper.yaml\n------------------\n\n    # ") || !strings.Contains(text, "\nbridges/jira.yaml\n") {
+	if text := rook.Pages()[3].Text; !strings.Contains(text, "\nrules.yaml\n----------\n\n    # ") || !strings.Contains(text, "\nbridges/jira.yaml\n") {
 		t.Error("the page rook-starter lacks a starting file")
 	}
 	if got, _ := os.ReadFile(filepath.Join(dir, ".rook/blocks/tell.yaml")); string(got) == "changed" {
@@ -788,6 +813,15 @@ func TestInitAgainKeepsThePersonsFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(stale); err == nil {
 		t.Error("a file Rook no longer ships stayed in .rook")
+	}
+	if err := os.Remove(filepath.Join(dir, "people.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if err := rook.Init(dir, []string{"slack"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "people.yaml")); err == nil {
+		t.Error("a starting file the person removed came back")
 	}
 }
 
@@ -850,7 +884,7 @@ func TestApprovalFromAChatGetsToTheApprover(t *testing.T) {
 	realAgent(t, dir, web.URL)
 	for name, text := range map[string]string{
 		".rook/bridges/telegram/telegram.js": dedent(oneMessage),
-		"agents/reviewer.yaml":               stubReviewer,
+		".rook/agents/reviewer.yaml":         stubReviewer,
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
 			t.Fatal(err)

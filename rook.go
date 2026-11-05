@@ -16,11 +16,8 @@ import (
 	"github.com/zummed/corbie/manual"
 )
 
-//go:embed all:shipped all:starter all:bridges
+//go:embed all:shipped all:starter all:bridges pages
 var files embed.FS
-
-//go:embed pages
-var pages embed.FS
 
 // Pages are Rook's pages of the manual: each file in pages/, whose first line
 // is its summary, and the starting files. corbie mcp, allowed rook init, tells
@@ -28,7 +25,7 @@ var pages embed.FS
 func Pages() []manual.Page {
 	var out []manual.Page
 	for _, name := range []string{"rook", "rook-project", "rook-design"} {
-		text, _ := pages.ReadFile("pages/" + name + ".txt")
+		text, _ := files.ReadFile("pages/" + name + ".txt")
 		summary, _, _ := strings.Cut(string(text), "\n")
 		out = append(out, manual.Page{Name: name, Group: "Rook", Summary: summary, Text: string(text)})
 	}
@@ -111,13 +108,15 @@ func Bridges() []string {
 	return names
 }
 
-// Named are the project's files that a machine in .rook reads by name.
-var Named = []string{"rules.yaml", "lookup.yaml", "attend.yaml", "answer.yaml", "agents/reviewer.yaml"}
+// Named are the project's files that init writes whenever one is not there:
+// those a machine in .rook reads by name, and those that point a model at
+// .rook/AGENTS.md.
+var Named = []string{"rules.yaml", "lookup.yaml", "attend.yaml", "answer.yaml", "AGENTS.md", "CLAUDE.md", ".mcp.json"}
 
-// Init makes dir a project, or brings one up to date. It rewrites .rook. It writes
-// the starting files if dir has no rules.yaml, each of Named that is not there,
-// and the file of each bridge named that is not there, so it changes no file of
-// the person's.
+// Init makes dir a project, or brings one up to date. It rewrites .rook, with
+// the page rook as .rook/AGENTS.md. It writes the starting files if dir has no
+// rules.yaml, each of Named that is not there, and the file of each bridge named
+// that is not there, so it changes no file of the person's.
 func Init(dir string, bridges []string) error {
 	for _, name := range bridges {
 		if _, ok := Secrets[name]; !ok {
@@ -131,6 +130,9 @@ func Init(dir string, bridges []string) error {
 		return err
 	}
 	if err := copyTree("shipped", filepath.Join(dir, Shipped), true); err != nil {
+		return err
+	}
+	if err := copyFile("pages/rook.txt", filepath.Join(dir, Shipped, "AGENTS.md"), true); err != nil {
 		return err
 	}
 	if _, err := os.Stat(filepath.Join(dir, "rules.yaml")); os.IsNotExist(err) {

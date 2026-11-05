@@ -81,7 +81,7 @@ func cmdInit(e *cli.Env, args []string) error {
 			fmt.Fprintln(e.Out)
 		}
 	} else {
-		fmt.Fprintf(e.Out, "%s is ready. Change people.yaml and rules.yaml, then:\n\n", dir)
+		fmt.Fprintf(e.Out, "%s is ready, and answers nobody until it has an agent. Add one as corbie rook manual rook-project says under Add an agent, or ask a model in %s to. Then:\n\n", dir, dir)
 		fmt.Fprintln(e.Out, "  corbie controller secret set CLAUDE_TOKEN")
 	}
 	for _, name := range bridges {
@@ -95,7 +95,7 @@ func cmdInit(e *cli.Env, args []string) error {
 		fmt.Fprintf(e.Out, "  corbie rook init %s --bridges <names>\n", dir)
 	}
 	if updating {
-		fmt.Fprintf(e.Out, "  %scorbie run submit . --check\n", in)
+		fmt.Fprintf(e.Out, "  %scorbie test .\n", in)
 	}
 	submit := "bridges"
 	if _, err := os.Stat(filepath.Join(dir, "schedules")); err == nil {

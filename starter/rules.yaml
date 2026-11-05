@@ -3,11 +3,14 @@
 # `readers` are groups, anyone, or asker. Each agent's file names the parts it can
 # open. `approve` names who says yes to each part's held calls: people and
 # groups, each asked in a direct message, or { people: [...], in: "#channel" },
-# asked in a Slack channel where any of them may answer.
+# asked in a Slack channel where any of them may answer. With no agent, the bot
+# answers nobody.
+#
+#   agents:
+#     - { name: helper, for: [alice] }
+#   approve:
+#     messages: [alice]
 places:
   dm: { readers: [asker] }
-agents:
-  - { name: helper, for: [alice] }
-  - { name: team, for: [team] }
-approve:
-  messages: [alice]
+agents: []
+approve: {}

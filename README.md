@@ -26,11 +26,7 @@ The manual has three pages of Rook's:
 | `rook-design` | the blocks, what each takes and gives, and who may do what |
 | `rook-starter` | the files this version starts a project with |
 
-To have a model set up or change a project, run this in the project:
-
-```sh
-claude mcp add corbie -- corbie mcp --allow test --allow "rook init"
-```
+A new project has no agent and no part. To have a model add them, start Claude Code in the project and say what the bot should do. The project's `.mcp.json` gives it Corbie's manual and `corbie test`, and its `AGENTS.md` tells any model how the project is changed.
 
 ## License
 

@@ -9,7 +9,7 @@ stages:
   brief:
     job: { script: ./held.js, input: { jobs: "${input.jobs}", alone: "${input.alone}", asker: "${input.asker}", request: "${input.request}" } }
   review:
-    job: { machine: agents/reviewer.yaml, input: { context: "${stages.brief.output.context + '\\n\\n' + stages.brief.output.rule}" } }
+    job: { machine: .rook/agents/reviewer.yaml, input: { context: "${stages.brief.output.context + '\\n\\n' + stages.brief.output.rule}" } }
   approvers:
     job: { machine: ./approvers.yaml, input: { part: "${input.part}" } }
   person:
