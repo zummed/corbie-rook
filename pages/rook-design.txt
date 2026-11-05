@@ -33,13 +33,14 @@ What init writes
 ----------------
 
 `corbie rook init` rewrites `.rook/`, and the first time writes the starting
-files. After that it writes only a file the project lacks: one a machine in
-`.rook/` reads by name, or the file of a bridge named with `--bridges`. It
+files, which hold no agent and no part. After that it writes only a file the
+project lacks: one a machine in `.rook/` reads by name, `AGENTS.md`,
+`CLAUDE.md`, `.mcp.json`, or the file of a bridge named with `--bridges`. It
 changes no other file.
 
 The machines in `.rook/` read these files by name: `rules.yaml`,
-`lookup.yaml`, `attend.yaml`, `answer.yaml` and `agents/reviewer.yaml`.
-`.rook/people/file.js` reads `people.yaml`.
+`lookup.yaml`, `attend.yaml` and `answer.yaml`. `.rook/people/file.js` reads
+`people.yaml`.
 
   bridges/<name>/listen.yaml           hears the service, and sends each message by key
   bridges/<name>/say.yaml              says a text; every bridge has one
@@ -64,6 +65,8 @@ The machines in `.rook/` read these files by name: `rules.yaml`,
   blocks/rich.js                       draws charts and layouts on Slack, and writes them as text elsewhere
   blocks/format.js                     how to write for each bridge, given to an agent as format
   agents/base.yaml                     what every agent answering a message takes from Rook
+  agents/reviewer.yaml                 judges a held call before a person is asked, for approval.yaml
+  AGENTS.md                            the page corbie rook manual rook, for a model
   people/file.js                       reads people.yaml, for lookup.yaml
   attend/never.yaml, model.yaml        answers no, or asks a small model
 

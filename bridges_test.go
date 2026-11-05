@@ -20,7 +20,6 @@ import (
 
 	"github.com/coder/websocket"
 
-	rook "github.com/zummed/corbie-rook"
 )
 
 // pointed makes a project with a bridge whose scripts and permissions name a
@@ -29,7 +28,7 @@ func pointed(t *testing.T, bridge string, srv *httptest.Server, hosts ...string)
 	t.Helper()
 	addr := strings.TrimPrefix(srv.URL, "http://")
 	dir := filepath.Join(t.TempDir(), "project")
-	if err := rook.Init(dir, []string{bridge}); err != nil {
+	if err := exampleProject(dir, []string{bridge}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Mkdir(filepath.Join(dir, "on"), 0o755); err != nil {

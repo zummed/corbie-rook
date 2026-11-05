@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	rook "github.com/zummed/corbie-rook"
 	"github.com/zummed/corbie/client"
 	llmstandin "github.com/zummed/corbie/plugin/llm/standin"
 )
@@ -297,7 +296,7 @@ func TestGitLabHearsANoteMadeWhileItsIssueWaits(t *testing.T) {
 func TestAttendAsksAModel(t *testing.T) {
 	w := newWorld(t)
 	dir := filepath.Join(t.TempDir(), "project")
-	if err := rook.Init(dir, nil); err != nil {
+	if err := exampleProject(dir, nil); err != nil {
 		t.Fatal(err)
 	}
 	model := &llmstandin.Server{Answer: func(llmstandin.Call) llmstandin.Reply { return llmstandin.Reply{Text: `{"answer": true}`} }}
@@ -331,7 +330,7 @@ func TestAttendAsksAModel(t *testing.T) {
 func TestStartingAttendSaysNo(t *testing.T) {
 	w := newWorld(t)
 	dir := filepath.Join(t.TempDir(), "project")
-	if err := rook.Init(dir, nil); err != nil {
+	if err := exampleProject(dir, nil); err != nil {
 		t.Fatal(err)
 	}
 	draft, _, err := client.ReadMachine(dir, "attend.yaml")
