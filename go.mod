@@ -4,7 +4,7 @@ go 1.27.1
 
 require (
 	github.com/coder/websocket v1.8.15
-	github.com/zummed/corbie v0.16.0
+	github.com/zummed/corbie v0.17.0
 	go.yaml.in/yaml/v3 v3.0.5
 )
 
@@ -20,5 +20,3 @@ require (
 	golang.org/x/term v0.46.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 )
-
-replace github.com/zummed/corbie => /data/projects/corbie/corbie/.claude/worktrees/locations
