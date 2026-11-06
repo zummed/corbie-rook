@@ -27,7 +27,7 @@ tools:
     args: { name: string, blob: "blob?", text: "string?" }
     job: { machine: .rook/blocks/send.yaml, input: { address: "${input.address}", name: "${args.name}", file: "${args.blob}", text: "${args.text}" } }
   form:
-    does: "On Slack, ask the person a form: a text and fields they fill in, which you get back by name. It gives choice send or cancel, or no when not answered within an hour."
+    does: "On Slack, ask the person a form: a text and fields they fill in, which you get back by name. It gives choice send or cancel, or no when not answered within an hour. Only someone in the bot's people list can answer one."
     args:
       type: object
       required: [text, fields]

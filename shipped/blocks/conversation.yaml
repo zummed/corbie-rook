@@ -12,6 +12,7 @@
 # a new one with the agent as it is then.
 statechart: conversation
 lifetime: keyed
+input: { message: map, asker: string, agent: string, address: map, history: "any?" }
 title: >-
   ${input.agent} in ${input.message.bridge === 'gitlab' ? input.message.chat.slice(input.message.chat.lastIndexOf('#')) :
   input.message.bridge === 'jira' ? input.message.chat : input.message.place}: ${String(input.message.text || (input.message.attachments || []).map((a) => a.name).join(', ')).split('\n')[0]}

@@ -1,6 +1,7 @@
 # Approval for a part's held calls, which a part names as its ask. Its input
 # says who approves:
-#   people   people and groups in lookup.yaml, each asked on their own bridge
+#   people   people and groups in lookup.yaml, each asked on their own bridge;
+#            with none, or no people at all, no one is asked
 #   in       a Slack channel's #name to ask them in, in place of each one alone
 #   review   true to call review.yaml first; by default no review
 #   alone    tools whose calls the review's yes approves with no person asked
@@ -10,7 +11,7 @@
 # shown its error.
 flow: approval
 title: "Approve ${(Array.isArray(input.jobs) ? input.jobs : []).map((j) => j.name).join(', ')}${input.request ? ': ' + input.request.split('\\n').pop() : ''}"
-input: { asking: any, jobs: any, part: string, people: list, in: "string?", review: "boolean?", alone: "list?", request: "string?" }
+input: { asking: any, jobs: any, part: string, people: "list?", in: "string?", review: "boolean?", alone: "list?", request: "string?" }
 allow: [send:review, send:.rook/blocks/ask]
 stages:
   brief:
@@ -19,7 +20,7 @@ stages:
     when: "${!!input.review}"
     job: { call: { at: review }, input: { context: "${stages.brief.output.context + '\\n\\n' + stages.brief.output.rule}" } }
   person:
-    when: "${input.people.length > 0 && (stages.review.skipped || stages.review.failed || !(stages.review.output.reply.says === 'refuse' || stages.review.output.reply.says === 'yes' && stages.brief.output.alone))}"
+    when: "${(input.people || []).length > 0 && (stages.review.skipped || stages.review.failed || !(stages.review.output.reply.says === 'refuse' || stages.review.output.reply.says === 'yes' && stages.brief.output.alone))}"
     job:
       call: { at: .rook/blocks/ask }
       input:

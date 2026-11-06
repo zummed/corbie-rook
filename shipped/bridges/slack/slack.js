@@ -73,8 +73,9 @@ if (input.do === "hear") {
     emit("answer", { bridge: "slack", question: value.slice(0, at), from: body.user.id, choice: value.slice(at + 1), values: values })
   }
 
-  // heard holds the latest messages heard, as channel/ts, from this job and the
-  // one before it: Slack sends an envelope again when its receipt is late.
+  // heard holds the messages heard in the last ten minutes, as channel/ts, from
+  // this job and the ones before it: Slack sends an envelope again when its
+  // receipt is late.
   const heard = ((input.cursor || {}).heard || []).slice()
 
   // spoke holds the threads the bot has said something in, as channel/thread:
@@ -145,7 +146,9 @@ if (input.do === "hear") {
     socket.send(JSON.stringify({ envelope_id: envelope.envelope_id }))
   }
   socket.close()
-  return { cursor: { heard: heard.slice(-200) } }
+  const ts = (h) => Number(h.slice(h.indexOf("/") + 1))
+  const latest = Math.max(0, ...heard.map(ts))
+  return { cursor: { heard: heard.filter((h) => ts(h) > latest - 600) } }
 }
 
 if (input.do === "attachments") {

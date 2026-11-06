@@ -1,7 +1,7 @@
 # One thread with the bot, on any bridge: a chat, a thread or an issue. A
 # bridge's listener sends each message heard there to this location, keyed
-# <bridge>:<chat>, and the first message starts the run. It takes one message at
-# a time:
+# <bridge>:<chat>, and the first message starts the run, so its input is a
+# message as the listener heard it. It takes one message at a time:
 #   1. who.yaml finds who sent it, and the agent rules.yaml gives them there.
 #   2. history.yaml reads the thread before it, for someone with an agent.
 #   3. A message marked unaddressed is answered only when attend.yaml gives
@@ -16,6 +16,7 @@
 statechart: chat
 lifetime: keyed
 update: restart
+input: { bridge: string, text: string, chat: string, from: string, place: string, answers: "string?", at: "any?", attachments: "list?", unaddressed: "boolean?" }
 allow: [send:.rook/blocks/conversation]
 title: >-
   ${input.bridge === 'gitlab' ? input.chat.slice(input.chat.lastIndexOf('#')) + ' ' :

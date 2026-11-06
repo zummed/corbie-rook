@@ -605,7 +605,8 @@ func TestApprovalAsksThePartsApprovers(t *testing.T) {
 		stages:
 		  held: { job: { machine: .rook/blocks/approval.yaml, input: { asking: {}, part: messages, people: [bob], jobs: [{ name: tell, input: {} }] } } }
 		  nobody: { job: { machine: .rook/blocks/approval.yaml, input: { asking: {}, part: deploys, people: [], jobs: [{ name: tell, input: {} }] } } }
-		output: { held: "${stages.held.output.approve}", nobody: "${stages.nobody.output}" }
+		  unnamed: { job: { machine: .rook/blocks/approval.yaml, input: { asking: {}, part: deploys, jobs: [{ name: tell, input: {} }] } } }
+		output: { held: "${stages.held.output.approve}", nobody: "${stages.nobody.output}", unnamed: "${stages.unnamed.output}" }
 	`})
 	w.sync(dir)
 	try := w.start("on/try.yaml", nil)
@@ -621,7 +622,7 @@ func TestApprovalAsksThePartsApprovers(t *testing.T) {
 		}
 	}
 	w.until("the approval", func() bool { return w.show(try).HasEnded() })
-	if got := fmt.Sprint(w.show(try).Output); got != "map[held:[tell] nobody:map[approve:[] note:The part deploys names no one in people to approve its calls.]]" {
+	if got := fmt.Sprint(w.show(try).Output); got != "map[held:[tell] nobody:map[approve:[] note:The part deploys names no one in people to approve its calls.] unnamed:map[approve:[] note:The part deploys names no one in people to approve its calls.]]" {
 		t.Fatalf("it gave %s", got)
 	}
 	if n := len(keyed(w, ".rook/blocks/ask.yaml")[""]); n != 1 {
