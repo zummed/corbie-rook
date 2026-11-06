@@ -127,6 +127,43 @@ func copyStarter(t *testing.T) string {
 	return dir
 }
 
+// heard stands in for telegram.js: its listener hears these once, then rests.
+// One with a question is a tap, and any other a message. A question gives
+// the message it posted, so a close has something to close.
+func heard(events ...map[string]any) string {
+	var emits []string
+	for _, e := range events {
+		data, _ := json.Marshal(e)
+		name := "message"
+		if _, ok := e["question"]; ok {
+			name = "answer"
+		}
+		emits = append(emits, "emit(\""+name+"\", "+string(data)+")")
+	}
+	return `
+		if (input.do === "hear") {
+		  if (input.cursor !== null) throw new Error("nothing more")
+		  ` + strings.Join(emits, "\n\t\t  ") + `
+		  return { cursor: 1 }
+		}
+		if (input.do === "ask") return { sent: input.to.map((to) => ({ chat: to, id: 101 })) }
+		if (input.do === "send") return { sent: input.to + ":1" }
+		if (input.do === "close" || input.do === "status") return {}
+		return { sent: [input.answers || ""] }
+	`
+}
+
+// from is a message from a person in their own chat with the bot, the n-th
+// of that chat.
+func from(id, text string, n int) map[string]any {
+	return map[string]any{"bridge": "telegram", "text": text, "chat": id, "from": id, "place": "dm", "answers": fmt.Sprintf("%s:%d", id, n)}
+}
+
+// heardIn is a message from a person in a chat, which is the place given.
+func heardIn(chat, from, place, text string) map[string]any {
+	return map[string]any{"bridge": "telegram", "text": text, "chat": chat, "from": from, "place": place, "answers": chat + ":10"}
+}
+
 // removeListener removes the one machine the project keeps running.
 func removeListener(t *testing.T, dir string) {
 	t.Helper()

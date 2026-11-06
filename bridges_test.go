@@ -23,10 +23,10 @@ import (
 )
 
 // pointed makes a project with a bridge whose scripts and permissions name a
-// stand-in, reached over a plain connection. Nothing else of the bridge changes.
+// stand-in, reached over a plain connection, with the helper stub, alice and
+// bob on every bridge, and the directory on.
 func pointed(t *testing.T, bridge string, srv *httptest.Server, hosts ...string) string {
 	t.Helper()
-	addr := strings.TrimPrefix(srv.URL, "http://")
 	dir := filepath.Join(t.TempDir(), "project")
 	if err := exampleProject(dir, []string{bridge}); err != nil {
 		t.Fatal(err)
@@ -34,6 +34,24 @@ func pointed(t *testing.T, bridge string, srv *httptest.Server, hosts ...string)
 	if err := os.Mkdir(filepath.Join(dir, "on"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	point(t, dir, bridge, srv, hosts...)
+	for name, text := range map[string]string{
+		"agents/helper.yaml": dedent(helperStub),
+		"people.yaml":        "people:\n  alice: { slack: U1, gitlab: al, jira: acc-1 }\n  bob: { slack: U2, gitlab: bo, jira: acc-2 }\ngroups: {}\n",
+		"rules.yaml":         "places:\n  dm: { readers: [asker] }\n  group/project: { readers: [asker] }\n  OPS: { readers: [asker] }\nagents:\n  - { name: helper, for: [alice] }\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// point rewrites the files of one bridge in a project so that its hosts name a
+// stand-in, reached over a plain connection. Nothing else of the bridge changes.
+func point(t *testing.T, dir, bridge string, srv *httptest.Server, hosts ...string) {
+	t.Helper()
+	addr := strings.TrimPrefix(srv.URL, "http://")
 	files, err := filepath.Glob(filepath.Join(dir, ".rook/bridges", bridge, "*"))
 	if err != nil {
 		t.Fatal(err)
@@ -57,16 +75,6 @@ func pointed(t *testing.T, bridge string, srv *httptest.Server, hosts ...string)
 			t.Fatal(err)
 		}
 	}
-	for name, text := range map[string]string{
-		"agents/helper.yaml": dedent(helperStub),
-		"people.yaml":        "people:\n  alice: { slack: U1, gitlab: al, jira: acc-1 }\n  bob: { slack: U2, gitlab: bo, jira: acc-2 }\ngroups: {}\n",
-		"rules.yaml":         "places:\n  dm: { readers: [asker] }\n  group/project: { readers: [asker] }\n  OPS: { readers: [asker] }\nagents:\n  - { name: helper, for: [alice] }\n",
-	} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return dir
 }
 
 // jiraAt sets the values that name a stand-in Jira, and the account its token
@@ -92,16 +100,21 @@ func setSite(t *testing.T, dir, file, from, to string) {
 }
 
 // A telegram stands in for Telegram's Bot API, for the bot with the token
-// "123:abc".
+// "123:abc": private chats and groups, buttons and their taps.
 type telegram struct {
 	*httptest.Server
 	mu      sync.Mutex
-	updates []map[string]any  // each message sent to the bot, in order; its update_id is its place from 1
+	updates []map[string]any  // each update, in order; its update_id is its place from 1
 	heard   int               // the highest offset asked from, below which every update was heard
-	sent    []map[string]any  // each message the bot sent, in order
+	sent    []map[string]any  // each message the bot sent, in order, with its message_id
+	edits   []map[string]any  // each editMessageText
+	acks    []map[string]any  // each answerCallbackQuery
+	typing  []string          // the chat of each sendChatAction
 	files   map[string]string // what each file_id downloads
 	got     []string          // each file_id getFile was asked for
 	uploads []upload          // each file the bot sent, in order
+	refuse  map[string]string // a chat_id whose sendMessage is refused, with Telegram's description
+	methods []string          // each method called, in order
 }
 
 // An upload is a file a bot sent: the method and field it came by, the
@@ -128,7 +141,7 @@ func uploaded(r *http.Request, method, to string) (upload, error) {
 }
 
 func newTelegram(t *testing.T) *telegram {
-	tg := &telegram{files: map[string]string{}}
+	tg := &telegram{files: map[string]string{}, refuse: map[string]string{}}
 	tg.Server = httptest.NewServer(http.HandlerFunc(tg.serve))
 	t.Cleanup(tg.Close)
 	return tg
@@ -152,6 +165,9 @@ func (tg *telegram) serve(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"ok": false, "error_code": 401, "description": "Unauthorized"}`)
 		return
 	}
+	tg.mu.Lock()
+	tg.methods = append(tg.methods, method)
+	tg.mu.Unlock()
 	reply := func(result any) { json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": result}) }
 	if method == "sendDocument" {
 		u, err := uploaded(r, method, "chat_id")
@@ -167,55 +183,102 @@ func (tg *telegram) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	var ask map[string]any
 	json.NewDecoder(r.Body).Decode(&ask)
+	tg.mu.Lock()
+	defer tg.mu.Unlock()
 	switch method {
 	case "getUpdates":
 		// It waits for an update at most a third of a second, so that the
 		// server closes quickly when the test ends.
 		offset, _ := ask["offset"].(float64)
-		for end := time.Now().Add(min(time.Duration(ask["timeout"].(float64))*time.Second, 300*time.Millisecond)); ; time.Sleep(10 * time.Millisecond) {
-			tg.mu.Lock()
+		for end := time.Now().Add(min(time.Duration(ask["timeout"].(float64))*time.Second, 300*time.Millisecond)); ; {
 			tg.heard = max(tg.heard, int(offset))
 			from := max(tg.heard, 1)
-			out := []map[string]any{} // Telegram gives an empty list, never null
 			if from <= len(tg.updates) {
-				out = []map[string]any{{"update_id": from, "message": tg.updates[from-1]}}
-			}
-			tg.mu.Unlock()
-			if len(out) > 0 || time.Now().After(end) {
-				reply(out)
+				u := maps.Clone(tg.updates[from-1])
+				u["update_id"] = from
+				reply([]map[string]any{u})
 				return
 			}
+			if time.Now().After(end) {
+				reply([]map[string]any{}) // Telegram gives an empty list, never null
+				return
+			}
+			tg.mu.Unlock()
+			time.Sleep(10 * time.Millisecond)
+			tg.mu.Lock()
 		}
 	case "getFile":
 		id := ask["file_id"].(string)
-		tg.mu.Lock()
 		tg.got = append(tg.got, id)
-		tg.mu.Unlock()
 		reply(map[string]any{"file_id": id, "file_path": "files/" + id})
 	case "sendMessage":
-		tg.mu.Lock()
+		if why, ok := tg.refuse[fmt.Sprint(ask["chat_id"])]; ok {
+			fmt.Fprintf(w, `{"ok": false, "error_code": 403, "description": %q}`, why)
+			return
+		}
+		ask["message_id"] = 100 + len(tg.sent)
 		tg.sent = append(tg.sent, ask)
-		reply(map[string]any{"message_id": 100 + len(tg.sent)})
-		tg.mu.Unlock()
+		reply(map[string]any{"message_id": ask["message_id"]})
+	case "editMessageText":
+		tg.edits = append(tg.edits, ask)
+		reply(map[string]any{"message_id": ask["message_id"]})
+	case "answerCallbackQuery":
+		tg.acks = append(tg.acks, ask)
+		reply(true)
 	case "sendChatAction":
+		tg.typing = append(tg.typing, fmt.Sprint(ask["chat_id"]))
 		reply(true)
 	default:
 		fmt.Fprint(w, `{"ok": false, "error_code": 404, "description": "Not Found"}`)
 	}
 }
 
-// says sends the bot messages from alice, in her chat with it.
-func (tg *telegram) says(messages ...map[string]any) {
+// names are the people of the stand-in, by their Telegram ids.
+var names = map[int]string{1: "Alice", 2: "Bob", 3: "Carol", 9: "Stranger"}
+
+// update adds an update.
+func (tg *telegram) update(u map[string]any) {
 	tg.mu.Lock()
 	defer tg.mu.Unlock()
+	tg.updates = append(tg.updates, u)
+}
+
+// says sends the bot messages from alice, in her chat with it.
+func (tg *telegram) says(messages ...map[string]any) {
 	for _, m := range messages {
-		m["message_id"] = 10 + len(tg.updates)
-		m["from"] = map[string]any{"id": 1, "is_bot": false, "first_name": "Alice"}
 		m["chat"] = map[string]any{"id": 1, "type": "private"}
-		tg.updates = append(tg.updates, m)
+		tg.message(1, m)
 	}
 }
 
+// dm is a message from a person in their own chat with the bot. Extra fields
+// are added to the message.
+func (tg *telegram) dm(from int, text string, extra ...map[string]any) {
+	m := map[string]any{"chat": map[string]any{"id": from, "type": "private"}}
+	if text != "" {
+		m["text"] = text
+	}
+	for _, e := range extra {
+		maps.Copy(m, e)
+	}
+	tg.message(from, m)
+}
+
+// group is a message from a person in a group chat.
+func (tg *telegram) group(chat, from int, text string) {
+	tg.message(from, map[string]any{"chat": map[string]any{"id": chat, "type": "group", "title": "Family"}, "text": text})
+}
+
+func (tg *telegram) message(from int, m map[string]any) {
+	tg.mu.Lock()
+	defer tg.mu.Unlock()
+	m["message_id"] = 10 + len(tg.updates)
+	m["date"] = 1700000000
+	m["from"] = map[string]any{"id": from, "is_bot": false, "first_name": names[from]}
+	tg.updates = append(tg.updates, map[string]any{"message": m})
+}
+
+// said gives every text the bot said, in order.
 func (tg *telegram) said() []string {
 	tg.mu.Lock()
 	defer tg.mu.Unlock()
@@ -224,6 +287,93 @@ func (tg *telegram) said() []string {
 		out = append(out, fmt.Sprint(m["text"]))
 	}
 	return out
+}
+
+// texts gives what the bot said in a chat, in order.
+func (tg *telegram) texts(chat string) []string {
+	tg.mu.Lock()
+	defer tg.mu.Unlock()
+	var out []string
+	for _, m := range tg.sent {
+		if fmt.Sprint(m["chat_id"]) == chat {
+			out = append(out, fmt.Sprint(m["text"]))
+		}
+	}
+	return out
+}
+
+// edited gives the text of each message the bot edited, in order.
+func (tg *telegram) edited() []string {
+	tg.mu.Lock()
+	defer tg.mu.Unlock()
+	var out []string
+	for _, m := range tg.edits {
+		out = append(out, fmt.Sprint(m["text"]))
+	}
+	return out
+}
+
+// buttons gives the callback_data of each button the bot has sent, with the
+// chat it went to, in order.
+func (tg *telegram) buttons() [][2]string {
+	tg.mu.Lock()
+	defer tg.mu.Unlock()
+	var out [][2]string
+	for _, m := range tg.sent {
+		markup, _ := m["reply_markup"].(map[string]any)
+		rows, _ := markup["inline_keyboard"].([]any)
+		for _, row := range rows {
+			for _, b := range row.([]any) {
+				out = append(out, [2]string{fmt.Sprint(m["chat_id"]), fmt.Sprint(b.(map[string]any)["callback_data"])})
+			}
+		}
+	}
+	return out
+}
+
+// tapOn taps the button whose data ends with choice, of the n-th question sent
+// (from 0), as the person from.
+func (tg *telegram) tapOn(t *testing.T, n int, from int, choice string) {
+	t.Helper()
+	var questions []string
+	for _, b := range tg.buttons() {
+		q, _, _ := strings.Cut(b[1], " ")
+		if !slices.Contains(questions, q) {
+			questions = append(questions, q)
+		}
+	}
+	if n >= len(questions) {
+		t.Fatalf("there is no question %d among %v", n, questions)
+	}
+	tg.tapData(from, questions[n]+" "+choice)
+}
+
+// tapData sends a tap with any data, as the person from.
+func (tg *telegram) tapData(from int, data string) {
+	tg.mu.Lock()
+	id := fmt.Sprintf("cq%d", len(tg.updates))
+	tg.mu.Unlock()
+	tg.update(map[string]any{"callback_query": map[string]any{
+		"id":      id,
+		"from":    map[string]any{"id": from, "is_bot": false, "first_name": names[from]},
+		"message": map[string]any{"message_id": 1, "chat": map[string]any{"id": from, "type": "private"}},
+		"data":    data,
+	}})
+}
+
+// consumed says whether the listener has asked past every update so far.
+func (tg *telegram) consumed() bool {
+	tg.mu.Lock()
+	defer tg.mu.Unlock()
+	return tg.heard > len(tg.updates)
+}
+
+// waitFor waits for a text in a chat.
+func (tg *telegram) waitFor(w *world, chat, text string) {
+	w.t.Helper()
+	w.until(fmt.Sprintf("%q said in chat %s", text, chat), func() bool {
+		return slices.ContainsFunc(tg.texts(chat), func(s string) bool { return strings.Contains(s, text) })
+	})
 }
 
 // A gitlab stands in for GitLab's REST API on one project.
