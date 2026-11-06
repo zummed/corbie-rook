@@ -903,14 +903,21 @@ func TestInitAgainKeepsThePersonsFiles(t *testing.T) {
 	if _, err := os.Stat(stale); err == nil {
 		t.Error("a file Rook no longer ships stayed in .rook")
 	}
-	if err := os.Remove(filepath.Join(dir, "people.yaml")); err != nil {
-		t.Fatal(err)
+	// A starting file no machine reads, such as one for a model's tools, stays
+	// removed.
+	removed := []string{"people.yaml", "CLAUDE.md", ".mcp.json"}
+	for _, name := range removed {
+		if err := os.Remove(filepath.Join(dir, name)); err != nil {
+			t.Fatal(err)
+		}
 	}
 	if err := rook.Init(dir, []string{"slack"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "people.yaml")); err == nil {
-		t.Error("a starting file the person removed came back")
+	for _, name := range removed {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			t.Errorf("%s, a starting file the person removed, came back", name)
+		}
 	}
 }
 

@@ -119,9 +119,10 @@ func Bridges() []string {
 }
 
 // Named are the project's files that init writes whenever one is not there:
-// those a machine in .rook reads by name, and those that point a model at
-// .rook/AGENTS.md.
-var Named = []string{"rules.yaml", "lookup.yaml", "AGENTS.md", "CLAUDE.md", ".mcp.json"}
+// those a machine in .rook reads by name, and AGENTS.md, which points at
+// .rook/AGENTS.md. The starter's files for one model's tools are written only
+// with the starter, so a project can do without them.
+var Named = []string{"rules.yaml", "lookup.yaml", "AGENTS.md"}
 
 // Running gives the bridges whose file is in the project's bridges/, sorted.
 func Running(dir string) []string {

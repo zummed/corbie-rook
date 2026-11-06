@@ -110,8 +110,8 @@ What init writes
 `corbie rook init` rewrites `.rook/`, with the machines of each bridge whose
 file is in `bridges/`. The first time, it writes the starting files, which
 hold no agent and no part. After that it writes only a file the project lacks:
-one a machine in `.rook/` reads by name, `AGENTS.md`, `CLAUDE.md`,
-`.mcp.json`, or the file of a bridge named with `--bridges`.
+one a machine in `.rook/` reads by name, `AGENTS.md`, or the file of a bridge
+named with `--bridges`.
 
 The machines in `.rook/` read `rules.yaml`, and call `lookup`, `attend`,
 `review` and `agents/<agent>`. `.rook/people/file.js` reads `people.yaml` and

@@ -70,8 +70,8 @@ What a project holds
   review.yaml     judges a held call before a person is asked, once you add it
   schedules/      machines that run at a time, once you add one
   AGENTS.md       notes for a model or a person changing the project; it points at .rook/AGENTS.md
-  CLAUDE.md       makes Claude Code read AGENTS.md, for a person who changes the project with it
-  .mcp.json       starts corbie mcp for a model that changes the project
+  CLAUDE.md       makes Claude Code read AGENTS.md; init writes it only to a new project
+  .mcp.json       starts corbie mcp for a model; init writes it only to a new project
   .rook/          Rook's machines; corbie rook init rewrites it, so change nothing there
 
 A file with a type line has a location, `/my-bot/` and its path without
