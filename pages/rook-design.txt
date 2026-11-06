@@ -483,6 +483,8 @@ they ask.
 - A place that is not listed is read by anyone. A GitLab or Jira project must be listed for an agent that is not `for: [anyone]` to answer there.
 - `readers:` names groups, `anyone` or `asker`. It is written in the file, and not read from a channel's members.
 - `who.yaml` gives `rule`, the entry that chose the agent, so the chat's record shows why.
+- A field that `rules.yaml` does not take, such as `words:` in an agent's entry, fails `who.yaml`, naming the field.
+- When `rules.yaml` names an agent with no file in `agents/`, the person is told so.
 - A part goes in an agent's file only if everyone in that agent's `for` may use it. Nothing checks this, and each mix of parts is its own agent file.
 - The history comes from the thread the answer goes to. A bridge leaves out GitLab's internal notes and Jira's restricted comments, and does not hear them, since an answer on the issue is public.
 

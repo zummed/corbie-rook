@@ -369,7 +369,7 @@ func TestRuleWithoutForTellsSomeone(t *testing.T) {
 }
 
 // rules.yaml names an agent that has no file. The message fails, and the
-// person is told it could not be answered.
+// person is told the bot has no such agent.
 func TestRuleNamesAMissingAgent(t *testing.T) {
 	tg := newTelegram(t)
 	w := newWorld(t)
@@ -383,7 +383,38 @@ func TestRuleNamesAMissingAgent(t *testing.T) {
 	})
 	tg.dm(1, "hello")
 	w.sync(dir)
-	tg.waitFor(w, "1", "That could not be answered. Ask again in a while.")
+	tg.waitFor(w, "1", "This bot has no agent ghost: rules.yaml names it, and agents/ghost.yaml is not in the project.")
+}
+
+// A field rules.yaml does not take, as words: in an agent's entry, fails the
+// message, naming the field, and the person is told it could not be answered.
+func TestRulesUnknownFieldIsNamed(t *testing.T) {
+	for name, rules := range map[string]string{
+		"agent": "places:\n  dm: { readers: [asker] }\nagents:\n  - { name: helper, for: [alice], words: [hi] }\n",
+		"place": "places:\n  dm: { readers: [asker], quiet: true }\nagents:\n  - { name: helper, for: [alice] }\n",
+		"file":  "places:\n  dm: { readers: [asker] }\nagent:\n  - { name: helper, for: [alice] }\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			tg := newTelegram(t)
+			w := newWorld(t)
+			dir := chatProject(t, w, tg, map[string]string{
+				"agents/helper.yaml": echoAgent("helper"),
+				"agents/turn.js":     turnJS,
+				"rules.yaml":         rules,
+			})
+			tg.dm(1, "hello")
+			w.sync(dir)
+			tg.waitFor(w, "1", "That could not be answered. Ask again in a while.")
+			want := map[string]string{
+				"agent": "rules.yaml: the agent helper has words, and an agent takes only name and for",
+				"place": "rules.yaml: the place dm has quiet, and a place takes only readers",
+				"file":  "rules.yaml: the file has agent, and the file takes only places and agents",
+			}[name]
+			if f := failures(w); !slices.ContainsFunc(f, func(s string) bool { return strings.Contains(s, want) }) {
+				t.Errorf("no failure names the field: %q", f)
+			}
+		})
+	}
 }
 
 // houseParts is a part with a read tool, lights, and an act tool, tell, which
