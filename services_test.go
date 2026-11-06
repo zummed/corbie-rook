@@ -349,29 +349,34 @@ func TestSlackUnreadableChannelDoesNotStopTheListener(t *testing.T) {
 	}
 }
 
-// A message whose channel Slack fails to name once, with a 500, is left
-// unacknowledged, so Slack sends it again; the resend is answered, and a later
-// resend of it is not answered again. A message in a channel Slack refuses to
-// name, and a press with no user, are acknowledged and skipped.
+// A message whose channel Slack fails to name once, with a 500 or with a
+// refusal such as invalid_auth, is left unacknowledged, so Slack sends it
+// again; the resend is answered, and a later resend of it is not answered
+// again. A message in a channel Slack always refuses to name is never
+// acknowledged. A press with no user, which lacks what the listener reads, is
+// acknowledged and skipped.
 func TestSlackListenerLeavesAFailedEnvelopeForSlackToSendAgain(t *testing.T) {
 	s := newSlack(t)
 	var mu sync.Mutex
-	failed := false
+	failed := map[string]bool{}
 	override(s.Server, func(w http.ResponseWriter, r *http.Request) bool {
 		if r.URL.Path != "/api/conversations.info" {
 			return false
 		}
 		mu.Lock()
 		defer mu.Unlock()
-		switch r.URL.Query().Get("channel") {
-		case "C7":
-			if !failed {
-				failed = true
-				w.WriteHeader(500)
-				fmt.Fprint(w, "upstream error")
-				return true
-			}
-		case "C8":
+		channel := r.URL.Query().Get("channel")
+		switch {
+		case channel == "C7" && !failed[channel]:
+			failed[channel] = true
+			w.WriteHeader(500)
+			fmt.Fprint(w, "upstream error")
+			return true
+		case channel == "C8" && !failed[channel]:
+			failed[channel] = true
+			fmt.Fprint(w, `{"ok": false, "error": "invalid_auth"}`)
+			return true
+		case channel == "C9":
 			fmt.Fprint(w, `{"ok": false, "error": "channel_not_found"}`)
 			return true
 		}
@@ -386,35 +391,45 @@ func TestSlackListenerLeavesAFailedEnvelopeForSlackToSendAgain(t *testing.T) {
 		defer s.mu.Unlock()
 		return slices.Contains(s.acks, id)
 	}
-	lost := inChannel("U1", "4.0", "", "<@UBOT> once")
-	lost["channel"] = "C7"
-	refused := inChannel("U1", "5.0", "", "<@UBOT> never")
-	refused["channel"] = "C8"
-	s.says("a", lost)
-	s.says("b", refused)
-	// A press with no user, which can never be handled, is acknowledged too.
+	in := func(channel, ts string) map[string]any {
+		e := inChannel("U1", ts, "", "<@UBOT> "+channel)
+		e["channel"] = channel
+		return e
+	}
+	s.says("a", in("C7", "4.0"))
+	s.says("b", in("C8", "5.0"))
+	s.says("c", in("C9", "6.0"))
 	s.send(map[string]any{"envelope_id": "d", "type": "interactive", "payload": map[string]any{
 		"type": "block_actions", "actions": []any{map[string]any{"action_id": "choice-0", "value": "20260101T000000.000Z-0123456789 yes"}},
 	}})
-	w.until("the refused envelopes received", func() bool { return acked("b") && acked("d") })
+	w.until("the press with no user acknowledged", func() bool { return acked("d") })
 	time.Sleep(10 * interval)
-	if acked("a") || len(s.posted()) != 0 {
-		t.Fatalf("after a 500, the envelope was acknowledged: %v, and the bot posted %v", acked("a"), s.posted())
+	if acked("a") || acked("b") || acked("c") || len(s.posted()) != 0 {
+		t.Fatalf("a failed envelope was acknowledged: %v %v %v, and the bot posted %v", acked("a"), acked("b"), acked("c"), s.posted())
 	}
-	s.says("a", lost)
-	w.until("the resent envelope received", func() bool { return acked("a") })
-	w.until("the answer", func() bool { return len(s.posted()) >= 1 })
-	s.says("c", lost)
-	w.until("the second resend received", func() bool { return acked("c") })
+	s.says("a2", in("C7", "4.0"))
+	s.says("b2", in("C8", "5.0"))
+	s.says("c2", in("C9", "6.0"))
+	w.until("the resent envelopes received", func() bool { return acked("a2") && acked("b2") })
+	w.until("the answers", func() bool { return len(s.posted()) >= 2 })
+	s.says("a3", in("C7", "4.0"))
+	s.says("b3", in("C8", "5.0"))
+	w.until("the second resends received", func() bool { return acked("a3") && acked("b3") })
 	time.Sleep(20 * interval)
-	if got := s.posted(); len(got) != 1 || got[0]["channel"] != "C7" {
-		t.Fatalf("the bot posted %v", got)
+	var channels []string
+	for _, p := range s.posted() {
+		channels = append(channels, fmt.Sprint(p["channel"]))
+	}
+	slices.Sort(channels)
+	if !reflect.DeepEqual(channels, []string{"C7", "C8"}) || acked("c2") {
+		t.Fatalf("the bot posted in %v, and the always refused envelope was acknowledged: %v", channels, acked("c2"))
 	}
 }
 
 // A message Telegram gives while getUpdates fails once, with a 500, is not
 // lost: the listener asks again after its rest, and the message is answered
-// once. A message with no chat, which can never be handled, is passed over.
+// once. A message with no chat, which lacks what the listener reads, is logged
+// and passed over.
 func TestTelegramListenerLosesNoMessageToAFailure(t *testing.T) {
 	tg := newTelegram(t)
 	var mu sync.Mutex
@@ -458,6 +473,51 @@ func TestTelegramListenerLosesNoMessageToAFailure(t *testing.T) {
 	time.Sleep(20 * interval)
 	if got := tg.texts("1"); len(got) != 1 {
 		t.Fatalf("the bot said %q", got)
+	}
+}
+
+// An update that the listener fails on after getUpdates gave it, here a photo
+// with no sizes, fails the job before the cursor passes it, so Telegram gives
+// the update again, and it is answered once.
+func TestTelegramUpdateTheListenerFailsOnIsGivenAgain(t *testing.T) {
+	tg := newTelegram(t)
+	var mu sync.Mutex
+	asks, broken := 0, 0
+	override(tg.Server, func(w http.ResponseWriter, r *http.Request) bool {
+		if !strings.HasSuffix(r.URL.Path, "/getUpdates") {
+			return false
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		asks++
+		if broken == 0 && len(tg.updates) > 0 {
+			broken++
+			fmt.Fprint(w, `{"ok": true, "result": [{"update_id": 1, "message": {"message_id": 10, "date": 1700000000, "from": {"id": 1, "is_bot": false}, "chat": {"id": 1, "type": "private"}, "photo": []}}]}`)
+			return true
+		}
+		return false
+	})
+	asked := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return asks
+	}
+	w := newWorld(t)
+	dir := chatProject(t, w, tg, map[string]string{
+		"agents/helper.yaml": echoAgent("helper"),
+		"agents/turn.js":     turnJS,
+	})
+	tg.dm(1, "given again")
+	w.sync(dir)
+	w.until("the listener failed", func() bool {
+		return slices.ContainsFunc(failures(w), func(s string) bool { return strings.Contains(s, "telegram-listen") })
+	})
+	for i := 0; i < 5 && len(tg.texts("1")) == 0; i++ {
+		tick(w, asked)
+	}
+	time.Sleep(20 * interval)
+	if got := tg.texts("1"); len(got) != 1 || !strings.Contains(got[0], "given again") {
+		t.Fatalf("the bot said %q; failures: %v", got, failures(w))
 	}
 }
 

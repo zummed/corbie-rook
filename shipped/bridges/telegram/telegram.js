@@ -44,13 +44,20 @@ if (input.do === "hear") {
   // a person's own chat with the bot is emitted as message, except /start; a
   // tap on a button of a question is emitted as answer. A message in a group
   // is logged.
+  //
+  // An update that lacks what the listener reads is logged and passed over.
+  // Any other failure fails the job before the cursor passes the update, so
+  // Telegram gives it again, until it drops the update after 24 hours. limit: 1
+  // makes that update the only one of the job: with more, those before it
+  // would be emitted, then given again.
   const ask = { timeout: 50, limit: 1, allowed_updates: ["message", "callback_query"] }
   if (input.cursor !== null && input.cursor !== undefined) ask.offset = input.cursor
   let cursor = ask.offset === undefined ? null : ask.offset
   // heard emits what one update holds.
   const heard = (u) => {
     const q = u.callback_query
-    if (q && q.message && q.data) {
+    if (q) {
+      if (!q.id || !q.from || !q.data) return log("a tap with no id, sender or data is passed over")
       const at = q.data.indexOf(" ")
       const question = q.data.slice(0, at), choice = q.data.slice(at + 1)
       // Telegram passes on whatever data a client sends, so a tap that names
@@ -67,7 +74,9 @@ if (input.do === "hear") {
       return
     }
     const m = u.message
-    if (!m || !m.from || m.from.is_bot) return
+    if (!m) return
+    if (!m.from || !m.chat) return log("a message with no sender or chat is passed over")
+    if (m.from.is_bot) return
     if (m.chat.type !== "private") return log("a message in a " + m.chat.type + " is not heard: the Telegram bridge hears only direct messages")
     const text = m.text || m.caption || ""
     // Telegram sends /start when a person opens the bot.
@@ -82,16 +91,8 @@ if (input.do === "hear") {
     emit("message", message)
   }
   for (const u of call("getUpdates", ask)) {
+    heard(u)
     cursor = u.update_id + 1
-    // An update that lacks what the listener reads can never be handled, and
-    // the cursor passes it. Any other failure fails the job before the cursor
-    // passes the update, so Telegram gives it again.
-    try {
-      heard(u)
-    } catch (e) {
-      if (!(e instanceof TypeError)) throw e
-      log("an update the listener cannot read: " + e.message)
-    }
   }
   return { cursor: cursor }
 }

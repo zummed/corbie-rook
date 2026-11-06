@@ -33,12 +33,6 @@ function call(method, body, query, token) {
   return answer
 }
 
-// lasting says whether a failure would come again on a resend: Slack refused a
-// call with a word other than its temporary ones, as channel_not_found for a
-// channel the bot cannot read, or the envelope lacks what the listener reads.
-const temporary = ["ratelimited", "internal_error", "fatal_error", "service_unavailable", "request_timeout"]
-const lasting = (e) => (e.slack !== undefined && !temporary.includes(e.slack)) || e instanceof TypeError
-
 // named gives the ID of the channel a #name names, of those the bot can see, and
 // a conversation ID as it is.
 function named(to) {
@@ -75,6 +69,7 @@ if (input.do === "hear") {
     const value = String(action.value || "")
     const at = value.indexOf(" ")
     if (at < 0 || !question.test(value.slice(0, at))) return log("a press names no question: " + value.slice(0, 100))
+    if (!body.user || !body.user.id) return log("a press names no person")
     const values = {}
     for (const block of Object.values((body.state || {}).values || {})) {
       for (const [name, field] of Object.entries(block)) {
@@ -108,6 +103,7 @@ if (input.do === "hear") {
   // own included.
   const said = (e) => {
     if (e.type !== "message" || (e.subtype && e.subtype !== "file_share" && e.subtype !== "thread_broadcast")) return
+    if (!e.channel || !e.ts) return log("a message names no channel or no time")
     if (heard.includes(e.channel + "/" + e.ts)) return
     if (e.user === me) spoke.set(e.channel + "/" + (e.thread_ts || e.ts), true)
     if (e.bot_id || !e.user || e.user === me) return
@@ -152,16 +148,16 @@ if (input.do === "hear") {
     }
     if (envelope.type === "disconnect") break
     if (!envelope.envelope_id) continue
-    // An envelope that can never be handled is logged and acknowledged. Any
-    // other failure, such as a network error, is logged and leaves the envelope
-    // unacknowledged, so Slack sends it again.
+    // An envelope the listener handled or skipped is acknowledged. Any failure,
+    // such as a network error or Slack refusing a call, is logged and leaves
+    // the envelope unacknowledged, so Slack sends it again, a few times at most.
     const body = envelope.payload || {}
     try {
       if (envelope.type === "interactive" && body.type === "block_actions") pressed(body)
       if (envelope.type === "events_api" && body.event) said(body.event)
     } catch (e) {
       log(e.message)
-      if (!lasting(e)) continue
+      continue
     }
     socket.send(JSON.stringify({ envelope_id: envelope.envelope_id }))
   }
