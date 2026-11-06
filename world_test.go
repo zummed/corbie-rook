@@ -185,7 +185,7 @@ func (w *world) syncAt(c *client.Client, dir, at string) *instance.Receipt {
 	}
 	for _, row := range receipt.Tree.Locations {
 		if row.Run != "" {
-			if err := c.Taken(ctx, row.Run, interval); err != nil {
+			if err := c.Started(ctx, row.Run, interval); err != nil {
 				w.t.Fatal(err)
 			}
 		}
