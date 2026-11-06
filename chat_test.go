@@ -238,8 +238,8 @@ func TestSeveralPeopleGetTheirOwnAgents(t *testing.T) {
 
 // A message in a Telegram group is not heard, even from someone with an agent
 // and even when it names the bot: Telegram's listener hears only direct
-// messages, as rook-design says. Nothing is said in the group, and no chat run
-// starts for it.
+// messages, as rook-design says, and logs that. Nothing is said in the group,
+// and no chat run starts for it.
 func TestGroupMessagesAreNotHeard(t *testing.T) {
 	tg := newTelegram(t)
 	w := newWorld(t)
@@ -267,6 +267,44 @@ func TestGroupMessagesAreNotHeard(t *testing.T) {
 			t.Errorf("a chat %s", key)
 		}
 	}
+	if got := logged(w, "telegram"); !slices.Contains(got, "a message in a group is not heard: the Telegram bridge hears only direct messages") {
+		t.Errorf("the listener logged %q", got)
+	}
+}
+
+// The /start Telegram sends when a person opens the bot is logged and not
+// passed on: the agent answers only the message after it.
+func TestTelegramStartIsNotPassedOn(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorld(t)
+	dir := chatProject(t, w, tg, map[string]string{
+		"agents/helper.yaml": echoAgent("helper"),
+		"agents/turn.js":     turnJS,
+	})
+	tg.dm(1, "/start")
+	tg.dm(1, "hello")
+	w.sync(dir)
+	tg.waitFor(w, "1", "hello")
+	quiet()
+	if got := tg.texts("1"); len(got) != 1 || strings.Contains(got[0], "/start") {
+		t.Errorf("the bot said %q", got)
+	}
+	if got := logged(w, "telegram"); !slices.Contains(got, "a /start is not passed on") {
+		t.Errorf("the listener logged %q", got)
+	}
+}
+
+// Telegram's listener takes no input: overhear given in bridges/telegram.yaml
+// fails the listener, naming it, and is not passed over.
+func TestTelegramOverhearIsRefused(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorld(t)
+	dir := chatProject(t, w, tg, map[string]string{"agents/helper.yaml": echoAgent("helper"), "agents/turn.js": turnJS})
+	setSite(t, dir, "bridges/telegram.yaml", "restart: { when: always }", "restart: { when: always }\n      input: { overhear: true }")
+	w.sync(dir)
+	w.until("the listener refuses overhear", func() bool {
+		return slices.ContainsFunc(failures(w), func(s string) bool { return strings.Contains(s, "additional properties 'overhear' not allowed") })
+	})
 }
 
 // rules.yaml chooses by person and group: the first entry that holds the asker.

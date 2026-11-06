@@ -9,6 +9,7 @@
 // of the token's sight is null where options.maybe says so. options.headers are
 // sent too.
 exports.api = (site, email) => {
+  if (String(site).includes("/")) throw new Error("JIRA_SITE is a host name, such as example.atlassian.net, with no https:// and no path: it is " + site)
   const base = "https://" + site + "/rest/api/2"
   const auth = secrets.text`Basic ${secrets.encoded(secrets.text`${email}:${secrets.get("JIRA_TOKEN")}`, { as: "base64" })}`
   return (method, path, options) => {

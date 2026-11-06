@@ -4,6 +4,7 @@
 # to the question's run at .rook/blocks/ask. A button holds the run's ID without
 # its client's name, since Telegram keeps 64 bytes, and this adds the name back.
 title: Telegram listener
+input: { type: object, additionalProperties: false }   # it takes no input, such as overhear
 allow: [send:.rook/blocks/chat, send:.rook/blocks/ask]
 initial: hearing
 states:

@@ -97,6 +97,19 @@ func tick(w *world, asked func() int) {
 	})
 }
 
+// logged gives what the runs of a bridge's listener logged, in order.
+func logged(w *world, bridge string) []string {
+	var out []string
+	for _, run := range listenerRuns(w, bridge) {
+		for _, e := range w.record(run.ID) {
+			if e.Name == "log" {
+				out = append(out, fmt.Sprint(e.Data))
+			}
+		}
+	}
+	return out
+}
+
 // listenerRuns gives the runs of a bridge's listener, the children of its
 // bridge, newest last.
 func listenerRuns(w *world, bridge string) []*client.Run {
@@ -444,6 +457,29 @@ func TestTelegramListenerLosesNoMessageToAFailure(t *testing.T) {
 	time.Sleep(20 * interval)
 	if got := tg.texts("1"); len(got) != 1 {
 		t.Fatalf("the bot said %q", got)
+	}
+}
+
+// GITLAB_SITE and JIRA_SITE given with https:// fail the listener, saying
+// each is a host name.
+func TestSiteWithASchemeIsExplained(t *testing.T) {
+	for _, c := range []struct{ bridge, value, want string }{
+		{"gitlab", "https://gitlab.example.com", "GITLAB_SITE is a host name, such as gitlab.example.com, with no https:// and no path: it is https://gitlab.example.com"},
+		{"jira", "https://example.atlassian.net/", "JIRA_SITE is a host name, such as example.atlassian.net, with no https:// and no path: it is https://example.atlassian.net/"},
+	} {
+		t.Run(c.bridge, func(t *testing.T) {
+			w := newWorld(t)
+			srv := httptest.NewServer(http.NotFoundHandler())
+			t.Cleanup(srv.Close)
+			dir := pointed(t, c.bridge, srv)
+			w.secret(strings.ToUpper(c.bridge)+"_TOKEN", "token")
+			w.value("JIRA_EMAIL", "bot@example.com")
+			w.value(strings.ToUpper(c.bridge)+"_SITE", c.value)
+			w.sync(dir)
+			w.until(c.want, func() bool {
+				return slices.ContainsFunc(failures(w), func(s string) bool { return strings.Contains(s, c.want) })
+			})
+		})
 	}
 }
 

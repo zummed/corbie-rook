@@ -41,8 +41,9 @@ if (input.do === "hear") {
   // One update at a time, waiting up to fifty seconds for it. Asking from
   // the cursor tells Telegram every update before it was heard; with no
   // cursor, Telegram gives the oldest it has not been told of. A message in
-  // a person's own chat with the bot is emitted as message; a tap on a
-  // button of a question is emitted as answer.
+  // a person's own chat with the bot is emitted as message, except /start; a
+  // tap on a button of a question is emitted as answer. A message in a group
+  // is logged.
   const ask = { timeout: 50, limit: 1, allowed_updates: ["message", "callback_query"] }
   if (input.cursor !== null && input.cursor !== undefined) ask.offset = input.cursor
   let cursor = ask.offset === undefined ? null : ask.offset
@@ -66,8 +67,11 @@ if (input.do === "hear") {
       return
     }
     const m = u.message
-    if (!m || !m.from || m.from.is_bot || m.chat.type !== "private") return
+    if (!m || !m.from || m.from.is_bot) return
+    if (m.chat.type !== "private") return log("a message in a " + m.chat.type + " is not heard: the Telegram bridge hears only direct messages")
     const text = m.text || m.caption || ""
+    // Telegram sends /start when a person opens the bot.
+    if (text === "/start" || text.startsWith("/start ")) return log("a /start is not passed on")
     const file = attachment(m)
     if (!text && !file) return
     // Each item of an album comes as its own update, so it is a message of
