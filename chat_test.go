@@ -431,13 +431,15 @@ func TestRuleNamesAMissingAgent(t *testing.T) {
 	}
 }
 
-// A field rules.yaml does not take, as words: in an agent's entry, fails the
-// message, naming the field, and the person is told it could not be answered.
+// A field rules.yaml does not take, as words: in an agent's entry, or an
+// agent's places: that is not a list, fails the message, naming the field,
+// and the person is told it could not be answered.
 func TestRulesUnknownFieldIsNamed(t *testing.T) {
 	for name, rules := range map[string]string{
-		"agent": "places:\n  dm: { readers: [asker] }\nagents:\n  - { name: helper, for: [alice], words: [hi] }\n",
-		"place": "places:\n  dm: { readers: [asker], quiet: true }\nagents:\n  - { name: helper, for: [alice] }\n",
-		"file":  "places:\n  dm: { readers: [asker] }\nagent:\n  - { name: helper, for: [alice] }\n",
+		"agent":  "places:\n  dm: { readers: [asker] }\nagents:\n  - { name: helper, for: [alice], words: [hi] }\n",
+		"place":  "places:\n  dm: { readers: [asker], quiet: true }\nagents:\n  - { name: helper, for: [alice] }\n",
+		"file":   "places:\n  dm: { readers: [asker] }\nagent:\n  - { name: helper, for: [alice] }\n",
+		"places": "places:\n  dm: { readers: [asker] }\nagents:\n  - { name: helper, for: [alice], places: dm }\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			tg := newTelegram(t)
@@ -451,9 +453,10 @@ func TestRulesUnknownFieldIsNamed(t *testing.T) {
 			w.sync(dir)
 			tg.waitFor(w, "1", "That could not be answered.")
 			want := map[string]string{
-				"agent": "rules.yaml: the agent helper has words, and an agent takes only name and for",
-				"place": "rules.yaml: the place dm has quiet, and a place takes only readers",
-				"file":  "rules.yaml: the file has agent, and the file takes only places and agents",
+				"agent":  "rules.yaml: the agent helper has words, and an agent takes only name, for and places",
+				"places": "rules.yaml: the agent helper has places: that is not a list",
+				"place":  "rules.yaml: the place dm has quiet, and a place takes only readers",
+				"file":   "rules.yaml: the file has agent, and the file takes only places and agents",
 			}[name]
 			if f := failures(w); !slices.ContainsFunc(f, func(s string) bool { return strings.Contains(s, want) }) {
 				t.Errorf("no failure names the field: %q", f)
@@ -1053,8 +1056,8 @@ func TestAttendDecides(t *testing.T) {
 // nothing, and the chat goes on.
 func TestAttendThatFailsOrMisspeaks(t *testing.T) {
 	for name, attend := range map[string]string{
-		"fails":       "flow: attend\ninput: { said: string }\nstages:\n  x: { job: { script: ./judge.js } }\n",
-		"plain true":  "flow: attend\ninput: { said: string }\nstages:\n  x: { job: { script: ./ok.js } }\noutput: { reply: true }\n",
+		"fails":        "flow: attend\ninput: { said: string }\nstages:\n  x: { job: { script: ./judge.js } }\n",
+		"plain true":   "flow: attend\ninput: { said: string }\nstages:\n  x: { job: { script: ./ok.js } }\noutput: { reply: true }\n",
 		"string false": "flow: attend\ninput: { said: string }\nstages:\n  x: { job: { script: ./ok.js } }\noutput: { reply: { answer: \"false\" } }\n",
 	} {
 		t.Run(name, func(t *testing.T) {

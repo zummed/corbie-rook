@@ -1,6 +1,7 @@
 # Who gets what. The first agent whose `for` holds the asker and everyone who
 # reads the answer answers, and a place not listed here is read by anyone.
-# `readers` are groups, anyone, or asker. Each agent is the file
+# `readers` are groups, anyone, or asker. An agent's `places`, if it has one,
+# are the only places it answers in. Each agent is the file
 # agents/<name>.yaml, which names the parts it can open; each part's ask names
 # who approves its held calls.
 places:
