@@ -514,6 +514,9 @@ func TestWhoGivesAnAgentTheAskerAndTheReadersMayUse(t *testing.T) {
 			{"slack", "U1", "#not-listed", "support"},
 			{"slack", "U9", "#help", "support"},
 			{"slack", "U9", "dm", "support"},
+			{"gitlab", "someone", "group/app", "reviewer"},
+			{"slack", "U1", "group/app", "reviewer"},
+			{"gitlab", "someone", "group/other", "support"},
 		},
 		"": {
 			{"telegram", "1", "dm", "helper"},

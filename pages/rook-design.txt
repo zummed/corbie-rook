@@ -490,8 +490,7 @@ Who gets what
 -------------
 
 `who.yaml` reads `rules.yaml`. A person gets the first agent that they and
-everyone who reads the answer may each use, so what they get depends on where
-they ask.
+everyone who reads the answer may each use, and that answers in that place.
 
     # rules.yaml, of a team
     places:
@@ -499,15 +498,18 @@ they ask.
       "#platform": { readers: [platform] }
       dm: { readers: [asker] }
     agents:
+      - { name: reviewer, for: [anyone], places: [group/app] }
       - { name: team, for: [platform] }
       - { name: support, for: [anyone] }
 
-  someone not in platform, anywhere        support
+  anyone, in the GitLab project group/app  reviewer
+  someone not in platform, anywhere else   support
   someone in platform, in #help            support
   someone in platform, in dm or #platform  team
 
 - A place that is not listed is read by anyone. A GitLab or Jira project must be listed for an agent that is not `for: [anyone]` to answer there.
 - `readers:` names groups, `anyone` or `asker`. It is written in the file, and not read from a channel's members.
+- An agent's `places:` names the places it answers in, and with none it answers in every place. A place is `dm`, a Slack `#channel`, a GitLab project's path or a Jira project's key.
 - `who.yaml` gives `rule`, the entry that chose the agent, so the chat's record shows why.
 - A field that `rules.yaml` does not take, such as `words:` in an agent's entry, fails `who.yaml`, and the chat's record names the field.
 - When `rules.yaml` names an agent with no file in `agents/`, the call to it fails, and the conversation's record names its location.

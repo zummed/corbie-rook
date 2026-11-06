@@ -121,6 +121,7 @@ Common changes
   The bot should                                  Add
   look something up, or do something, when asked  a tool, in the part for that service, or in a new part
   answer some people differently                  an agent, and a line in rules.yaml
+  answer differently in one channel or project    an agent, and a line in rules.yaml with places:
   do something at a time                          a schedule under schedules/
   answer a message with its own steps             a machine of your own at agents/<name>
   tell someone, from a machine                    a job that runs .rook/blocks/tell.yaml
