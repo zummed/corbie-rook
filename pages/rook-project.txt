@@ -7,35 +7,32 @@ what each agent can do.
 Start a project
 ---------------
 
-1. Install Claude Code on the computer that runs the runner. The agents run
-   on it, with the secret `CLAUDE_TOKEN` set to the token `claude
-   setup-token` prints.
-2. Make the project, naming its bridges.
-3. For Slack, make the app first, as The Slack app below says.
-4. Add the first agent, as Add an agent below says, and set each secret
-   `init` names.
-5. Start Corbie, and submit the bridges.
+1. Make the project, naming its bridges.
+2. For Slack, make the app first, as The Slack app below says.
+3. Add the first agent, as Add an agent below says, and set each secret and value `init` names.
+4. Start Corbie, and submit the project.
 
     corbie init --ceiling all
     corbie rook init my-bot --bridges slack
       Make the Slack app first, as corbie rook manual rook-project says under The Slack app.
       my-bot is ready, and answers nobody until it has an agent. Add one as corbie rook manual rook-project says under Add an agent, or ask a model in my-bot to. Then:
 
-        corbie controller secret set CLAUDE_TOKEN
-        corbie controller secret set SLACK_TOKEN
-        corbie controller secret set SLACK_APP_TOKEN
-        cd my-bot && corbie run submit bridges
+        corbie controller secret set SLACK_TOKEN --at /my-bot
+        corbie controller secret set SLACK_APP_TOKEN --at /my-bot
+        cd my-bot && corbie run submit .
 
     cd my-bot
     corbie start controller runner ui &
-    corbie run submit bridges
+    corbie run submit .
 
-A new project has no agent and no part. Until it has an agent, the bot tells
-anyone who names it that it answers only the people it belongs to.
+`corbie run submit .` records the project as the tree `/my-bot`, and starts
+each bridge. A secret or a value set at `/my-bot` is used by every run of the
+project, and one set at `/` by every tree.
 
-`corbie ui` shows each run and what waits on a person. Its Parts page shows
-each part, the agents that open it, and which of its tools have
-`approve: true`.
+- Until the project has an agent, the bot tells anyone who names it that it answers only the people it belongs to.
+- Submit the project from a client no gateway uses: a gateway whose client submitted the project can call any of its locations with any input.
+- A person stops what their agent is doing in a thread with Slack's stop button, or with `/stop` on Telegram, as `corbie rook manual rook-design` says under Stopping an answer.
+- `corbie ui` shows each run and what waits on a person. Its Parts page shows each part, the agents that open it, and which of its tools have `approve: true`.
 
 After a change
 --------------
@@ -43,17 +40,17 @@ After a change
 Corbie reads the project's files only when they are submitted. After changing
 any file, run in the project:
 
-  corbie test .                           reads every machine, and starts nothing
-  corbie run submit bridges schedules     starts each bridge and schedule whose files changed
+  corbie test .            reads every machine, and starts nothing
+  corbie run submit .      records the files, and starts again what the change says
 
-Leave out `schedules` when the project has no `schedules/`. Submit on the
-computer that runs the bot: a second copy of a bridge, with the same token,
+Submit to one Corbie only: a second copy of a bridge, with the same token,
 takes the first one's messages.
 
-A bridge reads every file it names, down to the agents and parts, so a change
-to any of them starts the bridge again. A conversation already under way
-finishes with the machines it started with, and the next message starts a new
-one.
+  a bridge's file, or a file its listener reads   the bridge starts again
+  an agent's file, or a part it opens             the next message is answered by the new agent
+  rules.yaml                                      the chats are cancelled, and each thread's next message starts a new one
+  a file deleted                                  the runs at its location are cancelled
+  a value                                         a bridge reads it when it starts: corbie run cancel /my-bot/bridges/<name>, then submit
 
 After updating Rook, run `corbie rook init .` in the project. It rewrites
 `.rook/`, writes any file it needs that the project lacks, and names the
@@ -65,22 +62,23 @@ What a project holds
 --------------------
 
   bridges/        a file for each bridge; a bridge runs while its file is there
-  people.yaml     the people, their id on each bridge, and the groups
+  people.yaml     the people, their id on each bridge, and the groups, which may be left out
   lookup.yaml     where people are read from: people.yaml by default
-  attend.yaml     whether a message that does not name the bot is for it: no by default
-  rules.yaml      which agent each person gets where, and who approves each part
-  answer.yaml     runs the agent that rules.yaml chose
+  rules.yaml      which agent each person gets where
   agents/         the agents, once you add one
-  parts/          the tools an agent can open, once you add one
+  parts/          the tools an agent can open, and who approves them, once you add one
+  attend.yaml     whether a message that does not name the bot is for it, once you add it
+  review.yaml     judges a held call before a person is asked, once you add it
   schedules/      machines that run at a time, once you add one
   AGENTS.md       notes for a model or a person changing the project; it points at .rook/AGENTS.md
-  CLAUDE.md       makes Claude Code read AGENTS.md
-  .mcp.json       starts corbie mcp for Claude Code in the project
+  CLAUDE.md       makes Claude Code read AGENTS.md; init writes it only to a new project
+  .mcp.json       starts corbie mcp for a model; init writes it only to a new project
   .rook/          Rook's machines; corbie rook init rewrites it, so change nothing there
 
-`.rook/AGENTS.md` is the page `corbie rook manual rook`: what a model reads
-before it changes the project. Keep `.rook/` in git, or run `corbie rook init
-.` after cloning the project.
+A file with a type line has a location, `/my-bot/` and its path without
+`.yaml`, as `/my-bot/agents/helper`. `.rook/AGENTS.md` is the page `corbie
+rook manual rook`, which a model reads before it changes the project. Keep
+`.rook/` in git, or run `corbie rook init .` after cloning the project.
 
 Add an agent
 ------------
@@ -88,11 +86,9 @@ Add an agent
 An agent answers the people `rules.yaml` gives it. To add one:
 
 1. Give each person it answers their id in `people.yaml`.
-2. Write the agent's file in `agents/`, including `.rook/agents/base.yaml`.
+2. Write the agent's file in `agents/`, including `.rook/agents/base.yaml` and naming its model.
 3. Name it in `rules.yaml`, with the people or groups it is for.
-4. Give it a stage in `answer.yaml`, and add that stage to `output:` there.
-
-The first agent makes `answer.yaml` a flow:
+4. Set its model's secret: `corbie controller secret set ANTHROPIC_KEY --at /my-bot`.
 
     # people.yaml, with one person
     people:
@@ -104,29 +100,20 @@ The first agent makes `answer.yaml` a flow:
       dm: { readers: [asker] }
     agents:
       - { name: helper, for: [alice] }
-    approve: {}
 
     # agents/helper.yaml
     agent: helper
     include: .rook/agents/base.yaml
-    model: { name: sonnet, service: claude-code, secret: CLAUDE_TOKEN }
+    model: { name: claude-sonnet-5-5, secret: ANTHROPIC_KEY }
     system: |
       You help alice. What you write is read on a phone: answer in one or two
       short sentences, in everyday words.
 
       ${input.format}
 
-    # answer.yaml, with one agent
-    flow: answer
-    input: { agent: string, message: any }
-    stages:
-      helper:
-        when: "${input.agent === 'helper'}"
-        job: { machine: agents/helper.yaml, input: "${input.message}" }
-    output: ${stages.helper.output}
-
-A second agent adds a stage, and `output:` picks the stage that ran:
-`${stages.helper.skipped ? stages.team.output : stages.helper.output}`.
+The conversation calls the agent at `/my-bot/agents/helper`. Any machine there
+with the same input and output answers in its place, a flow with no model
+included, as `corbie rook manual rook-design` says under Your machines.
 
 Common changes
 --------------
@@ -135,53 +122,31 @@ Common changes
   look something up, or do something, when asked  a tool, in the part for that service, or in a new part
   answer some people differently                  an agent, and a line in rules.yaml
   do something at a time                          a schedule under schedules/
-  answer a message with its own steps             a machine of your own in answer.yaml
+  answer a message with its own steps             a machine of your own at agents/<name>
   tell someone, from a machine                    a job that runs .rook/blocks/tell.yaml
+  judge a held call before a person is asked      review.yaml, and review: true in the part's ask
+  answer some messages that do not name it        attend.yaml, and overhear: true in the bridge's file
 
-- To add a tool, add it to a part under `parts/`, and name the part under
-  `open:` in each agent's file that should have it. A tool that changes
-  something gets `approve: true`, its part gets an `ask:` that runs
-  `.rook/blocks/approval.yaml`, and `approve:` in `rules.yaml` names who
-  approves, under the part's name. `corbie rook manual rook-design` shows a
-  part under Parts.
-- To answer with a machine of your own, add it as an agent is added. It takes
-  the message and gives a `reply`, as `corbie rook manual rook-design` says
-  under Your machines.
-- To tell someone from a machine, run `.rook/blocks/tell.yaml` as a job, with
-  `person` and `text`.
-- To run something at a time, add a statechart with a timer under
-  `schedules/`, as `corbie manual schedules` shows.
-- To add a bridge, run `corbie rook init . --bridges <name>`, and set its
-  secrets.
-- To stop a bridge, delete its file and submit again. Keep `bridges/` even
-  when it is empty, since `corbie run submit bridges` needs it.
+- To add a tool, add it to a part under `parts/`, and name the part under `open:` in each agent's file that should have it. A tool that changes something gets `approve: true`, and its part gets an `ask:` that runs `.rook/blocks/approval.yaml` with the `people` who approve. `corbie rook manual rook-design` shows a part under Parts.
+- To tell someone from a machine, run `.rook/blocks/tell.yaml` as a job, with `person` and `text`.
+- To run something at a time, add a statechart with `lifetime: singleton` and a timer under `schedules/`, as `corbie manual schedules` shows.
+- To add a bridge, run `corbie rook init . --bridges <name>`, set the secrets and values it names, and submit.
+- To stop a bridge, delete its file, then run `corbie rook init .`, which removes its machines from `.rook/`, and submit. Until init runs, people are still asked and told on it.
 - To read people from somewhere else, change the job in `lookup.yaml`.
-- To answer replies in a Slack thread without being named, add
-  `overhear: true` to the input in `bridges/slack.yaml`. A reply in a thread
-  the bot has said something in, from someone who gets an agent there, then
-  goes to `attend.yaml`, which gives `{ answer: false }` by default.
-- To hear every public issue and comment on GitLab or Jira, add
-  `overhear: true` to the input in the bridge's file. One that does not name
-  the bot then goes to `attend.yaml`.
-- To answer some of those messages, set the job in `attend.yaml` to
-  `.rook/attend/model.yaml`, which asks a small model, or to a machine of
-  your own.
-- To wait until an issue is finished being written, add `settle: 2m` to the
-  input in `bridges/gitlab.yaml` or `bridges/jira.yaml`. An opened issue is
-  then heard once nobody has changed it for two minutes.
-- To write for one bridge only, test `input.address.bridge` in an agent's
-  system text: `${input.address.bridge == 'slack' ? 'End with a summary in
-  bold.' : ''}`.
-- To call GitLab or Jira from a part, load `.rook/bridges/gitlab/api.js` or
-  `.rook/bridges/jira/api.js` in the part's script, as the file's comment
-  says.
+- To answer replies in a Slack thread without being named, add `overhear: true` to the input in `bridges/slack.yaml`. A reply in a thread the bot has said something in, from someone who gets an agent there, then goes to `attend.yaml`, and is not answered while the project has none.
+- To hear every public issue and comment on GitLab or Jira, add `overhear: true` to the input in the bridge's file. One that does not name the bot then goes to `attend.yaml`.
+- To answer some of those messages, write `attend.yaml`: an agent that includes `.rook/attend/agent.yaml`, as `corbie rook manual rook-design` says under Attend, or a machine of your own.
+- To wait until an issue is finished being written, add `settle: 2m` to the input in `bridges/gitlab.yaml` or `bridges/jira.yaml`. An opened issue is then heard once nobody has changed it for two minutes.
+- To write for one bridge only, test `input.address.bridge` in an agent's system text: `${input.address.bridge == 'slack' ? 'End with a summary in bold.' : ''}`.
+- To call GitLab or Jira from a part, load `.rook/bridges/gitlab/api.js` or `.rook/bridges/jira/api.js` in the part's script, as the file's comment says.
 
 With a model
 ------------
 
-A project's `.mcp.json` starts `corbie mcp --allow test --allow "rook init"`
-for Claude Code, which asks once before it starts it. Start Claude Code in the
-project, and ask for what the bot should do.
+Rook needs no model to run, and a model can change the project for you. A
+project's `.mcp.json` starts `corbie mcp --allow test --allow "rook init"` for
+a model that reads it, such as Claude Code, which asks once before it starts
+it. Start it in the project, and ask for what the bot should do.
 
 The model is told the page `rook`, and reads the rest of the manual from
 there. It checks what it writes with `corbie test`, and gives you the commands
@@ -200,9 +165,9 @@ nothing on the internet connects to this computer.
    description. Slack cannot turn an agent back into a plain app.
 3. Under Basic Information, App-Level Tokens, make a token with the scope
    `connections:write`, and run `corbie controller secret set
-   SLACK_APP_TOKEN`.
+   SLACK_APP_TOKEN --at /my-bot`.
 4. Under Install App, install the app, and set its Bot User OAuth Token with
-   `corbie controller secret set SLACK_TOKEN`.
+   `corbie controller secret set SLACK_TOKEN --at /my-bot`.
 5. In `people.yaml`, give each person `slack:` with their member ID, from
    their profile's menu, Copy member ID.
 6. In each channel the bot should hear, run `/invite @Rook`.
@@ -245,7 +210,8 @@ nothing on the internet connects to this computer.
           "bot_events": [
             "message.channels",
             "message.groups",
-            "message.im"
+            "message.im",
+            "agent_session_stopped"
           ]
         },
         "interactivity": {
@@ -255,8 +221,8 @@ nothing on the internet connects to this computer.
       }
     }
 
-  assistant:write                                   shows a status in a thread
-  chat:write                                        posts, and changes a question once it is answered
+  assistant:write                                   makes the bot an agent, which Slack gives a status and a stop button in a thread
+  chat:write                                        posts, sets the status in a thread, and changes a question once it is answered
   im:write                                          opens a direct message to ask a question
   channels:read, groups:read                        reads a channel's name, as rules.yaml names places
   channels:history, groups:history, im:history      hears messages, and reads a thread's history
@@ -264,12 +230,13 @@ nothing on the internet connects to this computer.
   files:write                                       sends a file an agent gives
 
 The bot hears a direct message, and a message that names it in a channel it
-was invited to.
+was invited to. With the event `agent_session_stopped`, Slack shows a stop
+button under a thread while the bot works there.
 
 Reference
 ---------
 
-  corbie rook manual rook-design     the blocks, what each takes and gives, and who may do what
+  corbie rook manual rook-design     the runs that answer a message, what each block takes and gives, and who may do what
   corbie rook manual rook-starter    the files this version starts a project with
   corbie manual a-directory          how corbie run submit brings runs into line with files
   corbie manual schedules            a machine that runs at a time

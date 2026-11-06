@@ -4,15 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/zummed/corbie/client"
-	llmstandin "github.com/zummed/corbie/plugin/llm/standin"
+		llmstandin "github.com/zummed/corbie/plugin/llm/standin"
 )
 
 // replying puts in an agent that gives one reply to everything.
@@ -80,7 +82,7 @@ func TestGitLabSaysAChartAsATable(t *testing.T) {
 	w := newWorld(t)
 	w.secret("GITLAB_TOKEN", "gl-token")
 	dir := pointed(t, "gitlab", gl.Server)
-	setSite(t, dir, "bridges/gitlab.yaml", "gitlab.example.com", strings.TrimPrefix(gl.URL, "http://"))
+	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
 	replying(t, dir, charts)
 	gl.note(1, 2, "al", "before")
 	w.sync(dir)
@@ -106,25 +108,46 @@ func TestGitLabSaysAChartAsATable(t *testing.T) {
 }
 
 // A status shows under a thread while its message is answered, and is cleared
-// when the answer says nothing.
+// once the reply is posted, when the answer says nothing, and when the answer
+// fails and the thread is told so.
 func TestSlackShowsAStatusWhileAnswering(t *testing.T) {
-	s := newSlack(t)
-	w := newWorld(t)
-	dir := slackProject(t, w, s)
-	replying(t, dir, "")
-	w.sync(dir)
-	w.until("Slack connected", s.connected)
-	s.says("a", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "thread_ts": "4.0", "ts": "5.0", "text": "hello"})
-	w.until("two statuses", func() bool {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		return len(s.status) >= 2
-	})
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	got, _ := json.Marshal(s.status)
-	if string(got) != `[{"channel_id":"D1","status":"Working on it.","thread_ts":"4.0"},{"channel_id":"D1","status":"","thread_ts":"4.0"}]` {
-		t.Fatalf("the statuses are %s", got)
+	for name, agent := range map[string]string{
+		"reply":   "Done.",
+		"nothing": "",
+		"failure": "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newSlack(t)
+			w := newWorld(t)
+			dir := slackProject(t, w, s)
+			replying(t, dir, agent)
+			if name == "failure" {
+				write(t, dir, map[string]string{"agents/helper.yaml": "flow: helper\nstages:\n  fail: { job: { script: ./fail.js } }\n", "agents/fail.js": `throw new Error("no answer")`})
+			}
+			w.sync(dir)
+			w.until("Slack connected", s.connected)
+			s.says("a", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "thread_ts": "4.0", "ts": "5.0", "text": "hello"})
+			w.until("two statuses", func() bool {
+				s.mu.Lock()
+				defer s.mu.Unlock()
+				return len(s.status) >= 2
+			})
+			quiet()
+			s.mu.Lock()
+			got, _ := json.Marshal(s.status)
+			s.mu.Unlock()
+			if string(got) != `[{"channel_id":"D1","status":"processing","thread_ts":"4.0"},{"channel_id":"D1","status":"active","thread_ts":"4.0"}]` {
+				t.Fatalf("the statuses are %s", got)
+			}
+			want := map[string][]string{"reply": {"Done."}, "nothing": nil, "failure": {"That could not be answered."}}[name]
+			var posted []string
+			for _, p := range s.posted() {
+				posted = append(posted, fmt.Sprint(p["markdown_text"]))
+			}
+			if !slices.Equal(posted, want) {
+				t.Errorf("the bot posted %q", posted)
+			}
+		})
 	}
 }
 
@@ -134,7 +157,7 @@ const attendStub = `
 	input: { said: string, asker: string, address: map, history: "any?" }
 	initial: e
 	states:
-	  e: { end: done, output: { answer: "${input.said.includes('please')}" } }
+	  e: { end: done, output: { reply: { answer: "${input.said.includes('please')}" } } }
 `
 
 // With overhear, a reply in a thread the bot has said something in goes to
@@ -145,7 +168,7 @@ func TestSlackOverhearsAThreadItSpokeIn(t *testing.T) {
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
 	echoing(t, dir)
-	setSite(t, dir, "bridges/slack.yaml", `input: { dir: "${run.context}" }`, `input: { dir: "${run.context}", overhear: true }`)
+	setSite(t, dir, "bridges/slack.yaml", "      restart: { when: always }\n", "      restart: { when: always }\n      input: { overhear: true }\n")
 	setSite(t, dir, "rules.yaml", "  dm: { readers: [asker] }\n", "  dm: { readers: [asker] }\n  \"#help\": { readers: [asker] }\n")
 	if err := os.WriteFile(filepath.Join(dir, "attend.yaml"), []byte(dedent(attendStub)), 0o644); err != nil {
 		t.Fatal(err)
@@ -209,7 +232,8 @@ func TestGitLabHearsAnIssueOnceItSettles(t *testing.T) {
 	w := newWorld(t)
 	w.secret("GITLAB_TOKEN", "gl-token")
 	dir := pointed(t, "gitlab", gl.Server)
-	setSite(t, dir, "bridges/gitlab.yaml", "gitlab.example.com, projects: [group/project]", strings.TrimPrefix(gl.URL, "http://")+", projects: [group/project], settle: 2m")
+	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
+	setSite(t, dir, "bridges/gitlab.yaml", "projects: [group/project] }", "projects: [group/project], settle: 2m }")
 	echoing(t, dir)
 	gl.note(1, 2, "al", "before")
 	w.sync(dir)
@@ -263,7 +287,8 @@ func TestGitLabHearsANoteMadeWhileItsIssueWaits(t *testing.T) {
 	w := newWorld(t)
 	w.secret("GITLAB_TOKEN", "gl-token")
 	dir := pointed(t, "gitlab", gl.Server)
-	setSite(t, dir, "bridges/gitlab.yaml", "gitlab.example.com, projects: [group/project]", strings.TrimPrefix(gl.URL, "http://")+", projects: [group/project], settle: 2m")
+	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
+	setSite(t, dir, "bridges/gitlab.yaml", "projects: [group/project] }", "projects: [group/project], settle: 2m }")
 	echoing(t, dir)
 	gl.note(1, 2, "al", "before")
 	w.sync(dir)
@@ -291,10 +316,12 @@ func TestGitLabHearsANoteMadeWhileItsIssueWaits(t *testing.T) {
 	}
 }
 
-// The ready-made attend asks a model, shown the thread and the message, and gives
-// its answer.
+// attend.yaml written as an agent that includes .rook/attend/agent.yaml asks
+// its model, shown the thread and the message and what the bot is for, and
+// gives its answer as reply.
 func TestAttendAsksAModel(t *testing.T) {
 	w := newWorld(t)
+	w.secret("TEST_KEY", "sk-test")
 	dir := filepath.Join(t.TempDir(), "project")
 	if err := exampleProject(dir, nil); err != nil {
 		t.Fatal(err)
@@ -302,20 +329,18 @@ func TestAttendAsksAModel(t *testing.T) {
 	model := &llmstandin.Server{Answer: func(llmstandin.Call) llmstandin.Reply { return llmstandin.Reply{Text: `{"answer": true}`} }}
 	web := httptest.NewServer(model)
 	t.Cleanup(web.Close)
-	setSite(t, dir, ".rook/attend/model.yaml", "model: { name: haiku, service: claude-code, secret: CLAUDE_TOKEN }",
-		"model: { name: test-model, service: anthropic, address: "+web.URL+", secret: TEST_KEY }")
-	draft, _, err := client.ReadMachine(dir, ".rook/attend/model.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	id, err := w.Start(context.Background(), draft, client.Start{
-		Input:   map[string]any{"said": "please look", "asker": "alice", "address": map[string]any{"bridge": "slack", "id": "C1/1.0"}, "history": "you: earlier words"},
-		Secrets: map[string]string{"TEST_KEY": "sk-test"}})
-	if err != nil {
-		t.Fatal(err)
-	}
+	write(t, dir, map[string]string{"attend.yaml": `
+		agent: attend
+		include: .rook/attend/agent.yaml
+		model: { name: test-model, service: anthropic, address: ` + web.URL + `, secret: TEST_KEY }
+		system:
+		  - { include: .rook/attend/agent.yaml#system }
+		  - The bot answers questions about the build.
+	`})
+	w.sync(dir)
+	id := w.start("attend.yaml", map[string]any{"said": "please look", "asker": "alice", "address": map[string]any{"bridge": "slack", "id": "C1/1.0"}, "history": "you: earlier words"})
 	w.until("the answer", func() bool { return w.show(id).HasEnded() })
-	if run := w.show(id); run.Status != "done" || fmt.Sprint(run.Output) != "map[answer:true]" {
+	if run := w.show(id); run.Status != "done" || fmt.Sprint(run.Output.(map[string]any)["reply"]) != "map[answer:true]" {
 		t.Fatalf("attend ended %s with %v: %s", run.Status, run.Output, run.Error)
 	}
 	shown := fmt.Sprint(model.Calls[0].Messages)
@@ -324,59 +349,66 @@ func TestAttendAsksAModel(t *testing.T) {
 			t.Errorf("%q is not in %s", want, shown)
 		}
 	}
+	if system := model.Calls[0].System; !strings.Contains(system, "meant for the") || !strings.Contains(system, "about the build") {
+		t.Errorf("the system text is %q", system)
+	}
 }
 
-// The starting attend.yaml answers no, and needs no model.
-func TestStartingAttendSaysNo(t *testing.T) {
+// With overhear and no attend.yaml, a message that does not name the bot is not
+// answered: the call to attend fails, which the chat's record shows, and a
+// message that names it is answered.
+func TestOverheardWithNoAttendIsNotAnswered(t *testing.T) {
+	s := newSlack(t)
 	w := newWorld(t)
-	dir := filepath.Join(t.TempDir(), "project")
-	if err := exampleProject(dir, nil); err != nil {
-		t.Fatal(err)
+	dir := slackProject(t, w, s)
+	echoing(t, dir)
+	setSite(t, dir, "bridges/slack.yaml", "      restart: { when: always }\n", "      restart: { when: always }\n      input: { overhear: true }\n")
+	setSite(t, dir, "rules.yaml", "  dm: { readers: [asker] }\n", "  dm: { readers: [asker] }\n  \"#help\": { readers: [asker] }\n")
+	s.thread = []map[string]any{{"ts": "1.0", "user": "UBOT", "text": "my earlier reply"}}
+	w.sync(dir)
+	w.until("Slack connected", s.connected)
+	s.says("a", map[string]any{"type": "message", "channel": "C1", "channel_type": "channel", "user": "U1", "ts": "5.0", "thread_ts": "1.0", "text": "please help"})
+	s.says("b", map[string]any{"type": "message", "channel": "C1", "channel_type": "channel", "user": "U1", "ts": "6.0", "thread_ts": "1.0", "text": "<@UBOT> named"})
+	w.until("the answer", func() bool { return len(s.posted()) >= 1 })
+	time.Sleep(20 * interval)
+	if got := s.posted(); len(got) != 1 || !strings.Contains(fmt.Sprint(got[0]["markdown_text"]), "named") {
+		t.Fatalf("the bot posted %v", got)
 	}
-	draft, _, err := client.ReadMachine(dir, "attend.yaml")
-	if err != nil {
-		t.Fatal(err)
+	failed := 0
+	for _, run := range stubs(t, w, "route") {
+		for _, e := range w.record(run.ID) {
+			for _, ev := range e.Events {
+				if ev.Name == "failed" && ev.From == "attend" && strings.Contains(fmt.Sprint(ev.Data), "/project/attend") {
+					failed++
+				}
+			}
+		}
 	}
-	id, err := w.Start(context.Background(), draft, client.Start{
-		Input: map[string]any{"said": "please look", "asker": "alice", "address": map[string]any{"bridge": "slack", "id": "C1/1.0"}}})
-	if err != nil {
-		t.Fatal(err)
-	}
-	w.until("the answer", func() bool { return w.show(id).HasEnded() })
-	if run := w.show(id); run.Status != "done" || fmt.Sprint(run.Output) != "map[answer:false]" {
-		t.Fatalf("attend ended %s with %v: %s", run.Status, run.Output, run.Error)
+	if failed != 1 {
+		t.Errorf("the chat's record shows %d failed calls of attend", failed)
 	}
 }
 
 // A question in a Slack channel is posted there, and the first tap from someone in
 // the group it names answers it; the message then shows who answered, with no
-// buttons. rules.yaml names such approvers as { people, in }.
+// buttons. A part's ask names such approvers as people and in.
 func TestQuestionInAChannelCountsTheGroup(t *testing.T) {
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
-	for name, text := range map[string]string{
+	write(t, dir, map[string]string{
 		"people.yaml": "people:\n  alice: { slack: U1 }\n  bob: { slack: U2 }\ngroups:\n  team: [bob]\n",
-		"rules.yaml":  "places: {}\nagents:\n  - { name: helper, for: [alice] }\napprove:\n  deploys: { people: [team], in: \"#approvals\" }\n",
-		"on/asker.yaml": dedent(`
-			statechart: asker
-			initial: who
-			states:
-			  who:
-			    job: { machine: .rook/blocks/approvers.yaml, input: { part: deploys } }
-			    on: { done: asking }
-			  asking:
-			    job: { machine: .rook/blocks/ask.yaml, input: { people: "${states.who.output.people}", in: "${states.who.output.in}", text: "Deploy?", choices: ["yes", "no"] } }
-			    on: { done: over }
-			  over: { end: done, output: "${states.asking.output.choice}" }
-		`),
-	} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
+		"rules.yaml":  "places: {}\nagents:\n  - { name: helper, for: [alice] }\n",
+		"on/asker.yaml": `
+			flow: asker
+			allow: [send:.rook/blocks/ask]
+			stages:
+			  asking: { job: { call: { at: .rook/blocks/ask }, input: { people: [team], in: "#approvals", text: "Deploy?", choices: ["yes", "no"] } } }
+			output: ${stages.asking.output.choice}
+		`,
+	})
 	w.sync(dir)
-	asker := w.kept("on/asker.yaml")
+	asker := w.start("on/asker.yaml", nil)
 	w.until("Slack connected", s.connected)
 	w.until("the question", func() bool { return len(s.posted()) == 1 })
 	post := s.posted()[0]
@@ -420,9 +452,10 @@ func TestQuestionInAChannelCountsTheGroup(t *testing.T) {
 	}
 }
 
-// A message after a bridge's file changes starts a new conversation, with the
-// machines as they are then, and a conversation already under way carries on.
-func TestChangedBridgeStartsNewConversations(t *testing.T) {
+// A changed agent answers the next message of a conversation already under way,
+// and a changed bridge file restarts its listener and starts no new chat or
+// conversation.
+func TestChangedAgentAnswersTheNextMessage(t *testing.T) {
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
@@ -431,40 +464,29 @@ func TestChangedBridgeStartsNewConversations(t *testing.T) {
 	w.until("Slack connected", s.connected)
 	s.says("a", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "ts": "3.0", "text": "first"})
 	w.until("the first answer", func() bool { return len(s.posted()) >= 1 })
-	chats := func() []*client.Run {
-		var out []*client.Run
-		for _, run := range stubs(t, w, "chat") {
-			if run.Status == "running" {
-				out = append(out, run)
-			}
-		}
-		return out
+	setSite(t, dir, "agents/helper.yaml", "${'[' + input.history + '] ' + input.said}", "${'changed: ' + input.said}")
+	w.sync(dir)
+	s.says("b", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "ts": "4.0", "text": "second"})
+	w.until("the second answer", func() bool { return len(s.posted()) >= 2 })
+	if got := fmt.Sprint(s.posted()[1]["markdown_text"]); got != "changed: second" {
+		t.Fatalf("the bot said %q", got)
 	}
-	first := chats()
-	if len(first) != 1 {
-		t.Fatalf("%d conversations", len(first))
-	}
-	bridge := filepath.Join(dir, "bridges/slack.yaml")
-	text, err := os.ReadFile(bridge)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(bridge, append(text, []byte("# changed\n")...), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	listener := w.kept("bridges/slack.yaml")
+	setSite(t, dir, "bridges/slack.yaml", "title: Slack bridge\n", "title: Slack bridge\nmeta: { changed: true }\n")
 	s.mu.Lock()
 	s.socket = nil
 	s.mu.Unlock()
 	w.sync(dir)
-	w.until("Slack connected again", s.connected)
-	s.says("b", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "ts": "4.0", "text": "second"})
-	w.until("the second answer", func() bool { return len(s.posted()) >= 2 })
-	now := chats()
-	if len(now) != 2 || now[0].Key == now[1].Key {
-		t.Fatalf("the conversations are %v", now)
+	if w.kept("bridges/slack.yaml") == listener {
+		t.Fatal("the changed bridge file did not restart its listener")
 	}
-	if got := fmt.Sprint(s.posted()[1]["markdown_text"]); !strings.HasSuffix(got, "second") {
-		t.Fatalf("the bot said %q", got)
+	w.until("Slack connected again", s.connected)
+	s.says("c", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "ts": "5.0", "text": "third"})
+	w.until("the third answer", func() bool { return len(s.posted()) >= 3 })
+	for _, path := range []string{".rook/blocks/chat.yaml", ".rook/blocks/conversation.yaml"} {
+		if runs := keyed(w, path); len(runs) != 1 || len(slices.Collect(maps.Values(runs))[0]) != 1 {
+			t.Errorf("%s has the runs %v", path, runs)
+		}
 	}
 }
 
@@ -481,6 +503,7 @@ func TestSlackSaysInAChannelByName(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.sync(dir)
+	w.start("on/log.yaml", nil)
 	w.until("the text", func() bool { return len(s.posted()) == 1 })
 	if post := s.posted()[0]; post["channel"] != "C5" || post["markdown_text"] != "Moved." {
 		t.Fatalf("the bot posted %v", post)
@@ -543,7 +566,7 @@ func TestFormIsAnsweredInTheThread(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.sync(dir)
-	former := w.kept("on/former.yaml")
+	former := w.start("on/former.yaml", nil)
 	w.until("Slack connected", s.connected)
 	w.until("the form", func() bool { return len(s.posted()) == 1 })
 	post := s.posted()[0]
@@ -572,7 +595,7 @@ func TestFormIsAnsweredInTheThread(t *testing.T) {
 	}})
 	w.until("the form done", func() bool { return w.show(former).Status == "done" })
 	got, _ := json.Marshal(w.show(former).Output)
-	if string(got) != `{"choice":"send","values":{"hours":2.5,"size":"big","title":"Login fails"}}` {
+	if string(got) != `{"choice":"send","person":"alice","values":{"hours":2.5,"size":"big","title":"Login fails"}}` {
 		t.Fatalf("the form gave %s", got)
 	}
 	w.until("the form closed", func() bool {
@@ -600,7 +623,7 @@ func TestFormOffSlackGivesANote(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.sync(dir)
-	former := w.started("on/former.yaml")
+	former := w.start("on/former.yaml", nil)
 	w.until("the form done", func() bool { return w.show(former).Status == "done" })
 	if got := fmt.Sprint(w.show(former).Output); !strings.Contains(got, "only on Slack") {
 		t.Fatalf("the form gave %s", got)

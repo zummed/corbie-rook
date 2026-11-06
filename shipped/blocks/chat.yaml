@@ -1,98 +1,115 @@
-# One conversation with the bot, on any bridge: a chat, a thread or an issue. A
-# bridge's listener sends each message here under a key of its own. Its messages
-# are answered one at a time, each by a new agent given the conversation so far,
-# the message's address, the files earlier in the service's thread, and with no
-# conversation yet, what the thread already holds. The message's own files are
-# downloaded only to answer it, and an earlier one only when the agent looks at it.
-# A message marked unaddressed is answered only if attend.yaml says so, given
-# what was said and a line naming its files. A status shows while the agent
-# works, and an empty reply says nothing.
-# Anyone with no agent who names the bot is told the bot is not theirs, and a
-# question the agent fails on is told so and ends the conversation, so one the
-# model cannot take does not stop the chat. A chat quiet for a day ends, and its
-# next message starts a new conversation with the machines as they are then.
-# Its title is where it is and the first line said: "#help: …", "dm: …", "#7 …"
-# for a GitLab issue, "OPS-1 …" for a Jira one. A message's title is all that
-# was said, or the names of the files sent with it.
+# One thread with the bot, on any bridge: a chat, a thread or an issue. A
+# bridge's listener sends each message heard there to this location, keyed
+# <bridge>:<chat>, and the first message starts the run, so its input is a
+# message as the listener heard it. It takes one message at a time:
+#   1. who.yaml finds who sent it, and the agent rules.yaml gives them there.
+#   2. history.yaml reads the thread before it, for someone with an agent.
+#   3. A message marked unaddressed is answered only when attend.yaml gives
+#      { reply: { answer: true } }. With no attend.yaml, or one that fails, it
+#      is not answered.
+#   4. A message to answer goes to the conversation of this thread and that
+#      agent, at .rook/blocks/conversation, keyed <bridge>:<chat>:<agent>.
+# A stop, a press of Slack's stop button or /stop on Telegram, goes the same
+# way: who.yaml finds the agent its sender gets here, and the stop goes to that
+# conversation. From someone with no agent here it goes nowhere, and one whose
+# who.yaml fails is told it could not be answered.
+# Someone with no agent who names the bot is told the bot is not theirs, or not
+# theirs here when lookup.yaml knows them. A message that names the bot and
+# whose who.yaml fails, as for a field rules.yaml does not take, is told it
+# could not be answered, and the route's record shows why. A chat
+# quiet for a day ends, and its next message starts a new one. Its title is
+# where it is and the first line said, or stop: "#help: …", "dm: …", "#7 …" for
+# a GitLab issue, "OPS-1 …" for a Jira one.
 statechart: chat
+lifetime: keyed
+update: restart
+input: { bridge: string, text: "string?", chat: string, from: string, place: string, answers: "string?", at: "any?", attachments: "list?", unaddressed: "boolean?" }
+allow: [send:.rook/blocks/conversation]
 title: >-
-  ${input.event.bridge === 'gitlab' ? input.event.chat.slice(input.event.chat.lastIndexOf('#')) + ' ' :
-  input.event.bridge === 'jira' ? input.event.chat + ' ' : input.event.place + ': '}${String(input.event.text || (input.event.attachments || []).map((a) => a.name).join(', ')).split('\n')[0]}
+  ${input.bridge === 'gitlab' ? input.chat.slice(input.chat.lastIndexOf('#')) + ' ' :
+  input.bridge === 'jira' ? input.chat + ' ' : input.place + ': '}${String(input.text || (input.attachments || []).map((a) => a.name).join(', ') || 'stop').split('\n')[0]}
 initial: waiting
 states:
   waiting:
     timers: { quiet: 1d }
-    on: { message: answering, quiet: over }
-  answering:
-    defer: [message]
+    on: { message: routing, stop: stopping, quiet: over }
+  routing:
+    defer: [message, stop]
     job:
       input:
-        event: "${event.data.event}"
-        dir: "${event.data.dir}"
-        last: "${states.answering.output}"
-        address: "${ { bridge: event.data.event.bridge, id: event.data.event.chat, answers: event.data.event.answers, at: event.data.event.at, settings: event.data.event.settings } }"
+        message: "${event.data}"
+        address: "${ { bridge: event.data.bridge, id: event.data.chat, answers: event.data.answers, at: event.data.at } }"
       machine:
-        flow: message
-        title: "${input.event.text || (input.event.attachments || []).map((a) => a.name).join(', ')}"
-        input: { event: any, dir: string, address: map, last: "any?" }
+        flow: route
+        title: "${input.message.text || (input.message.attachments || []).map((a) => a.name).join(', ')}"
+        input: { message: map, address: map }
+        allow: [send:attend]
         stages:
           who:
-            job:
-              machine: ./who.yaml
-              input: { bridge: "${input.event.bridge}", id: "${input.event.from}", place: "${input.event.place}" }
+            job: { machine: ./who.yaml, input: { bridge: "${input.message.bridge}", id: "${input.message.from}", place: "${input.message.place}" } }
           history:
-            job:
-              machine: ./history.yaml
-              input: { address: "${input.address}", wanted: "${!!stages.who.output.agent}" }
+            job: { machine: ./history.yaml, input: { address: "${input.address}", wanted: "${!!stages.who.output.agent}" } }
           attend:
+            when: "${!!input.message.unaddressed && !!stages.who.output.agent}"
             job:
-              input: { unaddressed: "${!!input.event.unaddressed}", agent: "${!!stages.who.output.agent}", said: "${(input.event.text || '') + ((input.event.attachments || []).length ? (input.event.text ? '\\n' : '') + '(files: ' + input.event.attachments.map((a) => a.name).join(', ') + ')' : '')}", asker: "${stages.who.output.person}", address: "${input.address}", history: "${(stages.history.output || {}).text}" }
-              machine:
-                flow: should-answer
-                input: { unaddressed: boolean, agent: boolean, said: string, asker: "any?", address: map, history: "any?" }
-                stages:
-                  decide:
-                    when: "${input.unaddressed && input.agent}"
-                    job: { machine: attend.yaml, input: { said: "${input.said}", asker: "${input.asker}", address: "${input.address}", history: "${input.history}" } }
-                output: "${input.agent && (!input.unaddressed || !stages.decide.failed && !!(stages.decide.output || {}).answer)}"
-          refuse:
-            when: "${!stages.who.output.agent && !input.event.unaddressed}"
-            job: { machine: ./say.yaml, input: { address: "${input.address}", text: This bot answers only the people it belongs to. } }
-          busy:
-            when: "${stages.attend.output}"
-            job: { machine: ./status.yaml, input: { address: "${input.address}", text: Working on it. } }
-          format:
-            when: "${stages.attend.output}"
-            job: { script: ./format.js, input: { bridge: "${input.event.bridge}" } }
-          attachments:
-            when: "${stages.attend.output}"
-            job: { machine: ./attachments.yaml, input: { address: "${input.address}", attachments: "${input.event.attachments}" } }
-          answer:
-            when: "${stages.attend.output}"
-            job:
-              machine: answer.yaml
+              call: { at: attend }
               input:
-                agent: "${stages.who.output.agent}"
-                message:
-                  said: "${input.event.text}"
-                  asker: "${stages.who.output.person}"
-                  home: "${input.dir}"
-                  address: "${input.address}"
-                  history: "${input.last && input.last.conversation ? null : (stages.history.output || {}).text}"
-                  attachments: "${stages.attachments.output}"
-                  earlier: "${((stages.history.output || {}).attachments || []).filter((e) => !(input.event.attachments || []).some((o) => o.id === e.id))}"
-                  conversation: "${input.last ? input.last.conversation : null}"
-                  format: "${stages.format.output}"
-          say:
-            when: "${(stages.answer.output || {}).reply}"
-            job: { machine: ./say.yaml, input: { address: "${input.address}", text: "${stages.answer.output.reply}" } }
-          idle:
-            when: "${!stages.busy.skipped && !stages.answer.skipped && !stages.answer.failed && !(stages.answer.output || {}).reply}"
-            job: { machine: ./status.yaml, input: { address: "${input.address}", text: "" } }
+                said: "${(input.message.text || '') + ((input.message.attachments || []).length ? (input.message.text ? '\\n' : '') + '(files: ' + input.message.attachments.map((a) => a.name).join(', ') + ')' : '')}"
+                asker: "${stages.who.output.person || input.message.bridge + ' user ' + input.message.from}"
+                address: "${input.address}"
+                history: "${(stages.history.output || {}).text}"
+          refuse:
+            when: "${!stages.who.output.agent && !input.message.unaddressed}"
+            job: { machine: ./say.yaml, input: { address: "${input.address}", text: "${stages.who.output.person ? 'This bot does not answer you here.' : 'This bot answers only the people it belongs to.'}" } }
           sorry:
-            when: "${stages.answer.failed}"
-            job: { machine: ./say.yaml, input: { address: "${input.address}", text: That could not be answered. Ask again in a while. } }
+            when: "${stages.who.failed && !input.message.unaddressed}"
+            job: { machine: ./say.yaml, input: { address: "${input.address}", text: That could not be answered. } }
         output:
-          conversation: "${stages.answer.failed ? null : stages.answer.skipped ? (input.last ? input.last.conversation : null) : (stages.answer.output || {}).conversation}"
-    on: { done: waiting, failed: waiting }
+          answer: "${stages.sorry.skipped && !!stages.who.output.agent && (!input.message.unaddressed || !stages.attend.failed && !stages.attend.skipped && ((stages.attend.output || {}).reply || {}).answer === true)}"
+          agent: "${(stages.who.output || {}).agent}"
+          rule: "${(stages.who.output || {}).rule}"
+          given:
+            message: "${input.message}"
+            asker: "${(stages.who.output || {}).person || input.message.bridge + ' user ' + input.message.from}"
+            agent: "${(stages.who.output || {}).agent}"
+            address: "${input.address}"
+            history: "${stages.history.output}"
+    on:
+      done:
+        - go: waiting
+          when: "${event.data.answer}"
+          send: { to: { at: .rook/blocks/conversation, key: "${input.bridge + ':' + input.chat + ':' + event.data.agent}" }, event: message, data: "${event.data.given}" }
+        - waiting
+      failed: waiting
+  stopping:
+    defer: [message, stop]
+    job:
+      input:
+        stop: "${event.data}"
+        address: "${ { bridge: event.data.bridge, id: event.data.chat, answers: event.data.answers } }"
+      machine:
+        flow: stop
+        title: Stop
+        input: { stop: map, address: map }
+        stages:
+          who:
+            job: { machine: ./who.yaml, input: { bridge: "${input.stop.bridge}", id: "${input.stop.from}", place: "${input.stop.place}" } }
+          sorry:
+            when: "${stages.who.failed}"
+            job: { machine: ./say.yaml, input: { address: "${input.address}", text: That could not be answered. } }
+        output:
+          agent: "${(stages.who.output || {}).agent}"
+          rule: "${(stages.who.output || {}).rule}"
+          given:
+            message: "${input.stop}"
+            asker: "${(stages.who.output || {}).person || input.stop.bridge + ' user ' + input.stop.from}"
+            agent: "${(stages.who.output || {}).agent}"
+            address: "${input.address}"
+    on:
+      done:
+        - go: waiting
+          when: "${!!event.data.agent}"
+          send: { to: { at: .rook/blocks/conversation, key: "${input.bridge + ':' + input.chat + ':' + event.data.agent}" }, event: stop, data: "${event.data.given}" }
+        - waiting
+      failed: waiting
   over: { end: done }

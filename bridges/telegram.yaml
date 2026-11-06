@@ -1,11 +1,10 @@
-# The telegram bridge runs while this file is here. To stop it, delete
-# the file and run corbie run submit bridges.
+# The Telegram bridge runs while this file is here. To stop it, delete the file
+# and run corbie run submit . in the project.
 flow: telegram-bridge
 title: Telegram bridge
-limits: { depth: 16 }   # every conversation counts its levels from here
+lifetime: singleton
 stages:
   listen:
     job:
-      machine: .rook/bridges/telegram/listen.yaml
+      machine: { statechart: telegram-listen, include: .rook/bridges/telegram/listen.yaml }
       restart: { when: always }
-      input: { dir: "${run.context}" }

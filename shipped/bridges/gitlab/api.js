@@ -8,6 +8,7 @@
 // address called. A thing gone or out of the token's sight is null where
 // options.maybe says so.
 exports.api = (site) => {
+  if (String(site).includes("/")) throw new Error("GITLAB_SITE is a host name, such as gitlab.example.com, with no https:// and no path: it is " + site)
   const base = "https://" + site + "/api/v4"
   const token = secrets.get("GITLAB_TOKEN")
   return (method, path, options) => {

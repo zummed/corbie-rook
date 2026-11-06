@@ -1,14 +1,14 @@
-# Shows what the bot is doing at an address, where a bridge has a way to: a
-# thread on Slack, and "typing" on Telegram. An empty text clears it on Slack,
-# and Telegram's "typing" ends by itself. A status is only a courtesy, so one
-# that fails gives nothing and stops nothing.
+# Shows that the bot is working at an address, where a bridge has a way to:
+# "Working..." under a thread on Slack, and "typing" on Telegram, for any text
+# but an empty one. An empty text clears it on Slack, and Telegram's "typing"
+# ends by itself. A status is only a courtesy, so one
+# that fails gives nothing and stops nothing. It calls the bridge's status at
+# .rook/bridges/<bridge>/status.
 flow: status
 input: { address: map, text: string }
+allow: ["send:.rook/bridges/*/status"]
 stages:
-  slack:
-    when: "${input.address.bridge === 'slack'}"
-    job: { machine: .rook/bridges/slack/status.yaml, input: { to: "${input.address.id}", text: "${input.text}" } }
-  telegram:
-    when: "${input.address.bridge === 'telegram'}"
-    job: { machine: .rook/bridges/telegram/status.yaml, input: { to: "${input.address.id}", text: "${input.text}" } }
-output: "${ { shown: !stages.slack.skipped && !stages.slack.failed || !stages.telegram.skipped && !stages.telegram.failed } }"
+  status:
+    when: "${['slack', 'telegram'].includes(input.address.bridge)}"
+    job: { call: { at: ".rook/bridges/${input.address.bridge}/status" }, input: { to: "${input.address.id}", text: "${input.text}" } }
+output: "${ { shown: !stages.status.skipped && !stages.status.failed } }"

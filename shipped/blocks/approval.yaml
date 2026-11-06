@@ -1,24 +1,35 @@
-# Approval for a part's held calls. The reviewer judges them first, and a
-# refusal ends it. Those rules.yaml names as the part's approvers decide the
-# rest, shown the reviewer's word, but for calls of tools in `alone` the
-# reviewer's yes is the last word. A part names this as its ask.
+# Approval for a part's held calls, which a part names as its ask. Its input
+# says who approves:
+#   people   people and groups in lookup.yaml, each asked on their own bridge;
+#            with none, or no people at all, no one is asked
+#   in       a Slack channel's #name to ask them in, in place of each one alone
+#   review   true to call review.yaml first; by default no review
+#   alone    tools whose calls the review's yes approves with no person asked
+#   request  what was asked, the agent's input request, which everyone is shown
+# A review's refuse ends it, and anything else goes to the people, shown the
+# review's word. A review that fails, or gives no reply, is taken as refer, and
+# the people are shown why. The note names who answered.
 flow: approval
-title: "Approve ${(Array.isArray(input.jobs) ? input.jobs : []).map((j) => j.name).join(', ')}${input.request ? ': ' + input.request : ''}"
-input: { asking: any, jobs: any, part: string, alone: "list?", asker: "string?", request: "string?" }
+title: "Approve ${(Array.isArray(input.jobs) ? input.jobs : []).map((j) => j.name).join(', ')}${input.request ? ': ' + input.request.split('\\n').pop() : ''}"
+input: { asking: any, jobs: any, part: string, people: "list?", in: "string?", review: "boolean?", alone: "list?", request: "string?" }
+allow: [send:review, send:.rook/blocks/ask]
 stages:
   brief:
-    job: { script: ./held.js, input: { jobs: "${input.jobs}", alone: "${input.alone}", asker: "${input.asker}", request: "${input.request}" } }
+    job: { script: ./held.js, input: { jobs: "${input.jobs}", alone: "${input.review ? input.alone : []}", request: "${input.request}" } }
   review:
-    job: { machine: .rook/agents/reviewer.yaml, input: { context: "${stages.brief.output.context + '\\n\\n' + stages.brief.output.rule}" } }
-  approvers:
-    job: { machine: ./approvers.yaml, input: { part: "${input.part}" } }
+    when: "${!!input.review}"
+    job: { call: { at: review }, input: { context: "${stages.brief.output.context + '\\n\\n' + stages.brief.output.rule}" } }
   person:
-    when: "${stages.review.output.reply.says !== 'refuse' && !(stages.brief.output.alone && stages.review.output.reply.says === 'yes')}"
+    when: "${(input.people || []).length > 0 && (stages.review.skipped || stages.review.failed || !(((stages.review.output || {}).reply || {}).says === 'refuse' || ((stages.review.output || {}).reply || {}).says === 'yes' && stages.brief.output.alone))}"
     job:
-      machine: ./ask.yaml
+      call: { at: .rook/blocks/ask }
       input:
-        people: "${stages.approvers.output.people}"
-        in: "${stages.approvers.output.in}"
+        people: "${input.people}"
+        in: "${input.in || ''}"
         choices: ["yes", "no"]
-        text: "An agent wants to run ${stages.brief.output.names.join(', ')}.\n\n${stages.brief.output.context}\n\nReviewer: ${stages.review.output.reply.says}, ${stages.review.output.reply.note}"
-output: "${stages.person.skipped ? { approve: stages.review.output.reply.says === 'yes' ? stages.brief.output.names : [], note: 'The reviewer said ' + stages.review.output.reply.says + ': ' + stages.review.output.reply.note } : { approve: stages.person.output.choice === 'yes' ? stages.brief.output.names : [], note: 'The approver said ' + stages.person.output.choice + '.' }}"
+        text: "An agent wants to run ${stages.brief.output.names.join(', ')}.\n\n${stages.brief.output.context}${stages.review.skipped ? '' : stages.review.failed ? '\\n\\nReview failed: ' + stages.review.error : !(stages.review.output || {}).reply ? '\\n\\nReview failed: it gave no reply' : '\\n\\nReview: ' + stages.review.output.reply.says + ', ' + stages.review.output.reply.note}"
+output: >-
+  ${!stages.person.skipped ? { approve: stages.person.output.choice === 'yes' ? stages.brief.output.names : [], note: stages.person.output.person ? stages.person.output.person + ' said ' + stages.person.output.choice + '.' : 'No one answered in time, so the answer is no.' }
+  : !stages.review.skipped && !stages.review.failed && (((stages.review.output || {}).reply || {}).says === 'refuse' || ((stages.review.output || {}).reply || {}).says === 'yes' && stages.brief.output.alone)
+  ? { approve: stages.review.output.reply.says === 'yes' ? stages.brief.output.names : [], note: 'The review said ' + stages.review.output.reply.says + ': ' + stages.review.output.reply.note }
+  : { approve: [], note: 'The part ' + input.part + ' names no one in people to approve its calls.' }}

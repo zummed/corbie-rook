@@ -1,8 +1,0 @@
-# Gives what someone said to the agent `who` chose. With no agent yet it ends and
-# says nothing. corbie rook manual rook-project shows it as a flow with one stage
-# for each agent in rules.yaml, under Add an agent.
-statechart: answer
-input: { agent: string, message: any }
-initial: nobody
-states:
-  nobody: { end: done }

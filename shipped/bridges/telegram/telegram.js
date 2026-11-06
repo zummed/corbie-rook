@@ -41,18 +41,30 @@ if (input.do === "hear") {
   // One update at a time, waiting up to fifty seconds for it. Asking from
   // the cursor tells Telegram every update before it was heard; with no
   // cursor, Telegram gives the oldest it has not been told of. A message in
-  // a person's own chat with the bot is emitted as message; a tap on a
-  // button of a question is emitted as answer.
+  // a person's own chat with the bot is emitted as message, except /start and
+  // /stop. /stop, or /stop@<bot>, with any words after it, is emitted as stop;
+  // a tap on a button of a question is emitted as answer. A message in a group
+  // is logged.
+  //
+  // An update that lacks what the listener reads is logged and passed over.
+  // An update the listener fails on for any other reason is given again, by
+  // asking from its own update_id, and after it has failed three times running
+  // it is logged and passed over. input.failing names that update and how many
+  // times it has failed. A failure of getUpdates fails the job, which asks
+  // again from the same cursor. limit: 1 makes each job hear one update: a job
+  // that ends with no output, such as at its timeout, has emitted at most the
+  // update Telegram gives again, where a longer list would be given again whole.
   const ask = { timeout: 50, limit: 1, allowed_updates: ["message", "callback_query"] }
   if (input.cursor !== null && input.cursor !== undefined) ask.offset = input.cursor
   let cursor = ask.offset === undefined ? null : ask.offset
-  for (const u of call("getUpdates", ask)) {
-    cursor = u.update_id + 1
+  // heard emits what one update holds. Its emit is the last thing it does,
+  // so an update it fails on was not emitted, and giving it again emits it once.
+  const heard = (u) => {
     const q = u.callback_query
-    if (q && q.message && q.data) {
+    if (q) {
+      if (!q.id || !q.from || !q.data) return log("a tap with no id, sender or data is passed over")
       const at = q.data.indexOf(" ")
       const question = q.data.slice(0, at), choice = q.data.slice(at + 1)
-      emit("answer", { bridge: "telegram", question: question, from: String(q.from.id), choice: choice })
       // This only shows the tap. Telegram refuses it for an old tap, and a
       // refusal must not stop the cursor passing this update.
       try {
@@ -60,19 +72,42 @@ if (input.do === "hear") {
       } catch (e) {
         log(e.message)
       }
-      continue
+      // Telegram passes on whatever data a client sends, so a tap that names
+      // no question is logged and starts nothing.
+      if (at > 0 && /^\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{10}$/.test(question)) emit("answer", { bridge: "telegram", question: question, from: String(q.from.id), choice: choice })
+      else log("a tap names no question: " + q.data.slice(0, 100))
+      return
     }
     const m = u.message
-    if (!m || !m.from || m.from.is_bot || m.chat.type !== "private") continue
+    if (!m) return
+    if (!m.from || !m.chat) return log("a message with no sender or chat is passed over")
+    if (m.from.is_bot) return
+    if (m.chat.type !== "private") return log("a message in a " + m.chat.type + " is not heard: the Telegram bridge hears only direct messages")
     const text = m.text || m.caption || ""
+    // Telegram sends /start when a person opens the bot.
+    if (text === "/start" || text.startsWith("/start ")) return log("a /start is not passed on")
+    if (/^\/stop(@\S+)?(\s|$)/.test(text)) return emit("stop", { bridge: "telegram", chat: String(m.chat.id), from: String(m.from.id), place: "dm", answers: m.chat.id + ":" + m.message_id })
     const file = attachment(m)
-    if (!text && !file) continue
+    if (!text && !file) return
     // Each item of an album comes as its own update, so it is a message of
     // its own, with its own caption.
     const message = { bridge: "telegram", text: text, chat: String(m.chat.id), from: String(m.from.id), place: "dm",
       answers: m.chat.id + ":" + m.message_id }
     if (file) message.attachments = [file]
     emit("message", message)
+  }
+  for (const u of call("getUpdates", ask)) {
+    try {
+      heard(u)
+    } catch (e) {
+      const tries = input.failing && input.failing.update === u.update_id ? input.failing.tries + 1 : 1
+      if (tries < 3) {
+        log("an update failed, and is given again: " + e.message)
+        return { cursor: u.update_id, failing: { update: u.update_id, tries: tries } }
+      }
+      log("an update failed three times and is passed over: " + e.message)
+    }
+    cursor = u.update_id + 1
   }
   return { cursor: cursor }
 }
@@ -100,12 +135,8 @@ if (input.do === "ask") {
   // A question with a button for each choice. A button holds the question
   // and the choice, which a tap names; Telegram takes at most 64 bytes.
   const buttons = input.choices.map((c) => ({ text: c[0].toUpperCase() + c.slice(1), callback_data: input.question + " " + c }))
-  const sent = []
-  for (const to of input.to) {
-    const m = call("sendMessage", { chat_id: to, text: input.text, reply_markup: { inline_keyboard: [buttons] } })
-    sent.push({ chat: to, id: m.message_id })
-  }
-  return { sent: sent }
+  const m = call("sendMessage", { chat_id: input.to, text: input.text, reply_markup: { inline_keyboard: [buttons] } })
+  return { sent: [{ chat: input.to, id: m.message_id }] }
 }
 
 if (input.do === "close") {

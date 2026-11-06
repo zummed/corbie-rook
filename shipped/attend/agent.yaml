@@ -1,0 +1,27 @@
+# What an agent at attend.yaml takes to say whether a message that does not name
+# the bot is meant for it: the input chat.yaml gives, the system text, the
+# prompt that puts the thread and the message to the model, and the reply
+# { answer }. It says no when unsure, so people talking to each other get no
+# reply. It names no model: a project's attend.yaml writes its own, and says in
+# its system text what the bot is for.
+#
+#   agent: attend
+#   include: .rook/attend/agent.yaml
+#   model: { name: <a small model>, secret: <its key> }
+#   system:
+#     - { include: .rook/attend/agent.yaml#system }
+#     - The bot answers questions about the build.
+input: { said: string, asker: string, address: map, history: "any?" }
+system: |
+  You are shown the newest message in a thread, and the thread before it, where
+  the bot is called you. Answer true when the newest message is meant for the
+  bot: it asks the bot for something, answers what the bot last said, or is the
+  kind of message the bot is for. Answer false when people are talking to each
+  other, and when you are unsure.
+prompt: "${input.history ? 'The thread before the message, where the bot is called you:\\n<thread>\\n' + input.history + '\\n</thread>' : 'The message starts the thread.'}\n\nThe newest message, from ${input.asker}:\n<message>\n${input.said}\n</message>"
+reply:
+  type: object
+  required: [answer]
+  additionalProperties: false
+  properties:
+    answer: { type: boolean }

@@ -1,8 +1,12 @@
-# reviewer judges a held call before a person is asked. blocks/approval.yaml asks
-# it first. It holds no tool.
-agent: reviewer
+# What an agent at review.yaml takes to judge a held call before a person is
+# asked: the input approval.yaml gives, the system text, the prompt, and the
+# reply { says, note }. It names no model: a project's review.yaml writes its
+# own.
+#
+#   agent: review
+#   include: .rook/review/agent.yaml
+#   model: { name: <a model>, secret: <its key> }
 input: { context: string }
-model: { name: opus, service: claude-code, secret: CLAUDE_TOKEN }
 system: |
   You are shown one tool call an agent wants to make: what the tool does, its
   arguments, what the agent said, and the request it serves.

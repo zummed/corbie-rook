@@ -1,7 +1,7 @@
-# Asks people on Telegram, with a button for each choice, and gives `sent`, the
-# messages it posted.
+# Asks a person on Telegram, `to` their id, with a button for each choice, and
+# gives `sent`, the messages it posted.
 flow: telegram-ask
-input: { to: list, text: string, choices: list, question: string }
+input: { to: string, text: string, choices: list, question: string }
 stages:
   question:
     job:

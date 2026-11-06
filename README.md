@@ -23,10 +23,12 @@ The manual has three pages of Rook's:
 | Page | What it gives |
 |---|---|
 | `rook-project` | making a project, what to run after a change, and the common changes |
-| `rook-design` | the blocks, what each takes and gives, and who may do what |
+| `rook-design` | the runs that answer a message, what each block takes and gives, and who may do what |
 | `rook-starter` | the files this version starts a project with |
 
-A new project has no agent and no part. To have a model add them, start Claude Code in the project and say what the bot should do. The project's `.mcp.json` gives it Corbie's manual and `corbie test`, and its `AGENTS.md` tells any model how the project is changed.
+`corbie run submit .` in the project records it in Corbie as one tree, `/my-bot`, and starts its bridges. A message goes from the bridge to a chat for its thread, then to a conversation for that thread and agent, which calls the agent. Each run names the run whose send or call started it, so a message can be followed to its agent, tools and approvals.
+
+A new project has no agent and no part, and Rook needs no model: an agent names its own, or is a machine with none. To have a model add them, start Claude Code or another model in the project and say what the bot should do. The project's `.mcp.json` gives it Corbie's manual and `corbie test`, and its `AGENTS.md` tells any model how the project is changed.
 
 ## License
 

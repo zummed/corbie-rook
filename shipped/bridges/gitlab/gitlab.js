@@ -40,7 +40,7 @@ if (input.do === "hear") {
   const settle = seconds(input.settle)
   const heard = []
   const me = call("GET", "/user")
-  const mention = new RegExp("(^|[^\\w@])@" + me.username.replace(/[.\-]/g, "\\$&") + "(?![\\w.-])", "g")
+  const mention = new RegExp("(^|[^\\w@])@" + me.username.replace(/[.\-]/g, "\\$&") + "(?![\\w-]|\\.[\\w-])", "g")
   // hear keeps a message that names the bot, and with overhear one that does
   // not, marked unaddressed.
   const hear = (message) => {
@@ -76,7 +76,7 @@ if (input.do === "hear") {
       // the latest that names the bot is kept for when the issue is heard.
       if (e.note && issues.includes(e.note.noteable_type) && !e.note.system && !e.note.internal && !e.note.confidential) {
         const chat = p + "#" + e.note.noteable_iid
-        const message = { bridge: "gitlab", text: String(e.note.body || "").trim(), chat: chat, from: String(e.author_username), place: p, at: e.note.id, settings: { site: input.site } }
+        const message = { bridge: "gitlab", text: String(e.note.body || "").trim(), chat: chat, from: String(e.author_username), place: p, at: e.note.id }
         const w = waiting.find((w) => w.chat === chat)
         if (!w) hear(message)
         else if (message.text.search(mention) >= 0) w.note = message
@@ -97,7 +97,7 @@ if (input.do === "hear") {
       continue
     }
     const text = ((issue.title || "") + "\n\n" + (issue.description || "")).trim()
-    hear(w.note && text.search(mention) < 0 ? w.note : { bridge: "gitlab", text: text, chat: w.chat, from: w.from, place: project(w.chat), settings: { site: input.site } })
+    hear(w.note && text.search(mention) < 0 ? w.note : { bridge: "gitlab", text: text, chat: w.chat, from: w.from, place: project(w.chat) })
   }
   // Said only now, when nothing is left to fail: a job that fails keeps the old
   // cursor, and its next ask hears the same again.

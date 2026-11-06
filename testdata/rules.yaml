@@ -1,13 +1,10 @@
 # Who gets what. The first agent whose `for` holds the asker and everyone who
 # reads the answer answers, and a place not listed here is read by anyone.
-# `readers` are groups, anyone, or asker. Each agent's file names the parts it can
-# open. `approve` names who says yes to each part's held calls: people and
-# groups, each asked in a direct message, or { people: [...], in: "#channel" },
-# asked in a Slack channel where any of them may answer.
+# `readers` are groups, anyone, or asker. Each agent is the file
+# agents/<name>.yaml, which names the parts it can open; each part's ask names
+# who approves its held calls.
 places:
   dm: { readers: [asker] }
 agents:
   - { name: helper, for: [alice] }
   - { name: team, for: [team] }
-approve:
-  messages: [alice]

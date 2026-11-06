@@ -1,13 +1,13 @@
 # Sends a file as a comment on a GitLab issue: `to` is project#iid. The file is
 # uploaded to the issue's project, and the comment links to it.
 flow: gitlab-send
-input: { to: string, name: string, file: blob, site: string }
+input: { to: string, name: string, file: blob }
 stages:
   send:
     job:
       script: ./gitlab.js
       files: [./api.js]
-      input: { do: send, to: "${input.to}", name: "${input.name}", file: "${input.file}", site: "${input.site}" }
-      allow: ["net:${input.site}", "secret:GITLAB_TOKEN@net:${input.site}"]
+      input: { do: send, to: "${input.to}", name: "${input.name}", file: "${input.file}", site: "${values.GITLAB_SITE}" }
+      allow: ["net:${values.GITLAB_SITE}", "secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
       timeout: 5m
 output: ${stages.send.output}

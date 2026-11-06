@@ -30,9 +30,11 @@ answers nobody. Before you write anything, ask the person:
 - who the bot is for, and each person's id on each bridge, for `people.yaml`
 - what the bot should do first, which gives its first agent and parts
 - who says yes to a tool that changes something
+- which model each agent uses, and the name of the secret that holds its key;
+  an agent may be a machine with no model
 
 Then add the first agent as `corbie rook manual rook-project` says under Add
-an agent, and give the person the secrets `init` named.
+an agent, and give the person the secrets and values `init` named.
 
 While you write
 ---------------
@@ -40,10 +42,12 @@ While you write
 - Choose each piece with the table under Common changes in `corbie rook
   manual rook-project`.
 - Change only the agents the person named.
-- Use Rook's blocks as jobs, and write no `key:`.
+- Use Rook's blocks as jobs, and call `.rook/blocks/ask` with `call:`, as
+  `corbie rook manual rook-design` says under Asking a person.
 - Give each job only the permissions it needs, in its `allow:` list.
 - Never ask for a secret's value or write one in a file. Give the person the
-  command `corbie controller secret set <NAME>`.
+  command `corbie controller secret set <NAME> --at /<project>`, where
+  `<project>` is the project directory's name.
 - For a Slack bridge, give the person the steps and the manifest under The
   Slack app in `corbie rook manual rook-project`, with their name and
   description.
@@ -58,8 +62,7 @@ After you change a project
 3. Tell the person each piece you added or changed, by Rook's name for it
    (agent, part, tool, schedule), and why that piece. Tell them what each
    job is allowed.
-4. Give the person `corbie run submit bridges`, with `schedules` added when
-   the project has that directory, to run where the bot runs. Run it
+4. Give the person `corbie run submit .`, to run where the bot runs. Run it
    yourself only when the person asks: a second copy of a bridge takes the
    first one's messages.
 5. Tell the person that `corbie ui`, started in the project, shows each run,
@@ -75,5 +78,5 @@ Reference
 ---------
 
   corbie rook manual rook-project    making a project, and the common changes
-  corbie rook manual rook-design     the blocks, what each takes and gives, and who may do what
+  corbie rook manual rook-design     the runs that answer a message, what each block takes and gives, and who may do what
   corbie rook manual rook-starter    the files this version starts a project with

@@ -23,10 +23,10 @@ import (
 )
 
 // pointed makes a project with a bridge whose scripts and permissions name a
-// stand-in, reached over a plain connection. Nothing else of the bridge changes.
+// stand-in, reached over a plain connection, with the helper stub, alice and
+// bob on every bridge, and the directory on.
 func pointed(t *testing.T, bridge string, srv *httptest.Server, hosts ...string) string {
 	t.Helper()
-	addr := strings.TrimPrefix(srv.URL, "http://")
 	dir := filepath.Join(t.TempDir(), "project")
 	if err := exampleProject(dir, []string{bridge}); err != nil {
 		t.Fatal(err)
@@ -34,6 +34,24 @@ func pointed(t *testing.T, bridge string, srv *httptest.Server, hosts ...string)
 	if err := os.Mkdir(filepath.Join(dir, "on"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	point(t, dir, bridge, srv, hosts...)
+	for name, text := range map[string]string{
+		"agents/helper.yaml": dedent(helperStub),
+		"people.yaml":        "people:\n  alice: { slack: U1, gitlab: al, jira: acc-1 }\n  bob: { slack: U2, gitlab: bo, jira: acc-2 }\ngroups: {}\n",
+		"rules.yaml":         "places:\n  dm: { readers: [asker] }\n  group/project: { readers: [asker] }\n  OPS: { readers: [asker] }\nagents:\n  - { name: helper, for: [alice] }\n",
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return dir
+}
+
+// point rewrites the files of one bridge in a project so that its hosts name a
+// stand-in, reached over a plain connection. Nothing else of the bridge changes.
+func point(t *testing.T, dir, bridge string, srv *httptest.Server, hosts ...string) {
+	t.Helper()
+	addr := strings.TrimPrefix(srv.URL, "http://")
 	files, err := filepath.Glob(filepath.Join(dir, ".rook/bridges", bridge, "*"))
 	if err != nil {
 		t.Fatal(err)
@@ -49,22 +67,21 @@ func pointed(t *testing.T, bridge string, srv *httptest.Server, hosts ...string)
 			text = strings.ReplaceAll(text, "net:"+host, "net:"+addr)
 			text = strings.ReplaceAll(text, "https://"+host, "http://"+addr)
 		}
-		text = strings.ReplaceAll(text, "@net:${input.site}", "@net.unencrypted:${input.site}")
+		for _, site := range []string{"${values.GITLAB_SITE}", "${values.JIRA_SITE}"} {
+			text = strings.ReplaceAll(text, "@net:"+site, "@net.unencrypted:"+site)
+		}
 		text = strings.ReplaceAll(text, `"https://" + site`, `"http://" + site`)
 		if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for name, text := range map[string]string{
-		"agents/helper.yaml": dedent(helperStub),
-		"people.yaml":        "people:\n  alice: { slack: U1, gitlab: al, jira: acc-1 }\n  bob: { slack: U2, gitlab: bo, jira: acc-2 }\ngroups: {}\n",
-		"rules.yaml":         "places:\n  dm: { readers: [asker] }\n  group/project: { readers: [asker] }\n  OPS: { readers: [asker] }\nagents:\n  - { name: helper, for: [alice] }\napprove: {}\n",
-	} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	return dir
+}
+
+// jiraAt sets the values that name a stand-in Jira, and the account its token
+// belongs to.
+func jiraAt(w *world, j *jira) {
+	w.value("JIRA_SITE", strings.TrimPrefix(j.URL, "http://"))
+	w.value("JIRA_EMAIL", "bot@example.com")
 }
 
 func setSite(t *testing.T, dir, file, from, to string) {
@@ -83,16 +100,21 @@ func setSite(t *testing.T, dir, file, from, to string) {
 }
 
 // A telegram stands in for Telegram's Bot API, for the bot with the token
-// "123:abc".
+// "123:abc": private chats and groups, buttons and their taps.
 type telegram struct {
 	*httptest.Server
 	mu      sync.Mutex
-	updates []map[string]any  // each message sent to the bot, in order; its update_id is its place from 1
+	updates []map[string]any  // each update, in order; its update_id is its place from 1
 	heard   int               // the highest offset asked from, below which every update was heard
-	sent    []map[string]any  // each message the bot sent, in order
+	sent    []map[string]any  // each message the bot sent, in order, with its message_id
+	edits   []map[string]any  // each editMessageText
+	acks    []map[string]any  // each answerCallbackQuery
+	typing  []string          // the chat of each sendChatAction
 	files   map[string]string // what each file_id downloads
 	got     []string          // each file_id getFile was asked for
 	uploads []upload          // each file the bot sent, in order
+	refuse  map[string]string // a chat_id whose sendMessage is refused, with Telegram's description
+	methods []string          // each method called, in order
 }
 
 // An upload is a file a bot sent: the method and field it came by, the
@@ -119,7 +141,7 @@ func uploaded(r *http.Request, method, to string) (upload, error) {
 }
 
 func newTelegram(t *testing.T) *telegram {
-	tg := &telegram{files: map[string]string{}}
+	tg := &telegram{files: map[string]string{}, refuse: map[string]string{}}
 	tg.Server = httptest.NewServer(http.HandlerFunc(tg.serve))
 	t.Cleanup(tg.Close)
 	return tg
@@ -143,6 +165,9 @@ func (tg *telegram) serve(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"ok": false, "error_code": 401, "description": "Unauthorized"}`)
 		return
 	}
+	tg.mu.Lock()
+	tg.methods = append(tg.methods, method)
+	tg.mu.Unlock()
 	reply := func(result any) { json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": result}) }
 	if method == "sendDocument" {
 		u, err := uploaded(r, method, "chat_id")
@@ -158,55 +183,102 @@ func (tg *telegram) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	var ask map[string]any
 	json.NewDecoder(r.Body).Decode(&ask)
+	tg.mu.Lock()
+	defer tg.mu.Unlock()
 	switch method {
 	case "getUpdates":
 		// It waits for an update at most a third of a second, so that the
 		// server closes quickly when the test ends.
 		offset, _ := ask["offset"].(float64)
-		for end := time.Now().Add(min(time.Duration(ask["timeout"].(float64))*time.Second, 300*time.Millisecond)); ; time.Sleep(10 * time.Millisecond) {
-			tg.mu.Lock()
+		for end := time.Now().Add(min(time.Duration(ask["timeout"].(float64))*time.Second, 300*time.Millisecond)); ; {
 			tg.heard = max(tg.heard, int(offset))
 			from := max(tg.heard, 1)
-			var out []map[string]any
 			if from <= len(tg.updates) {
-				out = []map[string]any{{"update_id": from, "message": tg.updates[from-1]}}
-			}
-			tg.mu.Unlock()
-			if out != nil || time.Now().After(end) {
-				reply(out)
+				u := maps.Clone(tg.updates[from-1])
+				u["update_id"] = from
+				reply([]map[string]any{u})
 				return
 			}
+			if time.Now().After(end) {
+				reply([]map[string]any{}) // Telegram gives an empty list, never null
+				return
+			}
+			tg.mu.Unlock()
+			time.Sleep(10 * time.Millisecond)
+			tg.mu.Lock()
 		}
 	case "getFile":
 		id := ask["file_id"].(string)
-		tg.mu.Lock()
 		tg.got = append(tg.got, id)
-		tg.mu.Unlock()
 		reply(map[string]any{"file_id": id, "file_path": "files/" + id})
 	case "sendMessage":
-		tg.mu.Lock()
+		if why, ok := tg.refuse[fmt.Sprint(ask["chat_id"])]; ok {
+			fmt.Fprintf(w, `{"ok": false, "error_code": 403, "description": %q}`, why)
+			return
+		}
+		ask["message_id"] = 100 + len(tg.sent)
 		tg.sent = append(tg.sent, ask)
-		reply(map[string]any{"message_id": 100 + len(tg.sent)})
-		tg.mu.Unlock()
+		reply(map[string]any{"message_id": ask["message_id"]})
+	case "editMessageText":
+		tg.edits = append(tg.edits, ask)
+		reply(map[string]any{"message_id": ask["message_id"]})
+	case "answerCallbackQuery":
+		tg.acks = append(tg.acks, ask)
+		reply(true)
 	case "sendChatAction":
+		tg.typing = append(tg.typing, fmt.Sprint(ask["chat_id"]))
 		reply(true)
 	default:
 		fmt.Fprint(w, `{"ok": false, "error_code": 404, "description": "Not Found"}`)
 	}
 }
 
-// says sends the bot messages from alice, in her chat with it.
-func (tg *telegram) says(messages ...map[string]any) {
+// names are the people of the stand-in, by their Telegram ids.
+var names = map[int]string{1: "Alice", 2: "Bob", 3: "Carol", 9: "Stranger"}
+
+// update adds an update.
+func (tg *telegram) update(u map[string]any) {
 	tg.mu.Lock()
 	defer tg.mu.Unlock()
+	tg.updates = append(tg.updates, u)
+}
+
+// says sends the bot messages from alice, in her chat with it.
+func (tg *telegram) says(messages ...map[string]any) {
 	for _, m := range messages {
-		m["message_id"] = 10 + len(tg.updates)
-		m["from"] = map[string]any{"id": 1, "is_bot": false, "first_name": "Alice"}
 		m["chat"] = map[string]any{"id": 1, "type": "private"}
-		tg.updates = append(tg.updates, m)
+		tg.message(1, m)
 	}
 }
 
+// dm is a message from a person in their own chat with the bot. Extra fields
+// are added to the message.
+func (tg *telegram) dm(from int, text string, extra ...map[string]any) {
+	m := map[string]any{"chat": map[string]any{"id": from, "type": "private"}}
+	if text != "" {
+		m["text"] = text
+	}
+	for _, e := range extra {
+		maps.Copy(m, e)
+	}
+	tg.message(from, m)
+}
+
+// group is a message from a person in a group chat.
+func (tg *telegram) group(chat, from int, text string) {
+	tg.message(from, map[string]any{"chat": map[string]any{"id": chat, "type": "group", "title": "Family"}, "text": text})
+}
+
+func (tg *telegram) message(from int, m map[string]any) {
+	tg.mu.Lock()
+	defer tg.mu.Unlock()
+	m["message_id"] = 10 + len(tg.updates)
+	m["date"] = 1700000000
+	m["from"] = map[string]any{"id": from, "is_bot": false, "first_name": names[from]}
+	tg.updates = append(tg.updates, map[string]any{"message": m})
+}
+
+// said gives every text the bot said, in order.
 func (tg *telegram) said() []string {
 	tg.mu.Lock()
 	defer tg.mu.Unlock()
@@ -215,6 +287,93 @@ func (tg *telegram) said() []string {
 		out = append(out, fmt.Sprint(m["text"]))
 	}
 	return out
+}
+
+// texts gives what the bot said in a chat, in order.
+func (tg *telegram) texts(chat string) []string {
+	tg.mu.Lock()
+	defer tg.mu.Unlock()
+	var out []string
+	for _, m := range tg.sent {
+		if fmt.Sprint(m["chat_id"]) == chat {
+			out = append(out, fmt.Sprint(m["text"]))
+		}
+	}
+	return out
+}
+
+// edited gives the text of each message the bot edited, in order.
+func (tg *telegram) edited() []string {
+	tg.mu.Lock()
+	defer tg.mu.Unlock()
+	var out []string
+	for _, m := range tg.edits {
+		out = append(out, fmt.Sprint(m["text"]))
+	}
+	return out
+}
+
+// buttons gives the callback_data of each button the bot has sent, with the
+// chat it went to, in order.
+func (tg *telegram) buttons() [][2]string {
+	tg.mu.Lock()
+	defer tg.mu.Unlock()
+	var out [][2]string
+	for _, m := range tg.sent {
+		markup, _ := m["reply_markup"].(map[string]any)
+		rows, _ := markup["inline_keyboard"].([]any)
+		for _, row := range rows {
+			for _, b := range row.([]any) {
+				out = append(out, [2]string{fmt.Sprint(m["chat_id"]), fmt.Sprint(b.(map[string]any)["callback_data"])})
+			}
+		}
+	}
+	return out
+}
+
+// tapOn taps the button whose data ends with choice, of the n-th question sent
+// (from 0), as the person from.
+func (tg *telegram) tapOn(t *testing.T, n int, from int, choice string) {
+	t.Helper()
+	var questions []string
+	for _, b := range tg.buttons() {
+		q, _, _ := strings.Cut(b[1], " ")
+		if !slices.Contains(questions, q) {
+			questions = append(questions, q)
+		}
+	}
+	if n >= len(questions) {
+		t.Fatalf("there is no question %d among %v", n, questions)
+	}
+	tg.tapData(from, questions[n]+" "+choice)
+}
+
+// tapData sends a tap with any data, as the person from.
+func (tg *telegram) tapData(from int, data string) {
+	tg.mu.Lock()
+	id := fmt.Sprintf("cq%d", len(tg.updates))
+	tg.mu.Unlock()
+	tg.update(map[string]any{"callback_query": map[string]any{
+		"id":      id,
+		"from":    map[string]any{"id": from, "is_bot": false, "first_name": names[from]},
+		"message": map[string]any{"message_id": 1, "chat": map[string]any{"id": from, "type": "private"}},
+		"data":    data,
+	}})
+}
+
+// consumed says whether the listener has asked past every update so far.
+func (tg *telegram) consumed() bool {
+	tg.mu.Lock()
+	defer tg.mu.Unlock()
+	return tg.heard > len(tg.updates)
+}
+
+// waitFor waits for a text in a chat.
+func (tg *telegram) waitFor(w *world, chat, text string) {
+	w.t.Helper()
+	w.until(fmt.Sprintf("%q said in chat %s", text, chat), func() bool {
+		return slices.ContainsFunc(tg.texts(chat), func(s string) bool { return strings.Contains(s, text) })
+	})
 }
 
 // A gitlab stands in for GitLab's REST API on one project.
@@ -311,6 +470,10 @@ func (gl *gitlab) serve(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(404)
 	case r.Method == "POST" && r.URL.EscapedPath() == "/api/v4/projects/group%2Fproject/uploads":
 		if gl.full {
+			// The body is read first: a server that answers before it has
+			// read a request may close the connection under the sender, who
+			// then sees a broken write in place of the 413.
+			io.Copy(io.Discard, r.Body)
 			w.WriteHeader(413)
 			return
 		}
@@ -374,7 +537,7 @@ func TestGitLabIssuesAreAnswered(t *testing.T) {
 	w.secret("GITLAB_TOKEN", "gl-token")
 	addr := strings.TrimPrefix(gl.URL, "http://")
 	dir := pointed(t, "gitlab", gl.Server)
-	setSite(t, dir, "bridges/gitlab.yaml", "gitlab.example.com", addr)
+	w.value("GITLAB_SITE", addr)
 	gl.note(1, 2, "al", "@bot this came before the bridge")
 	w.sync(dir)
 	w.kept("bridges/gitlab.yaml")
@@ -400,6 +563,12 @@ func TestGitLabIssuesAreAnswered(t *testing.T) {
 	if !strings.Contains(got, "the build fails") || strings.Contains(got, "@bot the build") || !strings.Contains(got, "only the people") || len(gl.said()) != 2 {
 		t.Fatalf("the bot said %s", got)
 	}
+	// The host is the value GITLAB_SITE, and no message names one.
+	for _, run := range stubs(t, w, "route") {
+		if input := fmt.Sprint(w.show(run.ID).Input); strings.Contains(input, "settings") || strings.Contains(input, addr) {
+			t.Errorf("a message names its host: %s", input)
+		}
+	}
 }
 
 // A comment made while GitLab fails is heard once it answers again.
@@ -408,7 +577,7 @@ func TestGitLabLosesNothingWhenItFails(t *testing.T) {
 	w := newWorld(t)
 	w.secret("GITLAB_TOKEN", "gl-token")
 	dir := pointed(t, "gitlab", gl.Server)
-	setSite(t, dir, "bridges/gitlab.yaml", "gitlab.example.com", strings.TrimPrefix(gl.URL, "http://"))
+	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
 	gl.note(1, 2, "al", "before")
 	w.sync(dir)
 	w.until("the first ask", func() bool { return gl.asked() > 0 })
@@ -437,7 +606,7 @@ func TestGitLabIssueGoneStopsNothing(t *testing.T) {
 	w := newWorld(t)
 	w.secret("GITLAB_TOKEN", "gl-token")
 	dir := pointed(t, "gitlab", gl.Server)
-	setSite(t, dir, "bridges/gitlab.yaml", "gitlab.example.com", strings.TrimPrefix(gl.URL, "http://"))
+	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
 	gl.note(1, 2, "al", "before")
 	w.sync(dir)
 	w.until("the first ask", func() bool { return gl.asked() > 0 })
@@ -597,7 +766,7 @@ func TestJiraIssuesAreAnswered(t *testing.T) {
 	w := newWorld(t)
 	w.secret("JIRA_TOKEN", "jira-token")
 	dir := pointed(t, "jira", j.Server)
-	setSite(t, dir, "bridges/jira.yaml", "example.atlassian.net", strings.TrimPrefix(j.URL, "http://"))
+	jiraAt(w, j)
 	w.sync(dir)
 	w.kept("bridges/jira.yaml")
 	// The first ask marks the time, and the next is the first to read.
@@ -632,7 +801,8 @@ func TestJiraHearsACommentMadeWhileItsIssueWaits(t *testing.T) {
 	w := newWorld(t)
 	w.secret("JIRA_TOKEN", "jira-token")
 	dir := pointed(t, "jira", j.Server)
-	setSite(t, dir, "bridges/jira.yaml", "example.atlassian.net, email", strings.TrimPrefix(j.URL, "http://")+", settle: 2m, email")
+	jiraAt(w, j)
+	setSite(t, dir, "bridges/jira.yaml", "projects: [OPS] }", "projects: [OPS], settle: 2m }")
 	w.sync(dir)
 	next := func() {
 		before := j.asked()
@@ -673,7 +843,7 @@ func TestJiraHearsTwoCommentsAtOneMoment(t *testing.T) {
 	w := newWorld(t)
 	w.secret("JIRA_TOKEN", "jira-token")
 	dir := pointed(t, "jira", j.Server)
-	setSite(t, dir, "bridges/jira.yaml", "example.atlassian.net", strings.TrimPrefix(j.URL, "http://"))
+	jiraAt(w, j)
 	w.sync(dir)
 	next := func() {
 		before := j.asked()
@@ -815,6 +985,10 @@ func (s *slack) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(map[string]any{"ok": true, "messages": messages, "response_metadata": meta})
 	case "/api/conversations.info":
+		if strings.HasPrefix(r.URL.Query().Get("channel"), "D") {
+			fmt.Fprint(w, `{"ok": true, "channel": {"is_im": true}}`)
+			return
+		}
 		fmt.Fprint(w, `{"ok": true, "channel": {"name": "help"}}`)
 	case "/api/conversations.open":
 		fmt.Fprint(w, `{"ok": true, "channel": {"id": "D9"}}`)
@@ -873,7 +1047,7 @@ func (s *slack) serve(w http.ResponseWriter, r *http.Request) {
 		u.Method, u.To = "files.completeUploadExternal", strings.TrimSuffix(done.Channel+"/"+done.Thread, "/")
 		s.shared = append(s.shared, u)
 		json.NewEncoder(w).Encode(map[string]any{"ok": true, "files": done.Files})
-	case "/api/assistant.threads.setStatus":
+	case "/api/agents.sessions.setStatus":
 		var status map[string]any
 		json.NewDecoder(r.Body).Decode(&status)
 		s.mu.Lock()
@@ -953,8 +1127,28 @@ func TestSlackMessagesAreAnswered(t *testing.T) {
 		"slack-bridge": {"Slack bridge"},
 		"slack-listen": {"Slack listener"},
 		"chat":         {"#help: hello", "dm: in private"},
-		"message":      {"hello", "in private"},
+		"route":        {"hello", "in private"},
+		"message":      {"in private"},
 	})
+}
+
+// Slack sends an envelope again when its receipt is late, and the event in it
+// is answered once.
+func TestSlackResentEventIsAnsweredOnce(t *testing.T) {
+	s := newSlack(t)
+	w := newWorld(t)
+	dir := slackProject(t, w, s)
+	w.sync(dir)
+	w.until("Slack connected", s.connected)
+	event := map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "ts": "3.0", "text": "in private"}
+	s.says("a", event)
+	s.says("b", event)
+	w.until("both envelopes received", func() bool { return s.acked() == 2 })
+	w.until("the answer", func() bool { return len(s.posted()) >= 1 })
+	time.Sleep(20 * interval)
+	if got := s.posted(); len(got) != 1 {
+		t.Fatalf("the bot posted %v", got)
+	}
 }
 
 // A question goes to a person on Slack with a button for each choice. A press by
@@ -963,32 +1157,31 @@ func TestSlackQuestionIsAnsweredByAPress(t *testing.T) {
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
-	if err := os.WriteFile(filepath.Join(dir, "on/asker.yaml"), []byte(dedent(`
-		statechart: asker
-		initial: asking
-		states:
-		  asking:
-		    job: { machine: .rook/blocks/question.yaml, key: "question:abc", input: { people: [alice], text: "Well?", choices: ["yes", "no"] } }
-		    on: { done: over }
-		  over: { end: done, output: "${states.asking.output.choice}" }
-	`)), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	write(t, dir, map[string]string{"on/asker.yaml": `
+		flow: asker
+		allow: [send:.rook/blocks/ask]
+		stages:
+		  asking: { job: { call: { at: .rook/blocks/ask }, input: { people: [alice], text: "Well?", choices: ["yes", "no"] } } }
+		output: ${stages.asking.output.choice}
+	`})
 	w.sync(dir)
-	asker := w.kept("on/asker.yaml")
+	asker := w.start("on/asker.yaml", nil)
 	w.until("Slack connected", s.connected)
 	w.until("the question", func() bool { return len(s.posted()) == 1 })
 	post := s.posted()[0]
 	if post["channel"] != "D9" {
 		t.Fatalf("the question went to %v", post)
 	}
+	// A button names the question's run by its ID without its client's name.
+	question := keyed(w, ".rook/blocks/ask.yaml")[""][0].ID
+	value := question[strings.Index(question, "/")+1:] + " no"
 	blocks, _ := json.Marshal(post["blocks"])
-	if !strings.Contains(string(blocks), `"value":"abc no"`) {
+	if !strings.Contains(string(blocks), `"value":"`+value+`"`) {
 		t.Fatalf("the buttons are %s", blocks)
 	}
 	press := func(id, user string) {
 		s.send(map[string]any{"envelope_id": id, "type": "interactive", "payload": map[string]any{
-			"type": "block_actions", "user": map[string]any{"id": user}, "actions": []any{map[string]any{"action_id": "choice-1", "value": "abc no"}},
+			"type": "block_actions", "user": map[string]any{"id": user}, "actions": []any{map[string]any{"action_id": "choice-1", "value": value}},
 			"channel": map[string]any{"id": "D9"}, "message": map[string]any{"ts": "1.1", "text": "Well?"},
 		}})
 	}
@@ -1040,7 +1233,7 @@ func TestGitLabChatTellsTheIssueOnce(t *testing.T) {
 	w := newWorld(t)
 	w.secret("GITLAB_TOKEN", "gl-token")
 	dir := pointed(t, "gitlab", gl.Server)
-	setSite(t, dir, "bridges/gitlab.yaml", "gitlab.example.com", strings.TrimPrefix(gl.URL, "http://"))
+	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
 	echoing(t, dir)
 	gl.note(1, 2, "al", "this came before the bridge")
 	gl.thread = []map[string]any{
@@ -1094,7 +1287,7 @@ func TestChatIsAnsweredWhenTheThreadCannotBeRead(t *testing.T) {
 	w := newWorld(t)
 	w.secret("GITLAB_TOKEN", "gl-token")
 	dir := pointed(t, "gitlab", gl.Server)
-	setSite(t, dir, "bridges/gitlab.yaml", "gitlab.example.com", strings.TrimPrefix(gl.URL, "http://"))
+	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
 	echoing(t, dir)
 	gl.note(1, 2, "al", "this came before the bridge")
 	w.sync(dir)
@@ -1120,7 +1313,7 @@ func TestRestrictedCommentIsNotHeard(t *testing.T) {
 	w := newWorld(t)
 	w.secret("GITLAB_TOKEN", "gl-token")
 	dir := pointed(t, "gitlab", gl.Server)
-	setSite(t, dir, "bridges/gitlab.yaml", "gitlab.example.com", strings.TrimPrefix(gl.URL, "http://"))
+	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
 	gl.note(1, 2, "al", "this came before the bridge")
 	w.sync(dir)
 	w.kept("bridges/gitlab.yaml")
@@ -1148,7 +1341,7 @@ func TestRestrictedJiraCommentIsNotHeard(t *testing.T) {
 	w := newWorld(t)
 	w.secret("JIRA_TOKEN", "jira-token")
 	dir := pointed(t, "jira", j.Server)
-	setSite(t, dir, "bridges/jira.yaml", "example.atlassian.net", strings.TrimPrefix(j.URL, "http://"))
+	jiraAt(w, j)
 	w.sync(dir)
 	w.kept("bridges/jira.yaml")
 	ask := func() {
@@ -1182,7 +1375,7 @@ func TestJiraChatReadsItsIssue(t *testing.T) {
 	w := newWorld(t)
 	w.secret("JIRA_TOKEN", "jira-token")
 	dir := pointed(t, "jira", j.Server)
-	setSite(t, dir, "bridges/jira.yaml", "example.atlassian.net", strings.TrimPrefix(j.URL, "http://"))
+	jiraAt(w, j)
 	echoing(t, dir)
 	w.sync(dir)
 	w.kept("bridges/jira.yaml")

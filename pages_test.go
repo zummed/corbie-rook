@@ -89,11 +89,11 @@ func TestEveryExampleFileReads(t *testing.T) {
 	if found < 5 {
 		t.Fatalf("the pages show only %d files", found)
 	}
-	machines, err := client.ReadMachines(dir)
+	tree, err := client.ReadTree(dir, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, m := range machines {
+	for _, m := range tree.Machines {
 		if m.Problem != nil {
 			t.Errorf("%s: %v", m.Path, m.Problem)
 		}

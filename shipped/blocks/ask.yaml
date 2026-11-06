@@ -1,17 +1,76 @@
-# Asks people, with a button for each choice, and gives `choice`: the first answer
-# from someone `people` names, or no after `within` (a duration, by default 7d). `people` names people and
-# groups in lookup.yaml, each asked on their own bridge; with `in`, a Slack
-# channel's #name or a Slack conversation's address, the question is posted there
-# instead. `fields` are form fields, each { name, label, kind, choices } with kind
-# text, long, number or choice; the answer gives their values as `values`, by
-# name. Only Slack shows fields, so a question with fields is asked only there.
-flow: ask
+# Asks people, with a button for each choice, and gives `choice` and `person`:
+# the first tap on one of `choices` from someone `people` names, as lookup.yaml
+# says who they are, and who that was; or no and no person after `within`, by
+# default seven days. `people` names people and groups, each asked on the
+# first of their ways that lookup.yaml gives; with `in`, a Slack channel's
+# #name or a Slack conversation's address, the question is posted there
+# instead. `fields` are form fields, each { name, label, kind, choices } with
+# kind text, long, number or choice; the answer gives their values as
+# `values`, by name. Only Slack shows fields, so a question with fields is asked
+# only there. A machine calls it at .rook/blocks/ask. Each button names this
+# run, so a bridge's listener sends a tap to it. Each message it posted then
+# shows the answer, and its buttons go. When a bridge fails to ask someone, the
+# question fails once, with that bridge's error.
+statechart: ask
 title: "${input.text.split('\\n')[0]}"
 input: { people: list, in: "string?", text: string, choices: list, fields: "list?", within: "string?" }
-stages:
-  question:
+initial: asking
+states:
+  asking:
+    defer: [answer]
     job:
-      machine: ./question.yaml
-      key: "question:${run.id.slice(-10)}"
-      input: { people: "${input.people}", in: "${input.in || ''}", text: "${input.text}", choices: "${input.choices}", fields: "${input.fields || []}", within: "${input.within || '7d'}" }
-output: ${stages.question.output}
+      input: { people: "${input.people}", in: "${input.in || ''}", text: "${input.text}", choices: "${input.choices}", fields: "${input.fields || []}", question: "${run.id.slice(run.id.indexOf('/') + 1)}" }
+      machine:
+        flow: ask-on
+        input: { people: list, in: string, text: string, choices: list, fields: list, question: string }
+        allow: [send:lookup, "send:.rook/bridges/*/ask"]
+        stages:
+          reach:
+            job: { call: { at: lookup }, input: { do: reach, names: "${input.in ? [] : input.people}" } }
+          person:
+            each: "${stages.reach.output.map((p) => (input.fields.length ? p.ways.find((w) => w.bridge === 'slack') : p.ways[0])).filter((w) => w)}"
+            job:
+              call: { at: ".rook/bridges/${item.bridge}/ask" }
+              input: "${ { to: item.id, text: input.text, choices: input.choices, question: input.question, ...(input.fields.length ? { fields: input.fields } : {}) } }"
+          unasked:
+            when: "${stages.person.output.some((p) => p.error)}"
+            job: { script: ./fail.js, input: { error: "${stages.person.output.find((p) => p.error).error}" } }
+          channel:
+            when: "${!!input.in}"
+            job:
+              call: { at: .rook/bridges/slack/ask }
+              input: { in: "${input.in}", text: "${input.text}", choices: "${input.choices}", fields: "${input.fields}", question: "${input.question}" }
+        output: "${ { telegram: stages.person.output.filter((p) => p.item.bridge === 'telegram').flatMap((p) => (p.output || {}).sent || []), slack: [...stages.person.output.filter((p) => p.item.bridge === 'slack').flatMap((p) => (p.output || {}).sent || []), ...(stages.channel.skipped ? [] : (stages.channel.output || {}).sent || [])] } }"
+    on: { done: open }
+  open:
+    timers: { unanswered: "${input.within || '7d'}" }
+    initial: waiting
+    states:
+      waiting:
+        on: { answer: checking }
+      checking:
+        defer: [answer]
+        job:
+          input: { bridge: "${event.data.bridge}", from: "${event.data.from}", choice: "${event.data.choice}", values: "${event.data.values || {}}", people: "${input.people}", choices: "${input.choices}" }
+          machine:
+            flow: tap
+            input: { bridge: string, from: string, choice: string, values: map, people: list, choices: list }
+            allow: [send:lookup]
+            stages:
+              who:
+                job: { call: { at: lookup }, input: { do: who, bridge: "${input.bridge}", id: "${input.from}" } }
+            output: "${ { counts: input.choices.includes(input.choice) && [stages.who.output.person, ...stages.who.output.groups].some((n) => input.people.includes(n)), person: stages.who.output.person, choice: input.choice, values: input.values } }"
+        on:
+          done:
+            - { go: answered, when: "${event.data.counts}" }
+            - waiting
+          failed: waiting
+    on: { unanswered: unanswered }
+  answered:
+    job: { machine: ./close.yaml, input: { sent: "${states.asking.output}", text: "${input.text + '\\n\\n' + states.checking.output.person + ' said ' + states.checking.output.choice + '.' + (input.fields || []).map((f) => '\\n' + (f.label || f.name) + ': ' + (states.checking.output.values[f.name] ?? '')).join('')}" } }
+    on: { done: over, failed: over }
+  over: { end: done, output: { choice: "${states.checking.output.choice}", values: "${states.checking.output.values}", person: "${states.checking.output.person}" } }
+  unanswered:
+    job: { machine: ./close.yaml, input: { sent: "${states.asking.output}", text: "${input.text + '\\n\\nNo one answered in time, so the answer is no.'}" } }
+    on: { done: expired, failed: expired }
+  expired: { end: done, output: { choice: "no" } }

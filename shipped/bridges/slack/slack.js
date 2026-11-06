@@ -1,11 +1,15 @@
-// Slack's script: input.do is hear, for listen.yaml, say, for say.yaml, ask, for
-// ask.yaml, close, for close.yaml, history, for history.yaml, status, for
-// status.yaml, attachments, for attachments.yaml, or send, for send.yaml. It
-// speaks Slack's Web API with the bot token SLACK_TOKEN and listens with the
-// app-level token SLACK_APP_TOKEN, holding each as a handle.
+// Slack's script: input.do is hear, for listen.yaml, cut and say, for
+// say.yaml, ask, for ask.yaml, close, for close.yaml, history, for
+// history.yaml, status, for status.yaml, attachments, for attachments.yaml, or
+// send, for send.yaml. It speaks Slack's Web API with the bot token SLACK_TOKEN
+// and listens with the app-level token SLACK_APP_TOKEN, holding each as a
+// handle.
 const api = "https://slack.com/api"
 const listenFor = 4 * 60 * 1000
 const longest = 12000
+// question is the form of a question's run ID without its client's name, which
+// a button holds.
+const question = /^\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{10}$/
 
 // call calls a method and gives Slack's answer. A refusal is thrown with Slack's
 // word, which the error carries as slack, so the job fails and says why.
@@ -57,12 +61,15 @@ if (input.do === "hear") {
   // pressed gives the answer a press of a question's button is. A button's value
   // holds the question and the choice, and the message's form fields give their
   // values by name. The question's run takes the buttons away once a press counts.
+  // A press of another button, such as one of a layout an agent posted, is
+  // logged and starts nothing.
   const pressed = (body) => {
     const action = (body.actions || [])[0] || {}
     if (!String(action.action_id || "").startsWith("choice-")) return
     const value = String(action.value || "")
     const at = value.indexOf(" ")
-    if (at < 0) return
+    if (at < 0 || !question.test(value.slice(0, at))) return log("a press names no question: " + value.slice(0, 100))
+    if (!body.user || !body.user.id) return log("a press names no person")
     const values = {}
     for (const block of Object.values((body.state || {}).values || {})) {
       for (const [name, field] of Object.entries(block)) {
@@ -72,6 +79,11 @@ if (input.do === "hear") {
     }
     emit("answer", { bridge: "slack", question: value.slice(0, at), from: body.user.id, choice: value.slice(at + 1), values: values })
   }
+
+  // heard holds the messages emitted in the last ten minutes, as channel/ts,
+  // from this job and the ones before it: Slack sends an envelope again when
+  // its receipt is late or missing.
+  const heard = ((input.cursor || {}).heard || []).slice()
 
   // spoke holds the threads the bot has said something in, as channel/thread:
   // what it was seen to say, and what a read of the thread found.
@@ -91,6 +103,8 @@ if (input.do === "hear") {
   // own included.
   const said = (e) => {
     if (e.type !== "message" || (e.subtype && e.subtype !== "file_share" && e.subtype !== "thread_broadcast")) return
+    if (!e.channel || !e.ts) return log("a message names no channel or no time")
+    if (heard.includes(e.channel + "/" + e.ts)) return
     if (e.user === me) spoke.set(e.channel + "/" + (e.thread_ts || e.ts), true)
     if (e.bot_id || !e.user || e.user === me) return
     const text = e.text || ""
@@ -99,13 +113,7 @@ if (input.do === "hear") {
     if (!text && !files.length) return
     let unaddressed = false
     if (!direct && !text.includes(mention)) {
-      if (!input.overhear || !e.thread_ts) return
-      try {
-        if (!spoken(e.channel, e.thread_ts)) return
-      } catch (err) {
-        log(err.message)
-        return
-      }
+      if (!input.overhear || !e.thread_ts || !spoken(e.channel, e.thread_ts)) return
       unaddressed = true
     }
     const place = direct ? "dm" : "#" + call("conversations.info", null, { channel: e.channel }).channel.name
@@ -113,7 +121,20 @@ if (input.do === "hear") {
     const message = { bridge: "slack", text: text.replaceAll(mention, "").trim(), chat: chat, from: e.user, place: place, at: e.ts }
     if (files.length) message.attachments = files
     if (unaddressed) message.unaddressed = true
+    heard.push(e.channel + "/" + e.ts)
     emit("message", message)
+  }
+
+  // stopped emits a press of the stop button Slack shows under a thread while
+  // the bot works there, as stop to that thread's chat. Slack sends
+  // agent_session_stopped to an app that subscribes to it.
+  const stopped = (e) => {
+    if (e.type !== "agent_session_stopped") return
+    if (!e.channel || !e.thread_ts || !e.user || !e.event_ts) return log("a stop names no channel, thread, person or time")
+    if (heard.includes(e.channel + "/" + e.event_ts)) return
+    const channel = call("conversations.info", null, { channel: e.channel }).channel
+    heard.push(e.channel + "/" + e.event_ts)
+    emit("stop", { bridge: "slack", chat: e.channel + "/" + e.thread_ts, from: e.user, place: channel.is_im ? "dm" : "#" + channel.name })
   }
 
   // Slack gives the app-level token the address of one connection, and sends
@@ -130,16 +151,33 @@ if (input.do === "hear") {
       throw e
     }
     if (message === null) break
-    const envelope = JSON.parse(message)
+    let envelope
+    try {
+      envelope = JSON.parse(message)
+    } catch (e) {
+      log("Slack sent what is not JSON: " + message.slice(0, 100))
+      continue
+    }
     if (envelope.type === "disconnect") break
     if (!envelope.envelope_id) continue
+    // An envelope the listener handled or skipped is acknowledged. Any failure,
+    // such as a network error or Slack refusing a call, is logged and leaves
+    // the envelope unacknowledged, so Slack sends it again, a few times at most.
     const body = envelope.payload || {}
-    if (envelope.type === "interactive" && body.type === "block_actions") pressed(body)
-    if (envelope.type === "events_api" && body.event) said(body.event)
+    try {
+      if (envelope.type === "interactive" && body.type === "block_actions") pressed(body)
+      if (envelope.type === "events_api" && body.event) said(body.event)
+      if (envelope.type === "events_api" && body.event) stopped(body.event)
+    } catch (e) {
+      log(e.message)
+      continue
+    }
     socket.send(JSON.stringify({ envelope_id: envelope.envelope_id }))
   }
   socket.close()
-  return {}
+  const ts = (h) => Number(h.slice(h.indexOf("/") + 1))
+  const latest = Math.max(0, ...heard.map(ts))
+  return { cursor: { heard: heard.filter((h) => ts(h) > latest - 600) } }
 }
 
 if (input.do === "attachments") {
@@ -171,7 +209,7 @@ if (input.do === "send") {
 
 if (input.do === "ask") {
   // A question, with a button for each choice: in input.in, a channel's #name or
-  // a conversation, or else in a direct message to each person in input.to. Each
+  // a conversation, or else in a direct message to the person input.to. Each
   // of input.fields is a form field above the buttons. A button's value holds the
   // question and the choice, which a press names.
   const label = (s) => ({ type: "plain_text", text: String(s).slice(0, 75) })
@@ -182,15 +220,11 @@ if (input.do === "ask") {
   const fields = (input.fields || []).map((f) => ({ type: "input", block_id: f.name, optional: true, label: label(f.label || f.name), element: Object.assign({ action_id: f.name }, element(f)) }))
   const buttons = input.choices.map((c, n) => ({ type: "button", action_id: "choice-" + n, text: label(c[0].toUpperCase() + c.slice(1)), value: input.question + " " + c }))
   const blocks = [{ type: "section", text: { type: "mrkdwn", text: input.text } }, ...fields, { type: "actions", elements: buttons }]
-  const places = input.in ? [input.in] : input.to.map((id) => call("conversations.open", { users: id }).channel.id)
-  const sent = []
-  for (const place of places) {
-    const [to, thread] = place.split("/")
-    const channel = named(to)
-    const posted = call("chat.postMessage", Object.assign({ channel: channel, text: input.text, blocks: blocks }, thread ? { thread_ts: thread } : {}))
-    sent.push({ channel: channel, ts: posted.ts })
-  }
-  return { sent: sent }
+  const place = input.in || call("conversations.open", { users: input.to }).channel.id
+  const [to, thread] = place.split("/")
+  const channel = named(to)
+  const posted = call("chat.postMessage", Object.assign({ channel: channel, text: input.text, blocks: blocks }, thread ? { thread_ts: thread } : {}))
+  return { sent: [{ channel: channel, ts: posted.ts }] }
 }
 
 if (input.do === "close") {
@@ -228,22 +262,39 @@ if (input.do === "history") {
 }
 
 if (input.do === "status") {
-  // What the bot is doing, shown under a thread until it replies there or is
-  // given an empty status. Slack shows a status only in a thread.
+  // Any text sets the thread's agent session to processing, under which Slack
+  // shows "Working..." and its stop button; an empty text sets it to active.
+  // Slack keeps a session only in a thread.
   const [channel, thread] = String(input.to).split("/")
   if (!thread) return {}
-  call("assistant.threads.setStatus", { channel_id: channel, thread_ts: thread, status: String(input.text || "") })
+  call("agents.sessions.setStatus", { channel_id: channel, thread_ts: thread, status: input.text ? "processing" : "active" })
   return {}
 }
 
-// say: the text in messages Slack takes, in a conversation or a channel's #name.
-// Markdown is cut at a line's end where one is near, and a message holds at most
-// 12000 characters of it, two charts and 50 blocks. A layout's blocks are posted
-// as they are. A chart Slack cannot draw is shown as its table, and a message
-// Slack refuses is posted again as plain markdown, each layout as its text.
+// say: one message of those cut gives, in a conversation or a channel's #name.
+// A message with charts or a layout that Slack refuses is posted again as its
+// plain markdown.
+if (input.do === "say") {
+  const [to, thread] = String(input.to).split("/")
+  const channel = named(to)
+  const m = input.message
+  const post = Object.assign({ channel: channel }, thread ? { thread_ts: thread } : {})
+  if (!m.blocks) return { sent: channel + ":" + call("chat.postMessage", Object.assign(post, { markdown_text: m.plain })).ts }
+  try {
+    return { sent: channel + ":" + call("chat.postMessage", Object.assign({}, post, { text: m.plain.slice(0, 3000), blocks: m.blocks })).ts }
+  } catch (e) {
+    if (!e.slack) throw e
+    log(e.message)
+    return { sent: channel + ":" + call("chat.postMessage", Object.assign(post, { markdown_text: m.plain })).ts }
+  }
+}
+
+// cut: the text as the messages Slack takes, each { plain, blocks }, blocks only
+// for one with charts or a layout. Markdown is cut at a line's end where one is
+// near, and a message holds at most 12000 characters of it, two charts and 50
+// blocks. A layout's blocks are posted as they are. A chart Slack cannot draw is
+// shown as its table, and plain is the markdown with each layout as its text.
 const rich = require("../../blocks/rich.js")
-const [to, thread] = String(input.to).split("/")
-const channel = named(to)
 if (!input.text) throw new Error("there is nothing to say")
 const short = (s, n) => s === undefined || String(s).length <= n
 const fits = (c) => {
@@ -300,26 +351,8 @@ for (const p of rich.parts(String(input.text))) {
     last().push({ markdown: piece })
   }
 }
-const sent = []
-for (const m of messages.filter((m) => m.length)) {
+return messages.filter((m) => m.length).map((m) => {
   const plain = m.map((p) => (p.chart ? rich.table(p.chart) : p.blocks ? rich.words(p.blocks) : p.markdown)).filter((s) => s).join("\n\n") || "(A layout with no text.)"
-  const post = { channel: channel }
-  if (thread) post.thread_ts = thread
-  if (!m.some((p) => p.chart || p.blocks)) {
-    post.markdown_text = plain
-    sent.push(channel + ":" + call("chat.postMessage", post).ts)
-    continue
-  }
-  post.text = plain.slice(0, 3000)
-  post.blocks = m.flatMap((p) => (p.chart ? [drawn(p.chart)] : p.blocks ? p.blocks : [{ type: "markdown", text: p.markdown }]))
-  let ts
-  try {
-    ts = call("chat.postMessage", post).ts
-  } catch (e) {
-    if (!e.slack) throw e
-    log(e.message)
-    ts = call("chat.postMessage", Object.assign({ channel: channel, markdown_text: plain }, thread ? { thread_ts: thread } : {})).ts
-  }
-  sent.push(channel + ":" + ts)
-}
-return { sent: sent }
+  if (!m.some((p) => p.chart || p.blocks)) return { plain: plain }
+  return { plain: plain, blocks: m.flatMap((p) => (p.chart ? [drawn(p.chart)] : p.blocks ? p.blocks : [{ type: "markdown", text: p.markdown }])) }
+})

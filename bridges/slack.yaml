@@ -1,13 +1,13 @@
-# The slack bridge runs while this file is here. To stop it, delete
-# the file and run corbie run submit bridges.
-# Add `overhear: true` to its input to hear replies in a thread the bot has said
-# something in, each weighed by attend.yaml.
+# The Slack bridge runs while this file is here. To stop it, delete the file
+# and run corbie run submit . in the project.
+# Add `input: { overhear: true }` beside `machine:` to hear replies in a thread
+# the bot has said something in, each weighed by attend.yaml, which a project
+# with overhear writes.
 flow: slack-bridge
 title: Slack bridge
-limits: { depth: 16 }   # every conversation counts its levels from here
+lifetime: singleton
 stages:
   listen:
     job:
-      machine: .rook/bridges/slack/listen.yaml
+      machine: { statechart: slack-listen, include: .rook/bridges/slack/listen.yaml }
       restart: { when: always }
-      input: { dir: "${run.context}" }

@@ -1,22 +1,26 @@
-# Slack: listens over Socket Mode, so nothing need reach this computer. A direct
-# message and a message naming the bot each go to their conversation's run, and
-# with overhear, a reply in a thread the bot has said something in. Each
-# press of a button goes to the run that waits for it. A job ends after four
-# minutes, and the next connects again.
-statechart: slack-listen
+# Slack's listener, which bridges/slack.yaml includes: it listens over Socket
+# Mode, so nothing need reach this computer. A direct message and a message
+# naming the bot each go to their thread's run at .rook/blocks/chat, keyed
+# slack:<chat>, and with overhear, a reply in a thread the bot has said something
+# in. A press of Slack's stop button under a thread goes there as a stop. Each
+# press of a question's button goes to the question's run at .rook/blocks/ask. A
+# job ends after four minutes, and the next connects again. An event Slack sends
+# again is heard once.
 title: Slack listener
-input: { dir: string, overhear: "boolean?" }
+input: { overhear: "boolean?" }
+allow: [send:.rook/blocks/chat, send:.rook/blocks/ask]
 initial: hearing
 states:
   hearing:
     job:
       script: ./slack.js
-      input: { do: hear, overhear: "${input.overhear || false}" }
+      input: { do: hear, overhear: "${input.overhear || false}", cursor: "${states.hearing.output ? states.hearing.output.cursor : null}" }
       allow: [net:slack.com, net:wss-primary.slack.com, net:wss-backup.slack.com, "secret:SLACK_TOKEN@net:slack.com", "secret:SLACK_APP_TOKEN@net:slack.com"]
       timeout: 5m
     on:
-      message: { send: { to: { machine: .rook/blocks/chat.yaml, key: "slack:${run.id.slice(-10)}:${event.data.chat}" }, event: message, data: { event: "${event.data}", dir: "${input.dir}" } } }
-      answer: { send: { to: { key: "question:${event.data.question}" }, event: answer, data: "${event.data}" } }
+      message: { send: { to: { at: .rook/blocks/chat, key: "slack:${event.data.chat}" }, event: message, data: "${event.data}" } }
+      stop: { send: { to: { at: .rook/blocks/chat, key: "slack:${event.data.chat}" }, event: stop, data: "${event.data}" } }
+      answer: { send: { to: { at: .rook/blocks/ask, run: "${run.id.slice(0, run.id.indexOf('/') + 1) + event.data.question}" }, event: answer, data: "${event.data}" } }
       done: hearing
       failed: resting
   resting:
