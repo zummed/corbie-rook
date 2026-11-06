@@ -484,8 +484,8 @@ func TestChangedRulesWhileApprovalWaits(t *testing.T) {
 
 // A flow agent deleted while its question waits: the submit cancels the agent
 // and, with it, the question it called. The asker is told the answer failed,
-// and asked to ask again, though rules.yaml still names the agent, which has no
-// file, so every later message fails the same way.
+// and asked to ask again. rules.yaml still names the agent, which has no file,
+// so a later message is told the bot has no such agent.
 func TestDeletedAgentWhileQuestionWaits(t *testing.T) {
 	w := newWorld(t)
 	dir := copyStarter(t)
@@ -520,16 +520,9 @@ func TestDeletedAgentWhileQuestionWaits(t *testing.T) {
 	}
 	sorry := "That could not be answered. Ask again in a while."
 	w.until("the asker told", func() bool { return sayings(t, w)[sorry] != nil })
-	// Each later message fails the same way, with the same advice.
 	w.sendTo(".rook/blocks/chat.yaml", "telegram:2", "message", from("2", "again", 13))
 	w.until("the second failure", func() bool {
-		n := 0
-		for _, run := range stubs(t, w, "say") {
-			if in, ok := w.show(run.ID).Input.(map[string]any); ok && in["text"] == sorry {
-				n++
-			}
-		}
-		return n >= 4 // the block's say and the bridge's say, twice
+		return sayings(t, w)["This bot has no agent desk: rules.yaml names it, and agents/desk.yaml is not in the project."] != nil
 	})
 	var failure string
 	for _, run := range stubs(t, w, "message") {
