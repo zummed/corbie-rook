@@ -53,7 +53,6 @@ func examples(t *testing.T, page string) []example {
 // project with every bridge, and a file labelled with the path of a starting
 // file is that file, without its comments.
 func TestEveryExampleFileReads(t *testing.T) {
-	t.Skip("the pages show the machines before trees and locations; package R2 rewrites them")
 	dir := filepath.Join(t.TempDir(), "project")
 	if err := rook.Init(dir, rook.Bridges()); err != nil {
 		t.Fatal(err)

@@ -755,17 +755,47 @@ func TestNoModelInWhatRookWrites(t *testing.T) {
 	}
 }
 
-// A project with no bridge reads, so one a project does not run costs it nothing.
+// A project has the machines of the bridges it runs and of no other, so one it
+// does not run costs it nothing: those named, and each whose file is in
+// bridges/, added by hand or not. It reads with only those.
 func TestBridgesOnlyRunWhenChosen(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "project")
+	there := func(want map[string]bool) {
+		t.Helper()
+		for name, want := range want {
+			if _, err := os.Stat(filepath.Join(dir, name)); (err == nil) != want {
+				t.Errorf("%s there: %v, and not %v", name, err == nil, want)
+			}
+		}
+	}
 	if err := rook.Init(dir, []string{"slack", "gitlab"}); err != nil {
 		t.Fatal(err)
 	}
-	for name, want := range map[string]bool{"bridges/slack.yaml": true, "bridges/gitlab.yaml": true, "bridges/telegram.yaml": false, "bridges/jira.yaml": false, ".rook/bridges/telegram/say.yaml": true} {
-		if _, err := os.Stat(filepath.Join(dir, name)); (err == nil) != want {
-			t.Errorf("%s there: %v, and not %v", name, err == nil, want)
+	there(map[string]bool{"bridges/slack.yaml": true, "bridges/gitlab.yaml": true, "bridges/telegram.yaml": false, "bridges/jira.yaml": false,
+		".rook/bridges/slack/say.yaml": true, ".rook/bridges/gitlab/listen.yaml": true, ".rook/bridges/telegram": false, ".rook/bridges/jira": false})
+	tree, err := client.ReadTree(dir, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range tree.Machines {
+		if m.Problem != nil {
+			t.Errorf("%s: %v", m.Path, m.Problem)
 		}
 	}
+	text, err := os.ReadFile("bridges/telegram.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "bridges/telegram.yaml"), text, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, "bridges/gitlab.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if err := rook.Init(dir, nil); err != nil {
+		t.Fatal(err)
+	}
+	there(map[string]bool{".rook/bridges/telegram/say.yaml": true, ".rook/bridges/slack/say.yaml": true, ".rook/bridges/gitlab": false})
 }
 
 // Init again rewrites .rook, and changes nothing of the person's.

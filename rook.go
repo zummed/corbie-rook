@@ -98,6 +98,16 @@ var Secrets = map[string][]string{
 	"jira":     {"JIRA_TOKEN"},
 }
 
+// A Value is a value a bridge reads, set as corbie controller value set Name
+// Shown, with what to write for Shown.
+type Value struct{ Name, Shown string }
+
+// Values gives the values each bridge needs.
+var Values = map[string][]Value{
+	"gitlab": {{"GITLAB_SITE", "<host>"}},
+	"jira":   {{"JIRA_SITE", "<host>"}, {"JIRA_EMAIL", "<email>"}},
+}
+
 // Bridges gives the name of every bridge, sorted.
 func Bridges() []string {
 	names := make([]string, 0, len(Secrets))
@@ -113,10 +123,22 @@ func Bridges() []string {
 // .rook/AGENTS.md.
 var Named = []string{"rules.yaml", "lookup.yaml", "AGENTS.md", "CLAUDE.md", ".mcp.json"}
 
-// Init makes dir a project, or brings one up to date. It rewrites .rook, with
-// the page rook as .rook/AGENTS.md. It writes the starting files if dir has no
-// rules.yaml, each of Named that is not there, and the file of each bridge named
-// that is not there, so it changes no file of the person's.
+// Running gives the bridges whose file is in the project's bridges/, sorted.
+func Running(dir string) []string {
+	var out []string
+	for _, name := range Bridges() {
+		if _, err := os.Stat(filepath.Join(dir, "bridges", name+".yaml")); err == nil {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+// Init makes dir a project, or brings one up to date. It writes the starting
+// files if dir has no rules.yaml, each of Named that is not there, and the file
+// of each bridge named that is not there, so it changes no file of the
+// person's. It rewrites .rook, with the page rook as .rook/AGENTS.md, and the
+// machines of each bridge whose file is in bridges/.
 func Init(dir string, bridges []string) error {
 	for _, name := range bridges {
 		if _, ok := Secrets[name]; !ok {
@@ -124,15 +146,6 @@ func Init(dir string, bridges []string) error {
 		}
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return err
-	}
-	if err := os.RemoveAll(filepath.Join(dir, Shipped)); err != nil {
-		return err
-	}
-	if err := copyTree("shipped", filepath.Join(dir, Shipped), true); err != nil {
-		return err
-	}
-	if err := copyFile("pages/rook.txt", filepath.Join(dir, Shipped, "AGENTS.md"), true); err != nil {
 		return err
 	}
 	if _, err := os.Stat(filepath.Join(dir, "rules.yaml")); os.IsNotExist(err) {
@@ -150,7 +163,28 @@ func Init(dir string, bridges []string) error {
 			return err
 		}
 	}
-	return nil
+	shipped := filepath.Join(dir, Shipped)
+	if err := os.RemoveAll(shipped); err != nil {
+		return err
+	}
+	tops, err := fs.ReadDir(files, "shipped")
+	if err != nil {
+		return err
+	}
+	for _, top := range tops {
+		if top.Name() == "bridges" {
+			continue
+		}
+		if err := copyTree("shipped/"+top.Name(), filepath.Join(shipped, top.Name()), true); err != nil {
+			return err
+		}
+	}
+	for _, name := range Running(dir) {
+		if err := copyTree("shipped/bridges/"+name, filepath.Join(shipped, "bridges", name), true); err != nil {
+			return err
+		}
+	}
+	return copyFile("pages/rook.txt", filepath.Join(shipped, "AGENTS.md"), true)
 }
 
 // copyTree copies a tree of files to a directory.

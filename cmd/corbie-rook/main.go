@@ -37,7 +37,7 @@ Rook.
   --bridges <names>   the bridges to add, separated by commas: telegram,
                       slack, gitlab, jira. Each gets a file in bridges/
 
-Then set the secrets it names, and run corbie run submit bridges in the
+Then set the secrets and values it names, and run corbie run submit . in the
 directory. A bridge runs from then while its file is there.`,
 }
 
@@ -82,25 +82,26 @@ func cmdInit(e *cli.Env, args []string) error {
 		}
 	} else {
 		fmt.Fprintf(e.Out, "%s is ready, and answers nobody until it has an agent. Add one as corbie rook manual rook-project says under Add an agent, or ask a model in %s to. Then:\n\n", dir, dir)
-		fmt.Fprintln(e.Out, "  corbie controller secret set CLAUDE_TOKEN")
 	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	at := "/" + filepath.Base(abs)
 	for _, name := range bridges {
 		for _, secret := range rook.Secrets[name] {
-			fmt.Fprintf(e.Out, "  corbie controller secret set %s\n", secret)
+			fmt.Fprintf(e.Out, "  corbie controller secret set %s --at %s\n", secret, at)
+		}
+		for _, value := range rook.Values[name] {
+			fmt.Fprintf(e.Out, "  corbie controller value set %s %s --at %s\n", value.Name, value.Shown, at)
 		}
 	}
-	// corbie run submit needs each directory it is given, so a project with
-	// no bridge is told to add one, and schedules is named once it is there.
-	if _, err := os.Stat(filepath.Join(dir, "bridges")); err != nil {
+	if len(rook.Running(dir)) == 0 {
 		fmt.Fprintf(e.Out, "  corbie rook init %s --bridges <names>\n", dir)
 	}
 	if updating {
 		fmt.Fprintf(e.Out, "  %scorbie test .\n", in)
 	}
-	submit := "bridges"
-	if _, err := os.Stat(filepath.Join(dir, "schedules")); err == nil {
-		submit += " schedules"
-	}
-	fmt.Fprintf(e.Out, "  %scorbie run submit %s\n", in, submit)
+	fmt.Fprintf(e.Out, "  %scorbie run submit .\n", in)
 	return nil
 }
