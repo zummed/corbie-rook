@@ -61,7 +61,7 @@ What a project holds
 --------------------
 
   bridges/        a file for each bridge; a bridge runs while its file is there
-  people.yaml     the people, their id on each bridge, and the groups
+  people.yaml     the people, their id on each bridge, and the groups, which may be left out
   lookup.yaml     where people are read from: people.yaml by default
   rules.yaml      which agent each person gets where
   agents/         the agents, once you add one

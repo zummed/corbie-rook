@@ -159,6 +159,7 @@ piece `.rook/bridges/<name>/listen.yaml`.
           input: { projects: [group/project] }
 
 - `restart: { when: always }` starts the listener again if it ends. After a failed read, a listener waits in its state `resting`, then reads again.
+- A message or a tap that a listener cannot handle, such as one in a Slack channel whose name the bot cannot read, is logged and skipped.
 - The hosts are values: `GITLAB_SITE`, `JIRA_SITE`, and `JIRA_EMAIL`, the account Jira's token belongs to.
 - A listener reads a value when it starts. After changing one, run `corbie run cancel /my-bot/bridges/<name>`, then `corbie run submit .`.
 - A bridge the project does not run has no machines in `.rook/`, and needs no secret.
@@ -191,7 +192,7 @@ or a part of it.
   bridge         telegram, slack, gitlab or jira
   chat           the thread it belongs to
   from           the sender's id on the bridge
-  text           what was said, without the bot's name
+  text           what was said; Slack, GitLab and Jira take out the bot's name
   place          where it was said, as rules.yaml names places
   at             the message's id on the service, where a bridge reads a thread
   answers        the message a reply answers, on Telegram
@@ -222,6 +223,7 @@ It answers its messages one at a time, each with a new run of the agent given
 the conversation so far.
 
 - Two people in one thread who get two agents have two conversations. An agent is never given another agent's conversation or tool results.
+- Everyone in a thread who gets the same agent shares its one conversation, with each tool call and result. A tool that reads one person's data belongs to an agent for a place only that person reads.
 - Every agent in a thread is given the thread's history and its earlier files, which everyone in the thread can read.
 - A chat or a conversation quiet for a day ends, and the next message starts a new one.
 - The agent's file is read for each message, so a changed agent answers the next message of a conversation under way.
@@ -238,7 +240,8 @@ the conversation so far.
 - While an agent works, the conversation shows `Working on it.` under a Slack thread and "typing" on Telegram. A reply clears it on Slack, and so does an answer that says nothing.
 - A conversation waits up to seven days for an approval, and up to an hour for a form.
 - When an answer fails, the conversation says `That could not be answered. Ask again in a while.`, and answers the next message with no conversation so far and with what the thread held before it.
-- When someone with no agent names the bot, the chat says `This bot answers only the people it belongs to.`
+- When `who.yaml` fails for a message that names the bot, as for an entry of `rules.yaml` with no `for:`, the chat says `That could not be answered. Ask again in a while.`
+- When someone with no agent names the bot, the chat says `This bot answers only the people it belongs to.`, or `This bot does not answer you here.` to someone `lookup.yaml` knows.
 
   a chat                  where it is and the first line said: #help: …, dm: …, #7 … on GitLab, OPS-1 … on Jira
   a conversation          the agent's name, where it is and the first line said: helper in #help: …
@@ -355,10 +358,10 @@ Asking a person
 A question is a run at `.rook/blocks/ask`. A machine calls it, and its buttons
 hold its run's ID, so a tap goes to it.
 
-1. The question asks each person `people` names in a direct message, on the first bridge `lookup` gives that reaches them, or posts in `in`.
-2. A tap counts when `lookup` says its sender is someone `people` names, or in a group it names, on any bridge.
+1. The question asks each person `people` names in a direct message, on the first bridge in their entry that reaches them and that the project runs, or posts in `in`.
+2. A tap counts when it is on one of `choices` and `lookup` says its sender is someone `people` names, or in a group it names, on any bridge.
 3. The first tap that counts is the answer. The question's messages then show who answered and the values, and lose their buttons.
-4. The call gives `choice`, and `values` when the question has fields. Unanswered after `within`, it gives only `choice: no`.
+4. The call gives `choice` and `person`, who answered, and `values` when the question has fields. Unanswered after `within`, it gives only `choice: no`.
 
     # ask-alice.yaml
     flow: ask-alice
@@ -378,8 +381,8 @@ hold its run's ID, so a tap goes to it.
   within     how long to wait; 7d by default
 
 - A machine calls the question, and never runs it as a child: a tap goes only to a run at `.rook/blocks/ask`.
-- A tap on a question that has ended is noted as undelivered in the bridge's record, and starts nothing.
-- A person with no bridge that reaches them directly cannot be asked: the call fails.
+- A tap on a question that has ended is noted as undelivered in the bridge's record, and starts nothing. A tap or press that names no question is logged by the listener.
+- A person with no bridge the project runs that reaches them directly cannot be asked: the call fails, naming their bridges.
 - GitLab and Jira only comment on an issue, so they ask no questions.
 - The tool `form` in `.rook/agents/base.yaml` asks the person who asked, in the Slack conversation the message came from, with the buttons Send and Cancel, for an hour. On another bridge it gives a note that forms are shown only on Slack.
 
@@ -427,13 +430,16 @@ part chooses them.
 
 1. With `review: true`, approval calls `review` with the held call and the request, and reads `{ reply: { says, note } }`.
 2. `refuse` ends it, and `yes` ends it for a tool in `alone`.
-3. Anything else asks the people, shown the review's word. A review that fails, or a project with no `review.yaml`, shows them `Review failed:` and the error.
+3. Anything else asks the people, shown the review's word. A review that fails or gives no `reply`, or a project with no `review.yaml`, shows them `Review failed:` and why.
 4. A part whose ask names no people approves nothing, and says so to the agent.
 
     # review.yaml
     agent: review
     include: .rook/review/agent.yaml
     model: { name: claude-sonnet-5-5, secret: ANTHROPIC_KEY }
+
+- The request and what the agent said are quoted, each line after `> `, so that no line of them reads as Rook's own.
+- The agent is told who answered, as `alice said yes.`, or `No one answered in time, so the answer is no.`
 
 - An agent that answers messages includes `.rook/agents/base.yaml`, and writes its own model, system text and parts.
 - `base.yaml` gives the agent its input, its prompt, the conversation, and the tools `progress`, `look`, `send` and `form`.
