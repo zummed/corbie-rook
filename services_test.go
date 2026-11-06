@@ -335,6 +335,118 @@ func TestSlackUnreadableChannelDoesNotStopTheListener(t *testing.T) {
 	}
 }
 
+// A message whose channel Slack fails to name once, with a 500, is left
+// unacknowledged, so Slack sends it again; the resend is answered, and a later
+// resend of it is not answered again. A message in a channel Slack refuses to
+// name, and a press with no user, are acknowledged and skipped.
+func TestSlackListenerLeavesAFailedEnvelopeForSlackToSendAgain(t *testing.T) {
+	s := newSlack(t)
+	var mu sync.Mutex
+	failed := false
+	override(s.Server, func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path != "/api/conversations.info" {
+			return false
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		switch r.URL.Query().Get("channel") {
+		case "C7":
+			if !failed {
+				failed = true
+				w.WriteHeader(500)
+				fmt.Fprint(w, "upstream error")
+				return true
+			}
+		case "C8":
+			fmt.Fprint(w, `{"ok": false, "error": "channel_not_found"}`)
+			return true
+		}
+		return false
+	})
+	w := newWorld(t)
+	dir := slackProject(t, w, s)
+	w.sync(dir)
+	w.until("Slack connected", s.connected)
+	acked := func(id string) bool {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return slices.Contains(s.acks, id)
+	}
+	lost := inChannel("U1", "4.0", "", "<@UBOT> once")
+	lost["channel"] = "C7"
+	refused := inChannel("U1", "5.0", "", "<@UBOT> never")
+	refused["channel"] = "C8"
+	s.says("a", lost)
+	s.says("b", refused)
+	// A press with no user, which can never be handled, is acknowledged too.
+	s.send(map[string]any{"envelope_id": "d", "type": "interactive", "payload": map[string]any{
+		"type": "block_actions", "actions": []any{map[string]any{"action_id": "choice-0", "value": "20260101T000000.000Z-0123456789 yes"}},
+	}})
+	w.until("the refused envelopes received", func() bool { return acked("b") && acked("d") })
+	time.Sleep(10 * interval)
+	if acked("a") || len(s.posted()) != 0 {
+		t.Fatalf("after a 500, the envelope was acknowledged: %v, and the bot posted %v", acked("a"), s.posted())
+	}
+	s.says("a", lost)
+	w.until("the resent envelope received", func() bool { return acked("a") })
+	w.until("the answer", func() bool { return len(s.posted()) >= 1 })
+	s.says("c", lost)
+	w.until("the second resend received", func() bool { return acked("c") })
+	time.Sleep(20 * interval)
+	if got := s.posted(); len(got) != 1 || got[0]["channel"] != "C7" {
+		t.Fatalf("the bot posted %v", got)
+	}
+}
+
+// A message Telegram gives while getUpdates fails once, with a 500, is not
+// lost: the listener asks again after its rest, and the message is answered
+// once. A message with no chat, which can never be handled, is passed over.
+func TestTelegramListenerLosesNoMessageToAFailure(t *testing.T) {
+	tg := newTelegram(t)
+	var mu sync.Mutex
+	asks, failed := 0, false
+	override(tg.Server, func(w http.ResponseWriter, r *http.Request) bool {
+		if !strings.HasSuffix(r.URL.Path, "/getUpdates") {
+			return false
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		asks++
+		if !failed && len(tg.updates) > 0 {
+			failed = true
+			w.WriteHeader(500)
+			fmt.Fprint(w, "upstream error")
+			return true
+		}
+		return false
+	})
+	asked := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return asks
+	}
+	w := newWorld(t)
+	dir := chatProject(t, w, tg, map[string]string{
+		"agents/helper.yaml": echoAgent("helper"),
+		"agents/turn.js":     turnJS,
+	})
+	tg.update(map[string]any{"message": map[string]any{"message_id": 5, "from": map[string]any{"id": 1, "is_bot": false}, "text": "no chat"}})
+	tg.dm(1, "after it")
+	w.sync(dir)
+	w.until("getUpdates failed", func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return failed
+	})
+	for i := 0; i < 5 && !slices.ContainsFunc(tg.texts("1"), func(s string) bool { return strings.Contains(s, "after it") }); i++ {
+		tick(w, asked)
+	}
+	time.Sleep(20 * interval)
+	if got := tg.texts("1"); len(got) != 1 {
+		t.Fatalf("the bot said %q", got)
+	}
+}
+
 // A file whose address is not on Slack's own file host is left out of the
 // message, and the bot token is never sent to its host.
 func TestSlackFileOnAnotherHostGetsNoToken(t *testing.T) {

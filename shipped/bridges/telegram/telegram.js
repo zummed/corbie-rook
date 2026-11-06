@@ -46,8 +46,8 @@ if (input.do === "hear") {
   const ask = { timeout: 50, limit: 1, allowed_updates: ["message", "callback_query"] }
   if (input.cursor !== null && input.cursor !== undefined) ask.offset = input.cursor
   let cursor = ask.offset === undefined ? null : ask.offset
-  for (const u of call("getUpdates", ask)) {
-    cursor = u.update_id + 1
+  // heard emits what one update holds.
+  const heard = (u) => {
     const q = u.callback_query
     if (q && q.message && q.data) {
       const at = q.data.indexOf(" ")
@@ -63,19 +63,31 @@ if (input.do === "hear") {
       } catch (e) {
         log(e.message)
       }
-      continue
+      return
     }
     const m = u.message
-    if (!m || !m.from || m.from.is_bot || m.chat.type !== "private") continue
+    if (!m || !m.from || m.from.is_bot || m.chat.type !== "private") return
     const text = m.text || m.caption || ""
     const file = attachment(m)
-    if (!text && !file) continue
+    if (!text && !file) return
     // Each item of an album comes as its own update, so it is a message of
     // its own, with its own caption.
     const message = { bridge: "telegram", text: text, chat: String(m.chat.id), from: String(m.from.id), place: "dm",
       answers: m.chat.id + ":" + m.message_id }
     if (file) message.attachments = [file]
     emit("message", message)
+  }
+  for (const u of call("getUpdates", ask)) {
+    cursor = u.update_id + 1
+    // An update that lacks what the listener reads can never be handled, and
+    // the cursor passes it. Any other failure fails the job before the cursor
+    // passes the update, so Telegram gives it again.
+    try {
+      heard(u)
+    } catch (e) {
+      if (!(e instanceof TypeError)) throw e
+      log("an update the listener cannot read: " + e.message)
+    }
   }
   return { cursor: cursor }
 }

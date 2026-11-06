@@ -160,7 +160,8 @@ piece `.rook/bridges/<name>/listen.yaml`.
           input: { projects: [group/project] }
 
 - `restart: { when: always }` starts the listener again if it ends. After a failed read, a listener waits in its state `resting`, then reads again.
-- A message or a tap that a listener cannot handle, such as one in a Slack channel whose name the bot cannot read, is logged and skipped.
+- A message or a tap that a listener can never handle, such as one in a Slack channel whose name the bot cannot read, is logged and skipped.
+- After any other failure, such as a network error, Slack sends the message again and Telegram gives it again, and it is answered once.
 - The hosts are values: `GITLAB_SITE`, `JIRA_SITE`, and `JIRA_EMAIL`, the account Jira's token belongs to.
 - A listener reads a value when it starts. After changing one, run `corbie run cancel /my-bot/bridges/<name>`, then `corbie run submit .`.
 - A bridge the project does not run has no machines in `.rook/`, and needs no secret.

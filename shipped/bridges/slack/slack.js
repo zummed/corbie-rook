@@ -33,6 +33,12 @@ function call(method, body, query, token) {
   return answer
 }
 
+// lasting says whether a failure would come again on a resend: Slack refused a
+// call with a word other than its temporary ones, as channel_not_found for a
+// channel the bot cannot read, or the envelope lacks what the listener reads.
+const temporary = ["ratelimited", "internal_error", "fatal_error", "service_unavailable", "request_timeout"]
+const lasting = (e) => (e.slack !== undefined && !temporary.includes(e.slack)) || e instanceof TypeError
+
 // named gives the ID of the channel a #name names, of those the bot can see, and
 // a conversation ID as it is.
 function named(to) {
@@ -79,9 +85,9 @@ if (input.do === "hear") {
     emit("answer", { bridge: "slack", question: value.slice(0, at), from: body.user.id, choice: value.slice(at + 1), values: values })
   }
 
-  // heard holds the messages heard in the last ten minutes, as channel/ts, from
-  // this job and the ones before it: Slack sends an envelope again when its
-  // receipt is late.
+  // heard holds the messages emitted in the last ten minutes, as channel/ts,
+  // from this job and the ones before it: Slack sends an envelope again when
+  // its receipt is late or missing.
   const heard = ((input.cursor || {}).heard || []).slice()
 
   // spoke holds the threads the bot has said something in, as channel/thread:
@@ -103,7 +109,6 @@ if (input.do === "hear") {
   const said = (e) => {
     if (e.type !== "message" || (e.subtype && e.subtype !== "file_share" && e.subtype !== "thread_broadcast")) return
     if (heard.includes(e.channel + "/" + e.ts)) return
-    heard.push(e.channel + "/" + e.ts)
     if (e.user === me) spoke.set(e.channel + "/" + (e.thread_ts || e.ts), true)
     if (e.bot_id || !e.user || e.user === me) return
     const text = e.text || ""
@@ -112,13 +117,7 @@ if (input.do === "hear") {
     if (!text && !files.length) return
     let unaddressed = false
     if (!direct && !text.includes(mention)) {
-      if (!input.overhear || !e.thread_ts) return
-      try {
-        if (!spoken(e.channel, e.thread_ts)) return
-      } catch (err) {
-        log(err.message)
-        return
-      }
+      if (!input.overhear || !e.thread_ts || !spoken(e.channel, e.thread_ts)) return
       unaddressed = true
     }
     const place = direct ? "dm" : "#" + call("conversations.info", null, { channel: e.channel }).channel.name
@@ -126,6 +125,7 @@ if (input.do === "hear") {
     const message = { bridge: "slack", text: text.replaceAll(mention, "").trim(), chat: chat, from: e.user, place: place, at: e.ts }
     if (files.length) message.attachments = files
     if (unaddressed) message.unaddressed = true
+    heard.push(e.channel + "/" + e.ts)
     emit("message", message)
   }
 
@@ -143,17 +143,25 @@ if (input.do === "hear") {
       throw e
     }
     if (message === null) break
-    const envelope = JSON.parse(message)
+    let envelope
+    try {
+      envelope = JSON.parse(message)
+    } catch (e) {
+      log("Slack sent what is not JSON: " + message.slice(0, 100))
+      continue
+    }
     if (envelope.type === "disconnect") break
     if (!envelope.envelope_id) continue
-    // An envelope the listener cannot handle, such as a message in a channel
-    // whose name Slack does not give the bot, is logged and skipped.
+    // An envelope that can never be handled is logged and acknowledged. Any
+    // other failure, such as a network error, is logged and leaves the envelope
+    // unacknowledged, so Slack sends it again.
     const body = envelope.payload || {}
     try {
       if (envelope.type === "interactive" && body.type === "block_actions") pressed(body)
       if (envelope.type === "events_api" && body.event) said(body.event)
     } catch (e) {
       log(e.message)
+      if (!lasting(e)) continue
     }
     socket.send(JSON.stringify({ envelope_id: envelope.envelope_id }))
   }
