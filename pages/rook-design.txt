@@ -124,6 +124,7 @@ The machines in `.rook/` read `rules.yaml`, and call `lookup`, `attend`,
   bridges/<name>/history.yaml          reads a thread; Slack, GitLab and Jira
   bridges/<name>/ask.yaml, close.yaml  asks with buttons, and shows the answer; Telegram and Slack
   bridges/<name>/status.yaml           shows a status; Telegram and Slack
+  bridges/<name>/<name>.js             the service's script, which each of the bridge's machines runs
   bridges/gitlab/api.js, jira/api.js   the service's REST API, for the bridge and a part's script
   blocks/chat.yaml                     one thread: who a message is from, and whether to answer it
   blocks/conversation.yaml             one thread with one agent: calls the agent, and says its reply
