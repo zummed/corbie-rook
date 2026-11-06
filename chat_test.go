@@ -1518,6 +1518,20 @@ func TestTwoQuestionsAnsweredOutOfOrder(t *testing.T) {
 		t.Errorf("alice's own request was answered by a tap on bob's: %q", tg.texts("1"))
 	}
 	tg.tapOn(t, 0, 1, "yes")
+	for i := 0; i < 100 && !slices.ContainsFunc(tg.texts("1"), func(s string) bool { return strings.Contains(s, "tell gave") }); i++ {
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !slices.ContainsFunc(tg.texts("1"), func(s string) bool { return strings.Contains(s, "tell gave") }) {
+		runs, _ := w.List(context.Background(), client.Filter{})
+		for _, r := range runs {
+			t.Logf("RUN %s %s %s", r.Machine, r.Status, r.ID)
+		}
+		fin, _ := w.List(context.Background(), client.Filter{Finished: true})
+		for _, r := range fin {
+			t.Logf("ENDED %s %s %s %s", r.Machine, r.Status, r.ID, w.show(r.ID).Error)
+		}
+		t.Logf("texts %q", tg.texts("1"))
+	}
 	tg.waitFor(w, "1", "tell gave")
 	tg.waitFor(w, "2", "hello from alice")
 	if q := tg.texts("1")[1]; !strings.Contains(q, "bob: please tell bob hello") {
@@ -1577,8 +1591,15 @@ func TestApprovalOutlivesTheChat(t *testing.T) {
 	chat := keyed(w, ".rook/blocks/chat.yaml")["telegram:1"][0].ID
 	w.set(w.now().Add(3 * 24 * time.Hour))
 	w.until("the chat ended", func() bool { return w.show(chat).HasEnded() })
+	// Three days at once may also time out the listener's job, which then
+	// rests a minute before it asks Telegram again: the clock moves on until
+	// the tap is heard.
 	tg.tapOn(t, 0, 1, "yes")
-	tg.waitFor(w, "1", "tell gave")
+	w.until(`"tell gave" said in chat 1`, func() bool {
+		w.set(w.now().Add(31 * time.Second))
+		time.Sleep(5 * interval)
+		return slices.ContainsFunc(tg.texts("1"), func(s string) bool { return strings.Contains(s, "tell gave") })
+	})
 	tg.dm(1, "thanks")
 	tg.waitFor(w, "1", "ok: thanks")
 	if n := len(model.Calls[len(model.Calls)-1].Messages); n < 5 {
