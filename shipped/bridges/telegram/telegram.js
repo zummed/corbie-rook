@@ -46,24 +46,24 @@ if (input.do === "hear") {
   // is logged.
   //
   // An update that lacks what the listener reads is logged and passed over.
-  // Any other failure fails the job before the cursor passes the update, so
-  // Telegram gives it again, until it drops the update after 24 hours. limit: 1
-  // makes that update the only one of the job: with more, those before it
-  // would be emitted, then given again.
+  // An update the listener fails on for any other reason is given again, by
+  // asking from its own update_id, and after it has failed three times running
+  // it is logged and passed over. input.failing names that update and how many
+  // times it has failed. A failure of getUpdates fails the job, which asks
+  // again from the same cursor. limit: 1 makes each job hear one update: a job
+  // that ends with no output, such as at its timeout, has emitted at most the
+  // update Telegram gives again, where a longer list would be given again whole.
   const ask = { timeout: 50, limit: 1, allowed_updates: ["message", "callback_query"] }
   if (input.cursor !== null && input.cursor !== undefined) ask.offset = input.cursor
   let cursor = ask.offset === undefined ? null : ask.offset
-  // heard emits what one update holds.
+  // heard emits what one update holds. Its emit is the last thing it does,
+  // so an update it fails on was not emitted, and giving it again emits it once.
   const heard = (u) => {
     const q = u.callback_query
     if (q) {
       if (!q.id || !q.from || !q.data) return log("a tap with no id, sender or data is passed over")
       const at = q.data.indexOf(" ")
       const question = q.data.slice(0, at), choice = q.data.slice(at + 1)
-      // Telegram passes on whatever data a client sends, so a tap that names
-      // no question is logged and starts nothing.
-      if (at > 0 && /^\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{10}$/.test(question)) emit("answer", { bridge: "telegram", question: question, from: String(q.from.id), choice: choice })
-      else log("a tap names no question: " + q.data.slice(0, 100))
       // This only shows the tap. Telegram refuses it for an old tap, and a
       // refusal must not stop the cursor passing this update.
       try {
@@ -71,6 +71,10 @@ if (input.do === "hear") {
       } catch (e) {
         log(e.message)
       }
+      // Telegram passes on whatever data a client sends, so a tap that names
+      // no question is logged and starts nothing.
+      if (at > 0 && /^\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{10}$/.test(question)) emit("answer", { bridge: "telegram", question: question, from: String(q.from.id), choice: choice })
+      else log("a tap names no question: " + q.data.slice(0, 100))
       return
     }
     const m = u.message
@@ -91,7 +95,16 @@ if (input.do === "hear") {
     emit("message", message)
   }
   for (const u of call("getUpdates", ask)) {
-    heard(u)
+    try {
+      heard(u)
+    } catch (e) {
+      const tries = input.failing && input.failing.update === u.update_id ? input.failing.tries + 1 : 1
+      if (tries < 3) {
+        log("an update failed, and is given again: " + e.message)
+        return { cursor: u.update_id, failing: { update: u.update_id, tries: tries } }
+      }
+      log("an update failed three times and is passed over: " + e.message)
+    }
     cursor = u.update_id + 1
   }
   return { cursor: cursor }

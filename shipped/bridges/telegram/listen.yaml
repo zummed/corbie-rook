@@ -11,7 +11,11 @@ states:
   hearing:
     job:
       script: ./telegram.js
-      input: { do: hear, token: TELEGRAM_TOKEN, cursor: "${states.hearing.output ? states.hearing.output.cursor : null}" }
+      input:
+        do: hear
+        token: TELEGRAM_TOKEN
+        cursor: "${states.hearing.output ? states.hearing.output.cursor : null}"
+        failing: "${states.hearing.output ? states.hearing.output.failing : null}"
       allow: [net:api.telegram.org, "secret:TELEGRAM_TOKEN@net:api.telegram.org"]
       timeout: 2m
     on:

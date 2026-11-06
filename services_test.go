@@ -476,32 +476,26 @@ func TestTelegramListenerLosesNoMessageToAFailure(t *testing.T) {
 	}
 }
 
-// An update that the listener fails on after getUpdates gave it, here a photo
-// with no sizes, fails the job before the cursor passes it, so Telegram gives
-// the update again, and it is answered once.
+// An update that the listener fails on after getUpdates gave it is given
+// again, and answered once. The stand-in gives update 1 first as a photo with
+// no sizes, which the listener fails on, then as the message it holds.
 func TestTelegramUpdateTheListenerFailsOnIsGivenAgain(t *testing.T) {
 	tg := newTelegram(t)
 	var mu sync.Mutex
-	asks, broken := 0, 0
+	broken := false
 	override(tg.Server, func(w http.ResponseWriter, r *http.Request) bool {
 		if !strings.HasSuffix(r.URL.Path, "/getUpdates") {
 			return false
 		}
 		mu.Lock()
 		defer mu.Unlock()
-		asks++
-		if broken == 0 && len(tg.updates) > 0 {
-			broken++
+		if !broken && len(tg.updates) > 0 {
+			broken = true
 			fmt.Fprint(w, `{"ok": true, "result": [{"update_id": 1, "message": {"message_id": 10, "date": 1700000000, "from": {"id": 1, "is_bot": false}, "chat": {"id": 1, "type": "private"}, "photo": []}}]}`)
 			return true
 		}
 		return false
 	})
-	asked := func() int {
-		mu.Lock()
-		defer mu.Unlock()
-		return asks
-	}
 	w := newWorld(t)
 	dir := chatProject(t, w, tg, map[string]string{
 		"agents/helper.yaml": echoAgent("helper"),
@@ -509,15 +503,41 @@ func TestTelegramUpdateTheListenerFailsOnIsGivenAgain(t *testing.T) {
 	})
 	tg.dm(1, "given again")
 	w.sync(dir)
-	w.until("the listener failed", func() bool {
-		return slices.ContainsFunc(failures(w), func(s string) bool { return strings.Contains(s, "telegram-listen") })
-	})
-	for i := 0; i < 5 && len(tg.texts("1")) == 0; i++ {
-		tick(w, asked)
-	}
+	w.until("the message answered", func() bool { return len(tg.texts("1")) > 0 })
 	time.Sleep(20 * interval)
-	if got := tg.texts("1"); len(got) != 1 || !strings.Contains(got[0], "given again") {
-		t.Fatalf("the bot said %q; failures: %v", got, failures(w))
+	if got, l := tg.texts("1"), logged(w, "telegram"); len(got) != 1 || !strings.Contains(got[0], "given again") ||
+		!slices.ContainsFunc(l, func(s string) bool { return strings.HasPrefix(s, "an update failed, and is given again: ") }) {
+		t.Fatalf("the bot said %q; logged: %q", got, l)
+	}
+}
+
+// An update the listener fails on each time, a photo with no sizes, is given
+// again, then logged and passed over after its third failure. The message
+// after it is answered once.
+func TestTelegramUpdateThatAlwaysFailsIsPassedOver(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorld(t)
+	dir := chatProject(t, w, tg, map[string]string{
+		"agents/helper.yaml": echoAgent("helper"),
+		"agents/turn.js":     turnJS,
+	})
+	tg.dm(1, "", map[string]any{"photo": []any{}})
+	tg.dm(1, "after it")
+	w.sync(dir)
+	w.until("the message after it answered", func() bool { return len(tg.texts("1")) > 0 })
+	time.Sleep(20 * interval)
+	var again, passed int
+	for _, l := range logged(w, "telegram") {
+		if strings.HasPrefix(l, "an update failed, and is given again: ") {
+			again++
+		}
+		if strings.HasPrefix(l, "an update failed three times and is passed over: ") {
+			passed++
+		}
+	}
+	if got := tg.texts("1"); again != 2 || passed != 1 || len(got) != 1 || !strings.Contains(got[0], "after it") {
+		t.Fatalf("the bad update was logged as given again %d times and as passed over %d times, and the bot said %q; logged: %q",
+			again, passed, got, logged(w, "telegram"))
 	}
 }
 
@@ -1495,7 +1515,7 @@ func TestQuestionOnAFailingBridgeFailsWithItsError(t *testing.T) {
 	if run := w.show(asker); run.Status != "failed" || !strings.Contains(run.Error, "Telegram is down") {
 		t.Fatalf("the asker is %s: %s", run.Status, run.Error)
 	}
-	if got := w.show(asker).Error; strings.Count(got, "Telegram is down") != 1 || strings.Count(got, " at line ") > 2 {
+	if got := w.show(asker).Error; strings.Count(got, "Telegram is down") != 1 || strings.Count(got, " at line ") > 1 {
 		t.Errorf("the asker's error repeats what failed: %s", got)
 	}
 }
