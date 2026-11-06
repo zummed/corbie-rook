@@ -126,7 +126,7 @@ if (input.do === "hear") {
   }
 
   // stopped emits a press of the stop button Slack shows under a thread while
-  // the bot's status is set there, as stop to that thread's chat. Slack sends
+  // the bot works there, as stop to that thread's chat. Slack sends
   // agent_session_stopped to an app that subscribes to it.
   const stopped = (e) => {
     if (e.type !== "agent_session_stopped") return
@@ -262,11 +262,12 @@ if (input.do === "history") {
 }
 
 if (input.do === "status") {
-  // What the bot is doing, shown under a thread until it replies there or is
-  // given an empty status. Slack shows a status only in a thread.
+  // Any text sets the thread's agent session to processing, under which Slack
+  // shows "Working..." and its stop button; an empty text sets it to active.
+  // Slack keeps a session only in a thread.
   const [channel, thread] = String(input.to).split("/")
   if (!thread) return {}
-  call("assistant.threads.setStatus", { channel_id: channel, thread_ts: thread, status: String(input.text || "") })
+  call("agents.sessions.setStatus", { channel_id: channel, thread_ts: thread, status: input.text ? "processing" : "active" })
   return {}
 }
 

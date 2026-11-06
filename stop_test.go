@@ -171,7 +171,8 @@ func TestStopCancelsAQuestion(t *testing.T) {
 }
 
 // /stop with nothing being answered is told so, and the next message is
-// answered in the same conversation.
+// answered in the same conversation. The chat and the conversation it started
+// are titled stop.
 func TestStopWithNothingRunning(t *testing.T) {
 	tg := newTelegram(t)
 	w := newWorld(t)
@@ -184,6 +185,7 @@ func TestStopWithNothingRunning(t *testing.T) {
 	if n := len(keyed(w, ".rook/blocks/conversation.yaml")["telegram:1:helper"]); n != 1 {
 		t.Errorf("there are %d conversations", n)
 	}
+	w.titled(map[string][]string{"chat": {"dm: stop"}, "conversation": {"helper in dm: stop"}})
 	if f := failedRuns(t, w); len(f) > 0 {
 		t.Errorf("runs failed: %v", f)
 	}
@@ -248,7 +250,7 @@ func TestSlackStopButtonStopsTheAnswer(t *testing.T) {
 			s.mu.Lock()
 			last := s.status[1]
 			s.mu.Unlock()
-			if last["status"] != "" || last["channel_id"] != channel || last["thread_ts"] != "4.0" {
+			if last["status"] != "active" || last["channel_id"] != channel || last["thread_ts"] != "4.0" {
 				t.Errorf("the last status is %v", last)
 			}
 			conversation := keyed(w, ".rook/blocks/conversation.yaml")["slack:"+channel+"/4.0:helper"]
@@ -265,3 +267,83 @@ func TestSlackStopButtonStopsTheAnswer(t *testing.T) {
 	}
 }
 
+
+// countingAgent is the echo agent, which counts the turns of its conversation,
+// and which takes an hour first for a message with the word wait.
+const countingAgent = `
+	flow: helper
+	input: { said: string, asker: string, conversation: "any?" }
+	stages:
+	  long:
+	    when: "${input.said.includes('wait')}"
+	    job:
+	      machine:` + hourMachine + `
+	  turn: { job: { script: ./turn.js, input: { name: helper, said: "${input.said}", asker: "${input.asker}", conversation: "${input.conversation}" } } }
+	output: ${stages.turn.output}
+`
+
+// A stopped message leaves the conversation as it was: the message after it is
+// the conversation's second turn, after the first.
+func TestStopKeepsTheConversation(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorld(t)
+	dir := chatProject(t, w, tg, map[string]string{
+		"agents/helper.yaml": countingAgent,
+		"agents/turn.js":     turnJS,
+		"rules.yaml":         teamRules,
+		"agents/team.yaml":   echoAgent("team"),
+	})
+	tg.dm(1, "hello")
+	w.sync(dir)
+	tg.waitFor(w, "1", "helper to alice (1): hello")
+	tg.dm(1, "wait an hour")
+	hour := one(t, w, "hour")
+	tg.dm(1, "/stop")
+	tg.waitFor(w, "1", "Stopped.")
+	cancelled(w, hour)
+	tg.dm(1, "again")
+	tg.waitFor(w, "1", "helper to alice (2): again")
+}
+
+// /stop@<bot>, and /stop with words after it, are a stop. /stopwatch is a
+// message.
+func TestStopWithABotNameOrWords(t *testing.T) {
+	for _, text := range []string{"/stop@rook_bot", "/stop please", "/stopwatch"} {
+		t.Run(text, func(t *testing.T) {
+			tg := newTelegram(t)
+			w := newWorld(t)
+			dir := stopProject(t, w, tg)
+			tg.dm(1, text)
+			w.sync(dir)
+			want := "Nothing is running."
+			if text == "/stopwatch" {
+				want = "ok: /stopwatch"
+			}
+			tg.waitFor(w, "1", want)
+		})
+	}
+}
+
+// A stop whose who.yaml fails, here on a field rules.yaml does not take, is
+// told it could not be answered, and stops nothing.
+func TestStopWhoseWhoFails(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorld(t)
+	dir := chatProject(t, w, tg, map[string]string{
+		"agents/helper.yaml": echoAgent("helper"),
+		"agents/turn.js":     turnJS,
+		"rules.yaml":         "places:\n  dm: { readers: [asker] }\nagents:\n  - { name: helper, for: [alice], words: [hi] }\n",
+	})
+	tg.dm(1, "/stop")
+	w.sync(dir)
+	tg.waitFor(w, "1", "That could not be answered.")
+	if f := failures(w); !slices.ContainsFunc(f, func(s string) bool { return strings.Contains(s, "the agent helper has words") }) {
+		t.Errorf("no failure names the field: %q", f)
+	}
+	if f := failures(w); slices.ContainsFunc(f, func(s string) bool { return strings.Contains(s, "TypeError") }) {
+		t.Errorf("the stop failed on its own output: %q", f)
+	}
+	if n := len(keyed(w, ".rook/blocks/conversation.yaml")); n != 0 {
+		t.Errorf("there are %d conversations", n)
+	}
+}

@@ -108,25 +108,46 @@ func TestGitLabSaysAChartAsATable(t *testing.T) {
 }
 
 // A status shows under a thread while its message is answered, and is cleared
-// when the answer says nothing.
+// once the reply is posted, when the answer says nothing, and when the answer
+// fails and the thread is told so.
 func TestSlackShowsAStatusWhileAnswering(t *testing.T) {
-	s := newSlack(t)
-	w := newWorld(t)
-	dir := slackProject(t, w, s)
-	replying(t, dir, "")
-	w.sync(dir)
-	w.until("Slack connected", s.connected)
-	s.says("a", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "thread_ts": "4.0", "ts": "5.0", "text": "hello"})
-	w.until("two statuses", func() bool {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		return len(s.status) >= 2
-	})
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	got, _ := json.Marshal(s.status)
-	if string(got) != `[{"channel_id":"D1","status":"Working on it.","thread_ts":"4.0"},{"channel_id":"D1","status":"","thread_ts":"4.0"}]` {
-		t.Fatalf("the statuses are %s", got)
+	for name, agent := range map[string]string{
+		"reply":   "Done.",
+		"nothing": "",
+		"failure": "",
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := newSlack(t)
+			w := newWorld(t)
+			dir := slackProject(t, w, s)
+			replying(t, dir, agent)
+			if name == "failure" {
+				write(t, dir, map[string]string{"agents/helper.yaml": "flow: helper\nstages:\n  fail: { job: { script: ./fail.js } }\n", "agents/fail.js": `throw new Error("no answer")`})
+			}
+			w.sync(dir)
+			w.until("Slack connected", s.connected)
+			s.says("a", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "thread_ts": "4.0", "ts": "5.0", "text": "hello"})
+			w.until("two statuses", func() bool {
+				s.mu.Lock()
+				defer s.mu.Unlock()
+				return len(s.status) >= 2
+			})
+			quiet()
+			s.mu.Lock()
+			got, _ := json.Marshal(s.status)
+			s.mu.Unlock()
+			if string(got) != `[{"channel_id":"D1","status":"processing","thread_ts":"4.0"},{"channel_id":"D1","status":"active","thread_ts":"4.0"}]` {
+				t.Fatalf("the statuses are %s", got)
+			}
+			want := map[string][]string{"reply": {"Done."}, "nothing": nil, "failure": {"That could not be answered."}}[name]
+			var posted []string
+			for _, p := range s.posted() {
+				posted = append(posted, fmt.Sprint(p["markdown_text"]))
+			}
+			if !slices.Equal(posted, want) {
+				t.Errorf("the bot posted %q", posted)
+			}
+		})
 	}
 }
 

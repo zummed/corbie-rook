@@ -1,6 +1,6 @@
-# Shows what the bot is doing under a Slack thread: `to` is conversation/thread,
-# and an empty text clears it. A late status is worse than none, so it is not
-# tried again.
+# Shows Slack's "Working..." and its stop button under a Slack thread, for any
+# text but an empty one, which clears them: `to` is conversation/thread. A late
+# status is worse than none, so it is not tried again.
 flow: slack-status
 input: { to: string, text: string }
 stages:

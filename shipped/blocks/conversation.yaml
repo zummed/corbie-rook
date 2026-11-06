@@ -6,7 +6,8 @@
 # of the conversation as `request`, and with no conversation yet, what the thread
 # already holds. The message's own files are downloaded only to answer it, and
 # an earlier one only when the agent looks at it. A status shows while the agent
-# works, and an empty reply says nothing. A question the agent fails on, for any
+# works, and is cleared once the reply, or the sorry, is said. An empty reply
+# says nothing. A question the agent fails on, for any
 # reason, such as rules.yaml naming an agent with no file, is told it could not
 # be answered, and the message's record shows why. It starts the conversation
 # again, so one the agent cannot take does not stop the next. A stop that
@@ -21,7 +22,7 @@ lifetime: keyed
 input: { message: map, asker: string, agent: string, address: map, history: "any?" }
 title: >-
   ${input.agent} in ${input.message.bridge === 'gitlab' ? input.message.chat.slice(input.message.chat.lastIndexOf('#')) :
-  input.message.bridge === 'jira' ? input.message.chat : input.message.place}: ${String(input.message.text || (input.message.attachments || []).map((a) => a.name).join(', ')).split('\n')[0]}
+  input.message.bridge === 'jira' ? input.message.chat : input.message.place}: ${String(input.message.text || (input.message.attachments || []).map((a) => a.name).join(', ') || 'stop').split('\n')[0]}
 initial: waiting
 states:
   waiting:
@@ -68,7 +69,7 @@ states:
             when: "${(stages.answer.output || {}).reply}"
             job: { machine: ./say.yaml, input: { address: "${input.address}", text: "${stages.answer.output.reply}" } }
           idle:
-            when: "${!stages.answer.failed && !(stages.answer.output || {}).reply}"
+            when: "${stages.say.skipped || stages.sorry.skipped}"
             job: { machine: ./status.yaml, input: { address: "${input.address}", text: "" } }
           sorry:
             when: "${stages.answer.failed}"

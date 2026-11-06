@@ -1,6 +1,7 @@
-# Shows what the bot is doing at an address, where a bridge has a way to: a
-# thread on Slack, and "typing" on Telegram. An empty text clears it on Slack,
-# and Telegram's "typing" ends by itself. A status is only a courtesy, so one
+# Shows that the bot is working at an address, where a bridge has a way to:
+# "Working..." under a thread on Slack, and "typing" on Telegram, for any text
+# but an empty one. An empty text clears it on Slack, and Telegram's "typing"
+# ends by itself. A status is only a courtesy, so one
 # that fails gives nothing and stops nothing. It calls the bridge's status at
 # .rook/bridges/<bridge>/status.
 flow: status

@@ -1043,7 +1043,7 @@ func (s *slack) serve(w http.ResponseWriter, r *http.Request) {
 		u.Method, u.To = "files.completeUploadExternal", strings.TrimSuffix(done.Channel+"/"+done.Thread, "/")
 		s.shared = append(s.shared, u)
 		json.NewEncoder(w).Encode(map[string]any{"ok": true, "files": done.Files})
-	case "/api/assistant.threads.setStatus":
+	case "/api/agents.sessions.setStatus":
 		var status map[string]any
 		json.NewDecoder(r.Body).Decode(&status)
 		s.mu.Lock()
