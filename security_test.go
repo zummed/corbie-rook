@@ -755,3 +755,65 @@ func TestBlobCodeHasNoNetworkOrSecret(t *testing.T) {
 	}
 }
 
+// On Slack, a layout an agent writes is posted as it is, so it can hold a
+// button whose action_id starts choice- and whose value names no run. A press
+// of it reaches the listener as a tap, which should be noted as undelivered:
+// the listener should not fail, and a message after it is answered.
+func TestSlackPressOfALayoutButtonDoesNotStopTheListener(t *testing.T) {
+	s := newSlack(t)
+	w := newWorld(t)
+	dir := slackProject(t, w, s)
+	w.sync(dir)
+	w.until("Slack connected", s.connected)
+	s.send(map[string]any{"envelope_id": "p", "type": "interactive", "payload": map[string]any{
+		"type": "block_actions", "user": map[string]any{"id": "U9"}, "actions": []any{map[string]any{"action_id": "choice-0", "value": "details please"}},
+		"channel": map[string]any{"id": "C1"}, "message": map[string]any{"ts": "1.1", "text": "A layout"},
+	}})
+	time.Sleep(10 * interval)
+	failed := ""
+	for _, e := range w.record(w.kept("bridges/slack.yaml")) {
+		for _, ev := range e.Events {
+			if ev.Name == "failed" {
+				b, _ := json.Marshal(ev.Data)
+				failed = string(b)
+			}
+		}
+	}
+	w.until("Slack connected again", s.connected)
+	s.says("a", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "ts": "3.0", "text": "in private"})
+	end := time.Now().Add(5 * time.Second)
+	for len(s.posted()) == 0 && time.Now().Before(end) {
+		time.Sleep(interval)
+	}
+	for _, run := range stubs(t, w, "slack-listen") {
+		if run.Status == "failed" && failed == "" {
+			failed = w.show(run.ID).Error
+		}
+	}
+	if failed != "" || len(s.posted()) == 0 {
+		t.Errorf("after a press naming no run, the listener failed with %s, and the next message was answered: %v", failed, len(s.posted()) > 0)
+	}
+}
+
+// A tap whose data names no question, as a changed client can send to the bot,
+// is skipped: the listener goes on, and the message after it is answered.
+func TestMalformedTapDoesNotStopTheListener(t *testing.T) {
+	for name, data := range map[string]string{"empty": "", "word": "nonsense", "word and choice": "nonsense yes", "slashes": "a/b/c yes",
+		"dots": "../x yes", "long": strings.Repeat("x", 300) + " yes", "space": " ", "no choice": "20260101T000000.000Z-0123456789a"} {
+		t.Run(name, func(t *testing.T) {
+			tg := newTelegram(t)
+			w := newWorld(t)
+			dir := chatProject(t, w, tg, map[string]string{
+				"agents/helper.yaml": echoAgent("helper"),
+				"agents/turn.js":     turnJS,
+			})
+			tg.tapData(1, data)
+			tg.dm(1, "after the tap")
+			w.sync(dir)
+			tg.waitFor(w, "1", "after the tap")
+			if f := failures(w); len(f) > 0 {
+				t.Errorf("runs failed: %q", f)
+			}
+		})
+	}
+}

@@ -299,6 +299,42 @@ func TestSlackResentPressAnswersOnce(t *testing.T) {
 	}
 }
 
+// One message in a channel whose name Slack will not give the bot (as
+// conversations.info answers for a channel the bot cannot read) does not stop
+// the bot hearing the next message: the direct message after it is answered
+// without waiting for the listener's minute of rest.
+func TestSlackUnreadableChannelDoesNotStopTheListener(t *testing.T) {
+	s := newSlack(t)
+	override(s.Server, func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path == "/api/conversations.info" && r.URL.Query().Get("channel") == "C7" {
+			fmt.Fprint(w, `{"ok": false, "error": "channel_not_found"}`)
+			return true
+		}
+		return false
+	})
+	w := newWorld(t)
+	dir := slackProject(t, w, s)
+	w.sync(dir)
+	w.until("Slack connected", s.connected)
+	bad := inChannel("U1", "4.0", "", "<@UBOT> from a shared channel")
+	bad["channel"] = "C7"
+	s.says("a", bad)
+	time.Sleep(20 * interval)
+	// Sent as Slack would, ignoring a connection the listener closed.
+	data, _ := json.Marshal(map[string]any{"envelope_id": "b", "type": "events_api", "payload": map[string]any{"type": "event_callback", "event": dm("U1", "5.0", "after it")}})
+	s.mu.Lock()
+	conn := s.socket
+	s.mu.Unlock()
+	sendErr := conn.Write(context.Background(), 1, data)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && len(s.posted()) == 0 {
+		time.Sleep(interval)
+	}
+	if len(s.posted()) == 0 {
+		t.Fatalf("one message in a channel conversations.info refuses stopped the listener for its minute of rest, and the direct message after it was not heard (send: %v); acks: %d; failures:\n%s", sendErr, s.acked(), strings.Join(failures(w), "\n"))
+	}
+}
+
 // A file whose address is not on Slack's own file host is left out of the
 // message, and the bot token is never sent to its host.
 func TestSlackFileOnAnotherHostGetsNoToken(t *testing.T) {
@@ -367,6 +403,46 @@ func TestSlackEditsAreNotHeard(t *testing.T) {
 	time.Sleep(20 * interval)
 	if got := s.posted(); len(got) != 1 || got[0]["markdown_text"] != "then this" {
 		t.Fatalf("the bot posted %v", got)
+	}
+}
+
+// A long answer is said in two messages. When Slack fails the second post once,
+// only that post is tried again, and the person reads each part once.
+func TestSlackLongAnswerIsNotSaidTwice(t *testing.T) {
+	s := newSlack(t)
+	var mu sync.Mutex
+	posts := 0
+	override(s.Server, func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path != "/api/chat.postMessage" {
+			return false
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		posts++
+		if posts == 2 {
+			w.WriteHeader(500)
+			fmt.Fprint(w, "upstream error")
+			return true
+		}
+		return false
+	})
+	w := newWorld(t)
+	dir := slackProject(t, w, s)
+	long := strings.Repeat("a", 11000) + "\n" + strings.Repeat("b", 3000)
+	replying(t, dir, long)
+	w.sync(dir)
+	w.until("Slack connected", s.connected)
+	s.says("a", dm("U1", "3.0", "tell me everything"))
+	w.until("an answer", func() bool { return len(s.posted()) >= 2 })
+	time.Sleep(30 * interval)
+	var firsts int
+	for _, p := range s.posted() {
+		if strings.HasPrefix(fmt.Sprint(p["markdown_text"]), "aaaa") {
+			firsts++
+		}
+	}
+	if firsts != 1 {
+		t.Fatalf("the first part of the answer was posted %d times in %d posts", firsts, len(s.posted()))
 	}
 }
 
@@ -564,6 +640,28 @@ func TestSlackQuestionToTwoPeopleClosesBoth(t *testing.T) {
 	}
 	if len(channels) != 2 {
 		t.Errorf("the questions changed are %v", s.updates)
+	}
+}
+
+// A comment that ends a sentence with the bot's name, as "can you look @bot.",
+// names the bot, as GitLab itself takes it, and is answered.
+func TestGitLabNameAtTheEndOfASentenceIsHeard(t *testing.T) {
+	gl := newGitLab(t)
+	w := newWorld(t)
+	w.secret("GITLAB_TOKEN", "gl-token")
+	dir := pointed(t, "gitlab", gl.Server)
+	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
+	gl.note(1, 2, "al", "before")
+	w.sync(dir)
+	w.until("the first ask", func() bool { return gl.asked() > 0 })
+	gl.note(2, 2, "al", "The build fails, can you look @bot.")
+	gl.note(3, 2, "al", "Thanks, @bot!")
+	tick(w, gl.asked)
+	tick(w, gl.asked)
+	time.Sleep(20 * interval)
+	got := gl.said()
+	if len(got) != 2 {
+		t.Fatalf("of a comment ending '@bot.' and one ending '@bot!', the bot answered %d: %q", len(got), got)
 	}
 }
 

@@ -40,7 +40,7 @@ if (input.do === "hear") {
   const settle = seconds(input.settle)
   const heard = []
   const me = call("GET", "/user")
-  const mention = new RegExp("(^|[^\\w@])@" + me.username.replace(/[.\-]/g, "\\$&") + "(?![\\w.-])", "g")
+  const mention = new RegExp("(^|[^\\w@])@" + me.username.replace(/[.\-]/g, "\\$&") + "(?![\\w-]|\\.[\\w-])", "g")
   // hear keeps a message that names the bot, and with overhear one that does
   // not, marked unaddressed.
   const hear = (message) => {

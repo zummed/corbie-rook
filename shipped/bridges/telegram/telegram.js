@@ -52,7 +52,10 @@ if (input.do === "hear") {
     if (q && q.message && q.data) {
       const at = q.data.indexOf(" ")
       const question = q.data.slice(0, at), choice = q.data.slice(at + 1)
-      emit("answer", { bridge: "telegram", question: question, from: String(q.from.id), choice: choice })
+      // Telegram passes on whatever data a client sends, so a tap that names
+      // no question is logged and starts nothing.
+      if (at > 0 && /^\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{10}$/.test(question)) emit("answer", { bridge: "telegram", question: question, from: String(q.from.id), choice: choice })
+      else log("a tap names no question: " + q.data.slice(0, 100))
       // This only shows the tap. Telegram refuses it for an old tap, and a
       // refusal must not stop the cursor passing this update.
       try {
