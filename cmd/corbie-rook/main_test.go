@@ -115,3 +115,21 @@ func TestInitWithNoBridgesSaysHowToChooseThem(t *testing.T) {
 		t.Errorf("init with no bridges prints a secret or value:\n%s", out)
 	}
 }
+
+// Bridges named as people write a list, with a space after a comma or a comma
+// at the end, or one named twice, are each taken once.
+func TestInitTakesAListAsPeopleWriteIt(t *testing.T) {
+	for _, list := range []string{"slack, gitlab", "slack,gitlab,", "slack,gitlab,slack"} {
+		t.Chdir(t.TempDir())
+		out, status := run(t, "", "init", "my-bot", "--bridges", list)
+		if status != 0 {
+			t.Errorf("--bridges %q ended %d:\n%s", list, status, out)
+			continue
+		}
+		for _, want := range []string{"secret set SLACK_TOKEN", "secret set GITLAB_TOKEN"} {
+			if n := strings.Count(out, want); n != 1 {
+				t.Errorf("--bridges %q prints %s %d times:\n%s", list, want, n, out)
+			}
+		}
+	}
+}

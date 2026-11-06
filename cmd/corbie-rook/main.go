@@ -51,9 +51,13 @@ func cmdInit(e *cli.Env, args []string) error {
 	case len(rest) != 1:
 		return cli.Mistake("name one directory")
 	}
+	// Blanks round a name and an empty name are left out, and a name given twice
+	// is taken once.
 	var bridges []string
-	if list != "" {
-		bridges = strings.Split(list, ",")
+	for _, name := range strings.Split(list, ",") {
+		if name = strings.TrimSpace(name); name != "" && !slices.Contains(bridges, name) {
+			bridges = append(bridges, name)
+		}
 	}
 	dir := rest[0]
 	_, err = os.Stat(filepath.Join(dir, "rules.yaml"))
