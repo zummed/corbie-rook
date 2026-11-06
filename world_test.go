@@ -1,8 +1,10 @@
 package rook_test
 
 import (
+	"bytes"
 	"context"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -10,6 +12,7 @@ import (
 	"time"
 
 	"github.com/zummed/corbie/client"
+	"github.com/zummed/corbie/client/cli"
 	"github.com/zummed/corbie/controller"
 	"github.com/zummed/corbie/identity"
 	"github.com/zummed/corbie/instance"
@@ -46,6 +49,7 @@ type world struct {
 	t          *testing.T
 	controller *controller.Controller
 	mem        *store.Memory
+	me         *identity.Identity // the client's identity
 	ahead      atomic.Int64 // how far the clock is ahead of the computer's
 }
 
@@ -56,7 +60,7 @@ func newWorld(t *testing.T) *world {
 	w.mem = mem
 	ctl, err1 := identity.New("controller", identity.Controller)
 	run, err2 := identity.New("runner", identity.Runner)
-	cli, err3 := identity.New("client", identity.Client)
+	me, err3 := identity.New("client", identity.Client)
 	for _, err := range []error{err1, err2, err3} {
 		if err != nil {
 			t.Fatal(err)
@@ -71,7 +75,7 @@ func newWorld(t *testing.T) *world {
 		t.Fatal(err)
 	}
 	ceiling := permission.Layer{Allow: []string{"all"}}
-	for _, trust := range []identity.Trust{{Card: run.Card}, {Card: cli.Card, Ceiling: ceiling}} {
+	for _, trust := range []identity.Trust{{Card: run.Card}, {Card: me.Card, Ceiling: ceiling}} {
 		if err := identity.WriteTrust(ctx, ctlStore, ctl, trust); err != nil {
 			t.Fatal(err)
 		}
@@ -81,7 +85,8 @@ func newWorld(t *testing.T) *world {
 	w.controller = c
 	r := runner.New(run, runner.Served{Controller: ctl.Card, Ceiling: ceiling, Store: as(store.Runner, run.Name)})
 	r.Now, r.Command = w.now, []string{os.Args[0], runner.JobArg}
-	w.Client = client.New(cli, ctl.Card, as(store.Client, cli.Name))
+	w.me = me
+	w.Client = client.New(me, ctl.Card, as(store.Client, me.Name))
 	w.Client.Now = w.now
 	inbox, stopInbox := ctlStore.Notice(store.Inbox(ctl.Name))
 	jobs, stopJobs := ctlStore.Notice(store.Inbox(run.Name))
@@ -139,6 +144,46 @@ func (w *world) value(name, value string) {
 	if err := secret.SetValue(context.Background(), w.controller.Store, w.controller.ID, project, name, value); err != nil {
 		w.t.Fatal(err)
 	}
+}
+
+// corbie runs a command of the program corbie as the world's client, and
+// gives what it printed. The CLI opens a store by its address, so the store
+// in memory is copied to a directory first, as it stands.
+func (w *world) corbie(args ...string) string {
+	w.t.Helper()
+	ctx := context.Background()
+	dir := w.t.TempDir()
+	to, err := store.Open(filepath.Join(dir, "store"))
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	from := w.mem.As(store.Party{Kind: store.Owner})
+	listed, err := from.List(ctx, "")
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	for _, l := range listed {
+		value, _, err := from.Read(ctx, l.Name)
+		if err == nil {
+			_, err = to.Write(ctx, l.Name, value, store.Overwrite)
+		}
+		if err != nil {
+			w.t.Fatal(err)
+		}
+	}
+	cfg := identity.Config{Dir: filepath.Join(dir, "config")}
+	err = w.me.Save(filepath.Join(cfg.Dir, "client", "identity"))
+	if err == nil {
+		err = cfg.SetTrust(identity.Client, identity.Trust{Card: w.controller.ID.Card, Store: filepath.Join(dir, "store")})
+	}
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	var out, said bytes.Buffer
+	if status := cli.Run(ctx, append(args, "--config", cfg.Dir), strings.NewReader(""), &out, &said); status != 0 {
+		w.t.Fatalf("corbie %s ended %d:\n%s%s", strings.Join(args, " "), status, out.String(), said.String())
+	}
+	return out.String()
 }
 
 // set moves the clock to a time.

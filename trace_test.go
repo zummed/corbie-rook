@@ -9,13 +9,16 @@ import (
 	"cmp"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
 
+	rook "github.com/zummed/corbie-rook"
 	"github.com/zummed/corbie/client"
 	"github.com/zummed/corbie/instance"
 	llmstandin "github.com/zummed/corbie/plugin/llm/standin"
@@ -281,7 +284,8 @@ func TestTraceMessageToToolsAndApproval(t *testing.T) {
 	for _, run := range stubs(t, w, "ask-on") {
 		posted = append(posted, w.sentFrom(run.ID, instance.AskCall, location(".rook/bridges/telegram/ask"))...)
 	}
-	if ask := lastOf(t, "the bridge's ask", posted); w.show(ask).Machine != "telegram-ask" {
+	ask := lastOf(t, "the bridge's ask", posted)
+	if w.show(ask).Machine != "telegram-ask" {
 		t.Errorf("the question's call went to %+v", w.show(ask))
 	}
 	var answer any
@@ -292,6 +296,67 @@ func TestTraceMessageToToolsAndApproval(t *testing.T) {
 	}
 	if m, _ := answer.(map[string]any); m["person"] != "alice" || m["counts"] != true {
 		t.Errorf("the question's record says it was answered by %v", answer)
+	}
+	// 7. the record lines rook-design shows are what corbie run show --record
+	// prints for these runs.
+	recordsAsThePageShows(t, w, map[string]string{
+		"chat": chat, "conversation": conversation, "agent": agent,
+		"approval": approval, "question": asked, "ask": ask,
+	})
+}
+
+// recordsAsThePageShows checks each record rook-design shows under Following
+// a message: the page's lines for corbie run show <name> --record are printed,
+// in that order, for the run of that name. A line is compared without its
+// time and run, with each run's ID written as <name>, and the project at
+// /my-bot.
+func recordsAsThePageShows(t *testing.T, w *world, runs map[string]string) {
+	t.Helper()
+	var page string
+	for _, p := range rook.Pages() {
+		if p.Name == "rook-design" {
+			page = p.Text
+		}
+	}
+	shown := map[string][]string{}
+	name := ""
+	for _, line := range strings.Split(page, "\n") {
+		if command, ok := strings.CutPrefix(line, "    corbie run show <"); ok && strings.HasSuffix(command, "> --record") {
+			name = strings.TrimSuffix(command, "> --record")
+			shown[name] = nil
+		} else if text, ok := strings.CutPrefix(line, "      "); ok && name != "" {
+			shown[name] = append(shown[name], text)
+		} else {
+			name = ""
+		}
+	}
+	if len(shown) < 4 {
+		t.Fatalf("rook-design shows the records %v", slices.Sorted(maps.Keys(shown)))
+	}
+	prefix := regexp.MustCompile(`^\d\d:\d\d:\d\d \S+  `)
+	for name, want := range shown {
+		id, ok := runs[name]
+		if !ok {
+			t.Errorf("rook-design shows the record of <%s>, which the test does not follow", name)
+			continue
+		}
+		var printed []string
+		for _, line := range strings.Split(w.corbie("run", "show", id, "--record"), "\n") {
+			line = prefix.ReplaceAllString(line, "")
+			for n, id := range runs {
+				line = strings.ReplaceAll(line, id, "<"+n+">")
+			}
+			printed = append(printed, strings.ReplaceAll(line, project+"/", "/my-bot/"))
+		}
+		rest := printed
+		for _, line := range want {
+			i := slices.Index(rest, line)
+			if i < 0 {
+				t.Errorf("corbie run show <%s> --record does not print, where rook-design shows it,\n%s\nIt prints:\n%s", name, line, strings.Join(printed, "\n"))
+				break
+			}
+			rest = rest[i+1:]
+		}
 	}
 }
 

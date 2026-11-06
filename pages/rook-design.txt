@@ -58,7 +58,7 @@ Record lines are shown without their time and run, and a name in angle
 brackets, such as `<chat>`, stands for a run's ID.
 
     corbie run show <chat> --record
-      step 2  <- done from who {"agent":"helper","groups":[],"person":"alice","rule":{"for":["alice"],"name":"helper"}}
+      step 2  <- done from who {"agent":"helper","groups":["team"],"person":"alice","rule":{"for":["alice"],"name":"helper"}}
       step 2  -> send message to /my-bot/.rook/blocks/conversation#telegram:1:helper · started <conversation>
     corbie run show <conversation> --record
       step 3  -> job answer: a call to /my-bot/agents/helper, <agent>
