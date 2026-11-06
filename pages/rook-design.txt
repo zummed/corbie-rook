@@ -74,7 +74,7 @@ every location of the project and from the client that submitted it. Every
 other tree and client is refused. A sender needs `send:` for the location in
 its `allow:`.
 
-  .rook/bridges/<bridge>/listen.yaml   send:.rook/blocks/chat, send:.rook/blocks/ask
+  .rook/bridges/<bridge>/listen.yaml   send:.rook/blocks/chat, and send:.rook/blocks/ask on Telegram and Slack
   .rook/blocks/chat.yaml               send:.rook/blocks/conversation, and send:attend in its child run route
   .rook/blocks/conversation.yaml       send:agents/** in its child run message
   .rook/blocks/who.yaml, tell.yaml     send:lookup

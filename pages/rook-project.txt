@@ -233,7 +233,7 @@ was invited to.
 Reference
 ---------
 
-  corbie rook manual rook-design     the blocks, what each takes and gives, and who may do what
+  corbie rook manual rook-design     the runs that answer a message, what each block takes and gives, and who may do what
   corbie rook manual rook-starter    the files this version starts a project with
   corbie manual a-directory          how corbie run submit brings runs into line with files
   corbie manual schedules            a machine that runs at a time

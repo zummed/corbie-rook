@@ -75,3 +75,43 @@ func TestThePageShowsWhatInitPrints(t *testing.T) {
 		t.Fatalf("init ended %d and printed\n%s\nand the page shows\n%s", status, out, want)
 	}
 }
+
+// init prints the secrets and the values each chosen bridge needs, set at the
+// project's tree.
+func TestInitPrintsTheSecretsAndValuesOfItsBridges(t *testing.T) {
+	t.Chdir(t.TempDir())
+	out, status := run(t, "", "init", "my-bot", "--bridges", "gitlab,jira")
+	if status != 0 {
+		t.Fatalf("init ended %d:\n%s", status, out)
+	}
+	for _, want := range []string{
+		"  corbie controller secret set GITLAB_TOKEN --at /my-bot\n",
+		"  corbie controller value set GITLAB_SITE <host> --at /my-bot\n",
+		"  corbie controller secret set JIRA_TOKEN --at /my-bot\n",
+		"  corbie controller value set JIRA_SITE <host> --at /my-bot\n",
+		"  corbie controller value set JIRA_EMAIL <email> --at /my-bot\n",
+		"  cd my-bot && corbie run submit .\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("init does not print %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "--bridges <names>") {
+		t.Errorf("init with bridges prints the hint to choose them:\n%s", out)
+	}
+}
+
+// init with no bridges sets no secret, and says how to choose bridges.
+func TestInitWithNoBridgesSaysHowToChooseThem(t *testing.T) {
+	t.Chdir(t.TempDir())
+	out, status := run(t, "", "init", "my-bot")
+	if status != 0 {
+		t.Fatalf("init ended %d:\n%s", status, out)
+	}
+	if !strings.Contains(out, "  corbie rook init my-bot --bridges <names>\n") {
+		t.Errorf("init does not say how to choose bridges:\n%s", out)
+	}
+	if strings.Contains(out, "secret set") || strings.Contains(out, "value set") {
+		t.Errorf("init with no bridges prints a secret or value:\n%s", out)
+	}
+}
