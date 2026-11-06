@@ -1,11 +1,12 @@
-# Downloads the files sent with a Slack message, each at most `most` bytes.
+# Downloads the files sent with a Slack message, each at most 32 MiB. A larger
+# file is given without its contents.
 flow: slack-attachments
-input: { attachments: list, most: number }
+input: { attachments: list }
 stages:
   download:
     job:
       script: ./slack.js
-      input: { do: attachments, attachments: "${input.attachments}", most: "${input.most}" }
+      input: { do: attachments, attachments: "${input.attachments}", most: 33554432 }
       allow: [net:files.slack.com, "secret:SLACK_TOKEN@net:files.slack.com"]
       timeout: 5m
 output: ${stages.download.output}

@@ -1,8 +1,9 @@
 # Says a text to a person, wherever lookup.yaml says they are reached.
 flow: tell
 input: { person: string, text: string }
+allow: [send:lookup]
 stages:
   reach:
-    job: { machine: lookup.yaml, input: { do: reach, names: ["${input.person}"] } }
+    job: { call: { at: lookup }, input: { do: reach, names: ["${input.person}"] } }
   say:
     job: { machine: ./say.yaml, input: { address: "${stages.reach.output[0]}", text: "${input.text}" } }

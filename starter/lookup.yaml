@@ -1,5 +1,6 @@
-# The People slot: who a bridge's id belongs to, and how to reach someone. Change
-# this job to take people from elsewhere; nothing else reads people.yaml.
+# The People slot: who a bridge's id belongs to, and how to reach someone. Rook
+# calls it at /<project>/lookup. Change this job to take people from elsewhere;
+# nothing else reads people.yaml.
 flow: lookup
 input: { do: string, bridge: "string?", id: "string?", names: "list?" }
 stages:

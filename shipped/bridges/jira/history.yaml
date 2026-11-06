@@ -1,13 +1,13 @@
 # What was said before a comment on a Jira issue: `to` is its key, such as OPS-12,
 # and `at` the comment.
 flow: jira-history
-input: { to: string, at: "any?", site: string, email: string }
+input: { to: string, at: "any?" }
 stages:
   read:
     job:
       script: ./jira.js
       files: [./api.js, .rook/blocks/thread.js]
-      input: { do: history, to: "${input.to}", at: "${input.at}", site: "${input.site}", email: "${input.email}" }
-      allow: ["net:${input.site}", "secret:JIRA_TOKEN@net:${input.site}"]
+      input: { do: history, to: "${input.to}", at: "${input.at}", site: "${values.JIRA_SITE}", email: "${values.JIRA_EMAIL}" }
+      allow: ["net:${values.JIRA_SITE}", "secret:JIRA_TOKEN@net:${values.JIRA_SITE}"]
       timeout: 20s
 output: ${stages.read.output}

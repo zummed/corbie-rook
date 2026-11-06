@@ -5,10 +5,11 @@
 flow: form
 title: "${input.text.split('\\n')[0]}"
 input: { address: map, asker: string, text: string, fields: list }
+allow: [send:.rook/blocks/ask]
 stages:
   question:
     when: "${input.address.bridge === 'slack'}"
     job:
-      machine: ./ask.yaml
+      call: { at: .rook/blocks/ask }
       input: { people: ["${input.asker}"], in: "${input.address.id}", text: "${input.text}", choices: ["send", "cancel"], fields: "${input.fields}", within: 1h }
 output: "${stages.question.skipped ? { choice: 'no', note: 'Forms are shown only on Slack. Ask in your reply instead.' } : stages.question.output}"

@@ -1,0 +1,73 @@
+# One thread's conversation with one agent: chat.yaml sends each message to
+# answer here, keyed <bridge>:<chat>:<agent>, so an agent never holds what
+# another agent in the same thread did. Its messages are answered one at a time,
+# each by a call of the agent at agents/<agent>, given the conversation so far,
+# the message's address, the files earlier in the thread, the last five messages
+# of the conversation as `request`, and with no conversation yet, what the thread
+# already holds. The message's own files are downloaded only to answer it, and
+# an earlier one only when the agent looks at it. A status shows while the agent
+# works, and an empty reply says nothing. A question the agent fails on is told
+# so and starts the conversation again, so one the agent cannot take does not
+# stop the next. A conversation quiet for a day ends, and its next message starts
+# a new one with the agent as it is then.
+statechart: conversation
+lifetime: keyed
+title: >-
+  ${input.agent} in ${input.message.bridge === 'gitlab' ? input.message.chat.slice(input.message.chat.lastIndexOf('#')) :
+  input.message.bridge === 'jira' ? input.message.chat : input.message.place}: ${String(input.message.text || (input.message.attachments || []).map((a) => a.name).join(', ')).split('\n')[0]}
+initial: waiting
+states:
+  waiting:
+    timers: { quiet: 1d }
+    on: { message: answering, quiet: over }
+  answering:
+    defer: [message]
+    job:
+      input:
+        message: "${event.data.message}"
+        asker: "${event.data.asker}"
+        agent: "${event.data.agent}"
+        address: "${event.data.address}"
+        history: "${event.data.history}"
+        conversation: "${(states.answering.output || {}).conversation}"
+        said: "${[...((states.answering.output || {}).said || []), event.data.asker + ': ' + (event.data.message.text || (event.data.message.attachments || []).map((a) => a.name).join(', '))].slice(-5)}"
+      machine:
+        flow: message
+        title: "${input.message.text || (input.message.attachments || []).map((a) => a.name).join(', ')}"
+        input: { message: map, asker: string, agent: string, address: map, history: "any?", conversation: "any?", said: list }
+        allow: ["send:agents/**"]
+        stages:
+          busy:
+            job: { machine: ./status.yaml, input: { address: "${input.address}", text: Working on it. } }
+          format:
+            job: { script: ./format.js, input: { bridge: "${input.message.bridge}" } }
+          attachments:
+            job: { machine: ./attachments.yaml, input: { address: "${input.address}", attachments: "${input.message.attachments}" } }
+          answer:
+            job:
+              call: { at: "agents/${input.agent}" }
+              input:
+                said: "${input.message.text || ''}"
+                asker: "${input.asker}"
+                request: "${input.said.join('\\n')}"
+                home: "${run.context}"
+                address: "${input.address}"
+                history: "${input.conversation ? null : (input.history || {}).text}"
+                attachments: "${stages.attachments.output}"
+                earlier: "${((input.history || {}).attachments || []).filter((e) => !(input.message.attachments || []).some((o) => o.id === e.id))}"
+                conversation: "${input.conversation}"
+                format: "${stages.format.output}"
+          say:
+            when: "${(stages.answer.output || {}).reply}"
+            job: { machine: ./say.yaml, input: { address: "${input.address}", text: "${stages.answer.output.reply}" } }
+          idle:
+            when: "${!stages.answer.failed && !(stages.answer.output || {}).reply}"
+            job: { machine: ./status.yaml, input: { address: "${input.address}", text: "" } }
+          sorry:
+            when: "${stages.answer.failed}"
+            job: { machine: ./say.yaml, input: { address: "${input.address}", text: That could not be answered. Ask again in a while. } }
+        output:
+          conversation: "${stages.answer.failed ? null : (stages.answer.output || {}).conversation}"
+          said: "${input.said}"
+    on: { done: waiting, failed: waiting }
+  over: { end: done }

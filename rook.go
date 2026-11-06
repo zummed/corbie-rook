@@ -111,7 +111,7 @@ func Bridges() []string {
 // Named are the project's files that init writes whenever one is not there:
 // those a machine in .rook reads by name, and those that point a model at
 // .rook/AGENTS.md.
-var Named = []string{"rules.yaml", "lookup.yaml", "attend.yaml", "answer.yaml", "AGENTS.md", "CLAUDE.md", ".mcp.json"}
+var Named = []string{"rules.yaml", "lookup.yaml", "AGENTS.md", "CLAUDE.md", ".mcp.json"}
 
 // Init makes dir a project, or brings one up to date. It rewrites .rook, with
 // the page rook as .rook/AGENTS.md. It writes the starting files if dir has no

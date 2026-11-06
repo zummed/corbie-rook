@@ -20,3 +20,5 @@ require (
 	golang.org/x/term v0.46.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 )
+
+replace github.com/zummed/corbie => /data/projects/corbie/corbie/.claude/worktrees/locations

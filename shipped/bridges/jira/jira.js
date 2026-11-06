@@ -60,7 +60,7 @@ if (input.do === "hear") {
     else if (input.overhear) heard.push(Object.assign(message, { unaddressed: true }))
   }
   const message = (issue, from, text, at, files) => {
-    const m = { bridge: "jira", text: text, chat: issue, at: at, from: from, place: issue.slice(0, issue.lastIndexOf("-")), settings: { site: input.site, email: input.email } }
+    const m = { bridge: "jira", text: text, chat: issue, at: at, from: from, place: issue.slice(0, issue.lastIndexOf("-")) }
     if (files.length) m.attachments = files
     return m
   }

@@ -1,9 +1,0 @@
-# Who may approve a part's calls, and where they are asked, as rules.yaml says
-# under approve: `people`, and `in`, a Slack channel, or nothing for each person
-# on their own bridge.
-flow: approvers
-input: { part: string }
-stages:
-  rule:
-    job: { script: ./approvers.js, files: [rules.yaml], input: { part: "${input.part}" } }
-output: ${stages.rule.output}

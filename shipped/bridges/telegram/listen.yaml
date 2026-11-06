@@ -1,8 +1,10 @@
-# Telegram: asks for each new update. Each message goes to its chat's run, which is started if the chat has none. Each
-# tap on a button goes to the run that waits for it.
-statechart: telegram
+# Telegram's listener, which bridges/telegram.yaml includes: it asks for each
+# new update. Each message goes to its chat's run at .rook/blocks/chat, keyed
+# telegram:<chat>, which starts when the chat has none. Each tap on a button goes
+# to the question's run at .rook/blocks/ask. A button holds the run's ID without
+# its client's name, since Telegram keeps 64 bytes, and this adds the name back.
 title: Telegram listener
-input: { dir: string }
+allow: [send:.rook/blocks/chat, send:.rook/blocks/ask]
 initial: hearing
 states:
   hearing:
@@ -12,8 +14,8 @@ states:
       allow: [net:api.telegram.org, "secret:TELEGRAM_TOKEN@net:api.telegram.org"]
       timeout: 2m
     on:
-      message: { send: { to: { machine: .rook/blocks/chat.yaml, key: "telegram:${run.id.slice(-10)}:${event.data.chat}" }, event: message, data: { event: "${event.data}", dir: "${input.dir}" } } }
-      answer: { send: { to: { key: "question:${event.data.question}" }, event: answer, data: "${event.data}" } }
+      message: { send: { to: { at: .rook/blocks/chat, key: "telegram:${event.data.chat}" }, event: message, data: "${event.data}" } }
+      answer: { send: { to: { at: .rook/blocks/ask, run: "${run.id.slice(0, run.id.indexOf('/') + 1) + event.data.question}" }, event: answer, data: "${event.data}" } }
       done: hearing
       failed: resting
   resting:

@@ -180,7 +180,7 @@ func gitlabProject(t *testing.T, w *world, gl *gitlab) (string, *llmstandin.Serv
 	w.secret("GITLAB_TOKEN", "gl-token")
 	w.secret("TEST_KEY", "sk-test")
 	dir := pointed(t, "gitlab", gl.Server)
-	setSite(t, dir, "bridges/gitlab.yaml", "gitlab.example.com", strings.TrimPrefix(gl.URL, "http://"))
+	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
 	model := &llmstandin.Server{Answer: func(llmstandin.Call) llmstandin.Reply { return llmstandin.Reply{Text: "seen"} }}
 	web := httptest.NewServer(model)
 	t.Cleanup(web.Close)
@@ -283,7 +283,7 @@ func jiraAnswering(t *testing.T, j *jira) (*world, *llmstandin.Server, func()) {
 	w.secret("JIRA_TOKEN", "jira-token")
 	w.secret("TEST_KEY", "sk-test")
 	dir := pointed(t, "jira", j.Server)
-	setSite(t, dir, "bridges/jira.yaml", "example.atlassian.net", strings.TrimPrefix(j.URL, "http://"))
+	jiraAt(w, j)
 	model := &llmstandin.Server{Answer: func(llmstandin.Call) llmstandin.Reply { return llmstandin.Reply{Text: "seen"} }}
 	web := httptest.NewServer(model)
 	t.Cleanup(web.Close)
@@ -399,7 +399,7 @@ func TestSlackOverheardFileIsNamedToAttend(t *testing.T) {
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
 	echoing(t, dir)
-	setSite(t, dir, "bridges/slack.yaml", `input: { dir: "${run.context}" }`, `input: { dir: "${run.context}", overhear: true }`)
+	setSite(t, dir, "bridges/slack.yaml", "      restart: { when: always }\n", "      restart: { when: always }\n      input: { overhear: true }\n")
 	setSite(t, dir, "rules.yaml", "  dm: { readers: [asker] }\n", "  dm: { readers: [asker] }\n  \"#help\": { readers: [asker] }\n")
 	if err := os.WriteFile(filepath.Join(dir, "attend.yaml"), []byte(dedent(attendStub)), 0o644); err != nil {
 		t.Fatal(err)
@@ -700,6 +700,7 @@ func TestSlackSendsAFileToAPerson(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.sync(dir)
+	w.start("on/report.yaml", nil)
 	w.until("the file shared", func() bool {
 		s.mu.Lock()
 		defer s.mu.Unlock()

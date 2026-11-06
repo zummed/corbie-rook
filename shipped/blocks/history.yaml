@@ -1,18 +1,13 @@
 # What was said before a message in the thread or on the issue an address names,
 # for a bridge whose service keeps it: { text, attachments } as thread.js gives
-# it, or nothing. It is only context, so
-# a failure gives nothing and the message is still answered. Telegram keeps nothing
-# a bot can read.
+# it, or nothing. It is only context, so a failure gives nothing and the message
+# is still answered. Telegram keeps nothing a bot can read. It calls the bridge's
+# history at .rook/bridges/<bridge>/history.
 flow: history
 input: { address: map, wanted: boolean }
+allow: ["send:.rook/bridges/*/history"]
 stages:
-  slack:
-    when: "${input.wanted && input.address.bridge === 'slack'}"
-    job: { machine: .rook/bridges/slack/history.yaml, input: { to: "${input.address.id}", at: "${input.address.at}" } }
-  gitlab:
-    when: "${input.wanted && input.address.bridge === 'gitlab'}"
-    job: { machine: .rook/bridges/gitlab/history.yaml, input: { to: "${input.address.id}", at: "${input.address.at}", site: "${input.address.settings.site}" } }
-  jira:
-    when: "${input.wanted && input.address.bridge === 'jira'}"
-    job: { machine: .rook/bridges/jira/history.yaml, input: { to: "${input.address.id}", at: "${input.address.at}", site: "${input.address.settings.site}", email: "${input.address.settings.email}" } }
-output: "${stages.slack.failed || stages.gitlab.failed || stages.jira.failed ? null : !stages.slack.skipped ? stages.slack.output : !stages.gitlab.skipped ? stages.gitlab.output : !stages.jira.skipped ? stages.jira.output : null}"
+  read:
+    when: "${input.wanted && ['slack', 'gitlab', 'jira'].includes(input.address.bridge)}"
+    job: { call: { at: ".rook/bridges/${input.address.bridge}/history" }, input: { to: "${input.address.id}", at: "${input.address.at}" } }
+output: "${stages.read.failed || stages.read.skipped ? null : stages.read.output}"

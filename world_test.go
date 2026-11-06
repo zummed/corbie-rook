@@ -3,7 +3,6 @@ package rook_test
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -13,6 +12,8 @@ import (
 	"github.com/zummed/corbie/client"
 	"github.com/zummed/corbie/controller"
 	"github.com/zummed/corbie/identity"
+	"github.com/zummed/corbie/instance"
+	"github.com/zummed/corbie/machine"
 	"github.com/zummed/corbie/permission"
 	"github.com/zummed/corbie/role"
 	"github.com/zummed/corbie/runner"
@@ -44,6 +45,7 @@ type world struct {
 	*client.Client
 	t          *testing.T
 	controller *controller.Controller
+	mem        *store.Memory
 	ahead      atomic.Int64 // how far the clock is ahead of the computer's
 }
 
@@ -51,6 +53,7 @@ func newWorld(t *testing.T) *world {
 	t.Helper()
 	w := &world{t: t}
 	mem := store.NewMemory()
+	w.mem = mem
 	ctl, err1 := identity.New("controller", identity.Controller)
 	run, err2 := identity.New("runner", identity.Runner)
 	cli, err3 := identity.New("client", identity.Client)
@@ -97,10 +100,43 @@ func newWorld(t *testing.T) *world {
 
 func (w *world) now() time.Time { return time.Now().Add(time.Duration(w.ahead.Load())) }
 
-// secret gives the controller a secret.
-func (w *world) secret(name, value string) {
+// newClient enrols another client with a ceiling that allows everything, as
+// a gateway's client would be: it owns no tree of the project's.
+func (w *world) newClient(name string) *client.Client {
 	w.t.Helper()
-	if err := secret.Set(context.Background(), w.controller.Store, w.controller.ID, name, value); err != nil {
+	id, err := identity.New(name, identity.Client)
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	ctl := w.controller.ID
+	trust := identity.Trust{Card: id.Card, Ceiling: permission.Layer{Allow: []string{"all"}}}
+	if err := identity.WriteTrust(context.Background(), w.controller.Store, ctl, trust); err != nil {
+		w.t.Fatal(err)
+	}
+	c := client.New(id, ctl.Card, w.mem.As(store.Party{Kind: store.Client, Name: id.Name, Controller: ctl.Name}))
+	c.Now = w.now
+	return c
+}
+
+// project is the prefix a test's project is submitted at: its directory is
+// named project, and a submit's prefix is by default / and that name.
+const project = "/project"
+
+// secret sets a secret at the project, as rook-project says to.
+func (w *world) secret(name, value string) { w.secretAt(project, name, value) }
+
+// secretAt sets a secret at a location.
+func (w *world) secretAt(at, name, value string) {
+	w.t.Helper()
+	if err := secret.Set(context.Background(), w.controller.Store, w.controller.ID, at, name, value); err != nil {
+		w.t.Fatal(err)
+	}
+}
+
+// value sets a value at the project.
+func (w *world) value(name, value string) {
+	w.t.Helper()
+	if err := secret.SetValue(context.Background(), w.controller.Store, w.controller.ID, project, name, value); err != nil {
 		w.t.Fatal(err)
 	}
 }
@@ -108,34 +144,109 @@ func (w *world) secret(name, value string) {
 // set moves the clock to a time.
 func (w *world) set(at time.Time) { w.ahead.Store(int64(time.Until(at))) }
 
-// sync submits a project's bridges and the machines the test put in on/.
+// sync submits a project's directory as the tree at /project, as corbie run
+// submit . does in it. It fails the test on a file with a problem.
 func (w *world) sync(dir string) {
 	w.t.Helper()
-	var dirs []string
-	for _, name := range []string{"bridges", "on"} {
-		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
-			dirs = append(dirs, name)
+	if r := w.syncAt(w.Client, dir, project); !r.Taken {
+		w.t.Fatalf("the submit was refused: %s", r.Refused)
+	}
+}
+
+// syncAt submits a directory as a tree at a prefix, by a client, and stays
+// until each run it cancelled has ended and each run it started is taken.
+func (w *world) syncAt(c *client.Client, dir, at string) *instance.Receipt {
+	w.t.Helper()
+	tree, err := client.ReadTree(dir, at)
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	for _, m := range tree.Machines {
+		if m.Problem != nil {
+			w.t.Fatalf("%s: %v", m.Path, m.Problem)
 		}
 	}
-	s := &client.Submit{Client: w.Client, Context: dir, Dirs: dirs, Interval: interval, Say: func(format string, args ...any) {
-		w.t.Logf("submit: "+format, args...)
-	}}
-	if err := s.Run(context.Background()); err != nil {
+	ctx := context.Background()
+	message, err := c.Submit(ctx, tree, 0)
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	receipt, err := c.WaitReceipt(ctx, message, 0, interval)
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	if !receipt.Taken {
+		return receipt
+	}
+	for _, id := range receipt.Tree.Cancelled {
+		if _, err := c.Wait(ctx, id, interval); err != nil {
+			w.t.Fatal(err)
+		}
+	}
+	for _, row := range receipt.Tree.Locations {
+		if row.Run != "" {
+			if err := c.Taken(ctx, row.Run, interval); err != nil {
+				w.t.Fatal(err)
+			}
+		}
+	}
+	return receipt
+}
+
+// location gives the location of a file of the project.
+func location(path string) string { return project + "/" + strings.TrimSuffix(path, ".yaml") }
+
+// at gives every run at the location of a file of the project, running or
+// ended, roots and children alike.
+func (w *world) at(path string) []*client.Run {
+	w.t.Helper()
+	runs, err := w.List(context.Background(), client.Filter{Location: location(path), Finished: true})
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	return runs
+}
+
+// start starts a run of a transient location of the project, and gives its
+// ID.
+func (w *world) start(path string, input any) string {
+	w.t.Helper()
+	id, err := w.Start(context.Background(), client.Start{At: location(path), Input: input})
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	return id
+}
+
+// sendTo sends an event to the run of a key at a keyed location of the
+// project, which starts one when none is running.
+func (w *world) sendTo(path, key, event string, data any) {
+	w.t.Helper()
+	if _, err := w.Send(context.Background(), machine.Address{At: location(path), Key: &key}, event, data, 0); err != nil {
 		w.t.Fatal(err)
 	}
 }
 
-// roots gives the root runs that carry every one of the labels.
-func (w *world) roots(labels map[string]string) []*client.Run {
+// record gives every entry of a run's record so far, its children's included.
+func (w *world) record(id string) []client.Entry {
 	w.t.Helper()
-	runs, err := w.List(context.Background(), client.Filter{Labels: labels, Finished: true})
-	if err != nil {
+	var out []client.Entry
+	if _, err := w.Record(context.Background(), id, func(e client.Entry) { out = append(out, e) }); err != nil {
 		w.t.Fatal(err)
 	}
-	var out []*client.Run
-	for _, run := range runs {
-		if run.Parent == "" {
-			out = append(out, run)
+	return out
+}
+
+// asked gives what the steps of a run and its children asked for, of one
+// kind.
+func (w *world) asked(id, kind string) []instance.Ask {
+	w.t.Helper()
+	var out []instance.Ask
+	for _, e := range w.record(id) {
+		for _, a := range e.Asks {
+			if a.Kind == kind {
+				out = append(out, a)
+			}
 		}
 	}
 	return out
@@ -164,14 +275,15 @@ func (w *world) until(what string, cond func() bool) {
 	}
 }
 
-// kept waits for the running run a sync keeps of a machine, and gives its ID.
+// kept waits for the running root at the location of a file of the project,
+// and gives its ID.
 func (w *world) kept(path string) string {
 	w.t.Helper()
 	var id string
 	w.until("the run of "+path, func() bool {
 		id = ""
-		for _, run := range w.roots(nil) {
-			if run.Key == client.KeyFile+path && run.Status == "running" {
+		for _, run := range w.at(path) {
+			if run.Parent == "" && run.Status == "running" {
 				id = run.ID
 			}
 		}
@@ -180,26 +292,14 @@ func (w *world) kept(path string) string {
 	return id
 }
 
-// started waits for the run a sync started of a machine, running or ended, and
-// gives its ID.
-func (w *world) started(path string) string {
-	w.t.Helper()
-	var id string
-	w.until("the run of "+path, func() bool {
-		for _, run := range w.roots(nil) {
-			if run.Key == client.KeyFile+path {
-				id = run.ID
-			}
-		}
-		return id != ""
-	})
-	return id
-}
-
-// send sends a run an event.
+// send sends an event to a run by its ID.
 func (w *world) send(run, event string, data any) {
 	w.t.Helper()
-	if _, err := w.Send(context.Background(), run, event, data, 0); err != nil {
+	to, err := w.Address(context.Background(), run)
+	if err != nil {
+		w.t.Fatal(err)
+	}
+	if _, err := w.Send(context.Background(), to, event, data, 0); err != nil {
 		w.t.Fatal(err)
 	}
 }

@@ -1,13 +1,13 @@
 # Sends a file to a Jira issue, under a name: it is attached, and a comment shows
 # it. `to` is the issue's key, such as OPS-12.
 flow: jira-send
-input: { to: string, name: string, file: blob, site: string, email: string }
+input: { to: string, name: string, file: blob }
 stages:
   send:
     job:
       script: ./jira.js
       files: [./api.js]
-      input: { do: send, to: "${input.to}", name: "${input.name}", file: "${input.file}", site: "${input.site}", email: "${input.email}" }
-      allow: ["net:${input.site}", "secret:JIRA_TOKEN@net:${input.site}"]
+      input: { do: send, to: "${input.to}", name: "${input.name}", file: "${input.file}", site: "${values.JIRA_SITE}", email: "${values.JIRA_EMAIL}" }
+      allow: ["net:${values.JIRA_SITE}", "secret:JIRA_TOKEN@net:${values.JIRA_SITE}"]
       timeout: 5m
 output: ${stages.send.output}

@@ -49,7 +49,9 @@ func pointed(t *testing.T, bridge string, srv *httptest.Server, hosts ...string)
 			text = strings.ReplaceAll(text, "net:"+host, "net:"+addr)
 			text = strings.ReplaceAll(text, "https://"+host, "http://"+addr)
 		}
-		text = strings.ReplaceAll(text, "@net:${input.site}", "@net.unencrypted:${input.site}")
+		for _, site := range []string{"${values.GITLAB_SITE}", "${values.JIRA_SITE}"} {
+			text = strings.ReplaceAll(text, "@net:"+site, "@net.unencrypted:"+site)
+		}
 		text = strings.ReplaceAll(text, `"https://" + site`, `"http://" + site`)
 		if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
 			t.Fatal(err)
@@ -58,13 +60,20 @@ func pointed(t *testing.T, bridge string, srv *httptest.Server, hosts ...string)
 	for name, text := range map[string]string{
 		"agents/helper.yaml": dedent(helperStub),
 		"people.yaml":        "people:\n  alice: { slack: U1, gitlab: al, jira: acc-1 }\n  bob: { slack: U2, gitlab: bo, jira: acc-2 }\ngroups: {}\n",
-		"rules.yaml":         "places:\n  dm: { readers: [asker] }\n  group/project: { readers: [asker] }\n  OPS: { readers: [asker] }\nagents:\n  - { name: helper, for: [alice] }\napprove: {}\n",
+		"rules.yaml":         "places:\n  dm: { readers: [asker] }\n  group/project: { readers: [asker] }\n  OPS: { readers: [asker] }\nagents:\n  - { name: helper, for: [alice] }\n",
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
 	return dir
+}
+
+// jiraAt sets the values that name a stand-in Jira, and the account its token
+// belongs to.
+func jiraAt(w *world, j *jira) {
+	w.value("JIRA_SITE", strings.TrimPrefix(j.URL, "http://"))
+	w.value("JIRA_EMAIL", "bot@example.com")
 }
 
 func setSite(t *testing.T, dir, file, from, to string) {
@@ -167,12 +176,12 @@ func (tg *telegram) serve(w http.ResponseWriter, r *http.Request) {
 			tg.mu.Lock()
 			tg.heard = max(tg.heard, int(offset))
 			from := max(tg.heard, 1)
-			var out []map[string]any
+			out := []map[string]any{} // Telegram gives an empty list, never null
 			if from <= len(tg.updates) {
 				out = []map[string]any{{"update_id": from, "message": tg.updates[from-1]}}
 			}
 			tg.mu.Unlock()
-			if out != nil || time.Now().After(end) {
+			if len(out) > 0 || time.Now().After(end) {
 				reply(out)
 				return
 			}
@@ -374,7 +383,7 @@ func TestGitLabIssuesAreAnswered(t *testing.T) {
 	w.secret("GITLAB_TOKEN", "gl-token")
 	addr := strings.TrimPrefix(gl.URL, "http://")
 	dir := pointed(t, "gitlab", gl.Server)
-	setSite(t, dir, "bridges/gitlab.yaml", "gitlab.example.com", addr)
+	w.value("GITLAB_SITE", addr)
 	gl.note(1, 2, "al", "@bot this came before the bridge")
 	w.sync(dir)
 	w.kept("bridges/gitlab.yaml")
@@ -400,6 +409,12 @@ func TestGitLabIssuesAreAnswered(t *testing.T) {
 	if !strings.Contains(got, "the build fails") || strings.Contains(got, "@bot the build") || !strings.Contains(got, "only the people") || len(gl.said()) != 2 {
 		t.Fatalf("the bot said %s", got)
 	}
+	// The host is the value GITLAB_SITE, and no message names one.
+	for _, run := range stubs(t, w, "route") {
+		if input := fmt.Sprint(w.show(run.ID).Input); strings.Contains(input, "settings") || strings.Contains(input, addr) {
+			t.Errorf("a message names its host: %s", input)
+		}
+	}
 }
 
 // A comment made while GitLab fails is heard once it answers again.
@@ -408,7 +423,7 @@ func TestGitLabLosesNothingWhenItFails(t *testing.T) {
 	w := newWorld(t)
 	w.secret("GITLAB_TOKEN", "gl-token")
 	dir := pointed(t, "gitlab", gl.Server)
-	setSite(t, dir, "bridges/gitlab.yaml", "gitlab.example.com", strings.TrimPrefix(gl.URL, "http://"))
+	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
 	gl.note(1, 2, "al", "before")
 	w.sync(dir)
 	w.until("the first ask", func() bool { return gl.asked() > 0 })
@@ -437,7 +452,7 @@ func TestGitLabIssueGoneStopsNothing(t *testing.T) {
 	w := newWorld(t)
 	w.secret("GITLAB_TOKEN", "gl-token")
 	dir := pointed(t, "gitlab", gl.Server)
-	setSite(t, dir, "bridges/gitlab.yaml", "gitlab.example.com", strings.TrimPrefix(gl.URL, "http://"))
+	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
 	gl.note(1, 2, "al", "before")
 	w.sync(dir)
 	w.until("the first ask", func() bool { return gl.asked() > 0 })
@@ -597,7 +612,7 @@ func TestJiraIssuesAreAnswered(t *testing.T) {
 	w := newWorld(t)
 	w.secret("JIRA_TOKEN", "jira-token")
 	dir := pointed(t, "jira", j.Server)
-	setSite(t, dir, "bridges/jira.yaml", "example.atlassian.net", strings.TrimPrefix(j.URL, "http://"))
+	jiraAt(w, j)
 	w.sync(dir)
 	w.kept("bridges/jira.yaml")
 	// The first ask marks the time, and the next is the first to read.
@@ -632,7 +647,8 @@ func TestJiraHearsACommentMadeWhileItsIssueWaits(t *testing.T) {
 	w := newWorld(t)
 	w.secret("JIRA_TOKEN", "jira-token")
 	dir := pointed(t, "jira", j.Server)
-	setSite(t, dir, "bridges/jira.yaml", "example.atlassian.net, email", strings.TrimPrefix(j.URL, "http://")+", settle: 2m, email")
+	jiraAt(w, j)
+	setSite(t, dir, "bridges/jira.yaml", "projects: [OPS] }", "projects: [OPS], settle: 2m }")
 	w.sync(dir)
 	next := func() {
 		before := j.asked()
@@ -673,7 +689,7 @@ func TestJiraHearsTwoCommentsAtOneMoment(t *testing.T) {
 	w := newWorld(t)
 	w.secret("JIRA_TOKEN", "jira-token")
 	dir := pointed(t, "jira", j.Server)
-	setSite(t, dir, "bridges/jira.yaml", "example.atlassian.net", strings.TrimPrefix(j.URL, "http://"))
+	jiraAt(w, j)
 	w.sync(dir)
 	next := func() {
 		before := j.asked()
@@ -953,8 +969,28 @@ func TestSlackMessagesAreAnswered(t *testing.T) {
 		"slack-bridge": {"Slack bridge"},
 		"slack-listen": {"Slack listener"},
 		"chat":         {"#help: hello", "dm: in private"},
-		"message":      {"hello", "in private"},
+		"route":        {"hello", "in private"},
+		"message":      {"in private"},
 	})
+}
+
+// Slack sends an envelope again when its receipt is late, and the event in it
+// is answered once.
+func TestSlackResentEventIsAnsweredOnce(t *testing.T) {
+	s := newSlack(t)
+	w := newWorld(t)
+	dir := slackProject(t, w, s)
+	w.sync(dir)
+	w.until("Slack connected", s.connected)
+	event := map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "ts": "3.0", "text": "in private"}
+	s.says("a", event)
+	s.says("b", event)
+	w.until("both envelopes received", func() bool { return s.acked() == 2 })
+	w.until("the answer", func() bool { return len(s.posted()) >= 1 })
+	time.Sleep(20 * interval)
+	if got := s.posted(); len(got) != 1 {
+		t.Fatalf("the bot posted %v", got)
+	}
 }
 
 // A question goes to a person on Slack with a button for each choice. A press by
@@ -963,32 +999,31 @@ func TestSlackQuestionIsAnsweredByAPress(t *testing.T) {
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
-	if err := os.WriteFile(filepath.Join(dir, "on/asker.yaml"), []byte(dedent(`
-		statechart: asker
-		initial: asking
-		states:
-		  asking:
-		    job: { machine: .rook/blocks/question.yaml, key: "question:abc", input: { people: [alice], text: "Well?", choices: ["yes", "no"] } }
-		    on: { done: over }
-		  over: { end: done, output: "${states.asking.output.choice}" }
-	`)), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	write(t, dir, map[string]string{"on/asker.yaml": `
+		flow: asker
+		allow: [send:.rook/blocks/ask]
+		stages:
+		  asking: { job: { call: { at: .rook/blocks/ask }, input: { people: [alice], text: "Well?", choices: ["yes", "no"] } } }
+		output: ${stages.asking.output.choice}
+	`})
 	w.sync(dir)
-	asker := w.kept("on/asker.yaml")
+	asker := w.start("on/asker.yaml", nil)
 	w.until("Slack connected", s.connected)
 	w.until("the question", func() bool { return len(s.posted()) == 1 })
 	post := s.posted()[0]
 	if post["channel"] != "D9" {
 		t.Fatalf("the question went to %v", post)
 	}
+	// A button names the question's run by its ID without its client's name.
+	question := keyed(w, ".rook/blocks/ask.yaml")[""][0].ID
+	value := question[strings.Index(question, "/")+1:] + " no"
 	blocks, _ := json.Marshal(post["blocks"])
-	if !strings.Contains(string(blocks), `"value":"abc no"`) {
+	if !strings.Contains(string(blocks), `"value":"`+value+`"`) {
 		t.Fatalf("the buttons are %s", blocks)
 	}
 	press := func(id, user string) {
 		s.send(map[string]any{"envelope_id": id, "type": "interactive", "payload": map[string]any{
-			"type": "block_actions", "user": map[string]any{"id": user}, "actions": []any{map[string]any{"action_id": "choice-1", "value": "abc no"}},
+			"type": "block_actions", "user": map[string]any{"id": user}, "actions": []any{map[string]any{"action_id": "choice-1", "value": value}},
 			"channel": map[string]any{"id": "D9"}, "message": map[string]any{"ts": "1.1", "text": "Well?"},
 		}})
 	}
@@ -1040,7 +1075,7 @@ func TestGitLabChatTellsTheIssueOnce(t *testing.T) {
 	w := newWorld(t)
 	w.secret("GITLAB_TOKEN", "gl-token")
 	dir := pointed(t, "gitlab", gl.Server)
-	setSite(t, dir, "bridges/gitlab.yaml", "gitlab.example.com", strings.TrimPrefix(gl.URL, "http://"))
+	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
 	echoing(t, dir)
 	gl.note(1, 2, "al", "this came before the bridge")
 	gl.thread = []map[string]any{
@@ -1094,7 +1129,7 @@ func TestChatIsAnsweredWhenTheThreadCannotBeRead(t *testing.T) {
 	w := newWorld(t)
 	w.secret("GITLAB_TOKEN", "gl-token")
 	dir := pointed(t, "gitlab", gl.Server)
-	setSite(t, dir, "bridges/gitlab.yaml", "gitlab.example.com", strings.TrimPrefix(gl.URL, "http://"))
+	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
 	echoing(t, dir)
 	gl.note(1, 2, "al", "this came before the bridge")
 	w.sync(dir)
@@ -1120,7 +1155,7 @@ func TestRestrictedCommentIsNotHeard(t *testing.T) {
 	w := newWorld(t)
 	w.secret("GITLAB_TOKEN", "gl-token")
 	dir := pointed(t, "gitlab", gl.Server)
-	setSite(t, dir, "bridges/gitlab.yaml", "gitlab.example.com", strings.TrimPrefix(gl.URL, "http://"))
+	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
 	gl.note(1, 2, "al", "this came before the bridge")
 	w.sync(dir)
 	w.kept("bridges/gitlab.yaml")
@@ -1148,7 +1183,7 @@ func TestRestrictedJiraCommentIsNotHeard(t *testing.T) {
 	w := newWorld(t)
 	w.secret("JIRA_TOKEN", "jira-token")
 	dir := pointed(t, "jira", j.Server)
-	setSite(t, dir, "bridges/jira.yaml", "example.atlassian.net", strings.TrimPrefix(j.URL, "http://"))
+	jiraAt(w, j)
 	w.sync(dir)
 	w.kept("bridges/jira.yaml")
 	ask := func() {
@@ -1182,7 +1217,7 @@ func TestJiraChatReadsItsIssue(t *testing.T) {
 	w := newWorld(t)
 	w.secret("JIRA_TOKEN", "jira-token")
 	dir := pointed(t, "jira", j.Server)
-	setSite(t, dir, "bridges/jira.yaml", "example.atlassian.net", strings.TrimPrefix(j.URL, "http://"))
+	jiraAt(w, j)
 	echoing(t, dir)
 	w.sync(dir)
 	w.kept("bridges/jira.yaml")
