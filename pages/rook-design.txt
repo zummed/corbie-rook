@@ -247,8 +247,8 @@ the conversation so far.
 - When a download fails, the agent gets each file as the message holds it, with no contents.
 - While an agent works, the conversation shows `Working on it.` under a Slack thread and "typing" on Telegram. A reply clears it on Slack, and so does an answer that says nothing.
 - A conversation waits up to seven days for an approval, and up to an hour for a form.
-- When an answer fails, the conversation says `That could not be answered. Ask again in a while.`, and answers the next message with no conversation so far and with what the thread held before it.
-- When `who.yaml` fails for a message that names the bot, as for an entry of `rules.yaml` with no `for:`, the chat says `That could not be answered. Ask again in a while.`
+- When an answer fails, for any reason, the conversation says `That could not be answered.`, and answers the next message with no conversation so far and with what the thread held before it. Its record shows why.
+- When `who.yaml` fails for a message that names the bot, as for an entry of `rules.yaml` with no `for:`, the chat says `That could not be answered.`, and its record shows why.
 - When someone with no agent names the bot, the chat says `This bot answers only the people it belongs to.`, or `This bot does not answer you here.` to someone `lookup.yaml` knows.
 
   a chat                  where it is and the first line said: #help: …, dm: …, #7 … on GitLab, OPS-1 … on Jira
@@ -487,8 +487,8 @@ they ask.
 - A place that is not listed is read by anyone. A GitLab or Jira project must be listed for an agent that is not `for: [anyone]` to answer there.
 - `readers:` names groups, `anyone` or `asker`. It is written in the file, and not read from a channel's members.
 - `who.yaml` gives `rule`, the entry that chose the agent, so the chat's record shows why.
-- A field that `rules.yaml` does not take, such as `words:` in an agent's entry, fails `who.yaml`, naming the field.
-- When `rules.yaml` names an agent with no file in `agents/`, the person is told so.
+- A field that `rules.yaml` does not take, such as `words:` in an agent's entry, fails `who.yaml`, and the chat's record names the field.
+- When `rules.yaml` names an agent with no file in `agents/`, the call to it fails, and the conversation's record names its location.
 - A part goes in an agent's file only if everyone in that agent's `for` may use it. Nothing checks this, and each mix of parts is its own agent file.
 - The history comes from the thread the answer goes to. A bridge leaves out GitLab's internal notes and Jira's restricted comments, and does not hear them, since an answer on the issue is public.
 

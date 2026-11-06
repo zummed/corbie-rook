@@ -6,10 +6,12 @@
 # of the conversation as `request`, and with no conversation yet, what the thread
 # already holds. The message's own files are downloaded only to answer it, and
 # an earlier one only when the agent looks at it. A status shows while the agent
-# works, and an empty reply says nothing. A question the agent fails on is told
-# so, or that the project has no such agent, and starts the conversation again, so one the agent cannot take does not
-# stop the next. A conversation quiet for a day ends, and its next message starts
-# a new one with the agent as it is then.
+# works, and an empty reply says nothing. A question the agent fails on, for any
+# reason, such as rules.yaml naming an agent with no file, is told it could not
+# be answered, and the message's record shows why. It starts the conversation
+# again, so one the agent cannot take does not stop the next. A conversation
+# quiet for a day ends, and its next message starts a new one with the agent as
+# it is then.
 statechart: conversation
 lifetime: keyed
 input: { message: map, asker: string, agent: string, address: map, history: "any?" }
@@ -66,7 +68,7 @@ states:
             job: { machine: ./status.yaml, input: { address: "${input.address}", text: "" } }
           sorry:
             when: "${stages.answer.failed}"
-            job: { machine: ./say.yaml, input: { address: "${input.address}", text: "${stages.answer.error.includes('nothing is recorded at ') && stages.answer.error.includes('/agents/' + input.agent + ':') ? 'This bot has no agent ' + input.agent + ': rules.yaml names it, and agents/' + input.agent + '.yaml is not in the project.' : 'That could not be answered. Ask again in a while.'}" } }
+            job: { machine: ./say.yaml, input: { address: "${input.address}", text: That could not be answered. } }
         output:
           conversation: "${stages.answer.failed ? null : (stages.answer.output || {}).conversation}"
           said: "${input.said}"

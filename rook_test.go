@@ -415,7 +415,7 @@ func TestChatStartsAfreshAfterAFailedAnswer(t *testing.T) {
 	if want := map[string]any{"one": 1.0, "two": nil, "three": 1.0, "four": 2.0}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("the conversations are %v", got)
 	}
-	if said := sayings(t, w); said["That could not be answered. Ask again in a while."] == nil {
+	if said := sayings(t, w); said["That could not be answered."] == nil {
 		t.Errorf("the failure was not told: %v", said)
 	}
 }

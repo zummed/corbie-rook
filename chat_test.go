@@ -400,14 +400,15 @@ func TestRuleWithoutForTellsSomeone(t *testing.T) {
 	})
 	tg.dm(1, "hello")
 	w.sync(dir)
-	tg.waitFor(w, "1", "That could not be answered. Ask again in a while.")
+	tg.waitFor(w, "1", "That could not be answered.")
 	if f := failures(w); !slices.ContainsFunc(f, func(s string) bool { return strings.Contains(s, "rules.yaml: the agent helper has no for: list") }) {
 		t.Errorf("no failure names the entry: %q", f)
 	}
 }
 
-// rules.yaml names an agent that has no file. The message fails, and the
-// person is told the bot has no such agent.
+// rules.yaml names an agent that has no file. The person is told only that
+// the message could not be answered, with no name of the project's files, and
+// the record names the agent's location.
 func TestRuleNamesAMissingAgent(t *testing.T) {
 	tg := newTelegram(t)
 	w := newWorld(t)
@@ -421,7 +422,13 @@ func TestRuleNamesAMissingAgent(t *testing.T) {
 	})
 	tg.dm(1, "hello")
 	w.sync(dir)
-	tg.waitFor(w, "1", "This bot has no agent ghost: rules.yaml names it, and agents/ghost.yaml is not in the project.")
+	tg.waitFor(w, "1", "That could not be answered.")
+	if said := strings.Join(tg.texts("1"), "\n"); strings.Contains(said, "ghost") || strings.Contains(said, "yaml") {
+		t.Errorf("the person was told %q", said)
+	}
+	if f := failures(w); !slices.ContainsFunc(f, func(s string) bool { return strings.Contains(s, "agents/ghost") }) {
+		t.Errorf("no failure names the agent: %q", f)
+	}
 }
 
 // A field rules.yaml does not take, as words: in an agent's entry, fails the
@@ -442,7 +449,7 @@ func TestRulesUnknownFieldIsNamed(t *testing.T) {
 			})
 			tg.dm(1, "hello")
 			w.sync(dir)
-			tg.waitFor(w, "1", "That could not be answered. Ask again in a while.")
+			tg.waitFor(w, "1", "That could not be answered.")
 			want := map[string]string{
 				"agent": "rules.yaml: the agent helper has words, and an agent takes only name and for",
 				"place": "rules.yaml: the place dm has quiet, and a place takes only readers",
@@ -1213,7 +1220,7 @@ func TestModelFails(t *testing.T) {
 	w.sync(dir)
 	w.until("two answers", func() bool { return len(tg.texts("1")) == 2 })
 	got := tg.texts("1")
-	if got[0] != "That could not be answered. Ask again in a while." || !strings.Contains(got[1], "fine") {
+	if got[0] != "That could not be answered." || !strings.Contains(got[1], "fine") {
 		t.Errorf("alice was told %q", got)
 	}
 }
@@ -1229,7 +1236,7 @@ func TestModelKeyMissing(t *testing.T) {
 	dir := chatProject(t, w, tg, map[string]string{"agents/helper.yaml": modelAgent("helper", web.URL, "")})
 	tg.dm(1, "hello")
 	w.sync(dir)
-	tg.waitFor(w, "1", "That could not be answered. Ask again in a while.")
+	tg.waitFor(w, "1", "That could not be answered.")
 	for _, r := range w.at("agents/helper.yaml") {
 		if e := w.show(r.ID).Error; !strings.Contains(e, "TEST_KEY") {
 			t.Errorf("the agent failed with %q", e)
@@ -1552,7 +1559,7 @@ func TestAgentRunsOutOfTurns(t *testing.T) {
 	tg.dm(1, "after")
 	w.sync(dir)
 	w.until("two answers", func() bool { return len(tg.texts("1")) == 2 })
-	if got := tg.texts("1"); got[0] != "That could not be answered. Ask again in a while." || got[1] != "ok: after" {
+	if got := tg.texts("1"); got[0] != "That could not be answered." || got[1] != "ok: after" {
 		t.Errorf("alice was told %q", got)
 	}
 }

@@ -484,8 +484,8 @@ func TestChangedRulesWhileApprovalWaits(t *testing.T) {
 
 // A flow agent deleted while its question waits: the submit cancels the agent
 // and, with it, the question it called. The asker is told the answer failed,
-// and asked to ask again. rules.yaml still names the agent, which has no file,
-// so a later message is told the bot has no such agent.
+// and so is a later message, since rules.yaml still names the agent, which has
+// no file. The message's record names the agent's location.
 func TestDeletedAgentWhileQuestionWaits(t *testing.T) {
 	w := newWorld(t)
 	dir := copyStarter(t)
@@ -518,21 +518,18 @@ func TestDeletedAgentWhileQuestionWaits(t *testing.T) {
 	if run := w.show(question.ID); run.Status != "cancelled" {
 		t.Errorf("the question is %s", run.Status)
 	}
-	sorry := "That could not be answered. Ask again in a while."
+	sorry := "That could not be answered."
 	w.until("the asker told", func() bool { return sayings(t, w)[sorry] != nil })
 	w.sendTo(".rook/blocks/chat.yaml", "telegram:2", "message", from("2", "again", 13))
-	w.until("the second failure", func() bool {
-		return sayings(t, w)["This bot has no agent desk: rules.yaml names it, and agents/desk.yaml is not in the project."] != nil
-	})
 	var failure string
-	for _, run := range stubs(t, w, "message") {
-		for _, a := range w.ownAsks(run.ID, instance.AskFail) {
-			failure = a.Error.Error
+	w.until("the second failure", func() bool {
+		for _, run := range stubs(t, w, "message") {
+			for _, a := range w.ownAsks(run.ID, instance.AskFail) {
+				failure = a.Error.Error
+			}
 		}
-	}
-	if !strings.Contains(failure, "agents/desk") {
-		t.Errorf("the record does not say the agent has no file: %q", failure)
-	}
+		return strings.Contains(failure, "agents/desk")
+	})
 }
 
 // A no is followed the same way: the agent's record shows the approval's no,
@@ -700,7 +697,7 @@ func TestMissingModelSecretIsNamed(t *testing.T) {
 	if !strings.Contains(fmt.Sprint(receipt.Tree.Missing), "TEST_KEY") {
 		t.Errorf("the submit names as missing %v", receipt.Tree.Missing)
 	}
-	w.until("the asker told", func() bool { return sayings(t, w)["That could not be answered. Ask again in a while."] != nil })
+	w.until("the asker told", func() bool { return sayings(t, w)["That could not be answered."] != nil })
 	agents := stubs(t, w, "helper")
 	if len(agents) != 1 {
 		t.Fatalf("%d agent runs", len(agents))
