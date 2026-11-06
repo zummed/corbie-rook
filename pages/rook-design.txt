@@ -79,7 +79,7 @@ its `allow:`.
   .rook/blocks/conversation.yaml       send:agents/** in its child run message
   .rook/blocks/who.yaml, tell.yaml     send:lookup
   .rook/blocks/approval.yaml           send:review, send:.rook/blocks/ask
-  .rook/blocks/ask.yaml                send:lookup, and the asks of Telegram and Slack
+  .rook/blocks/ask.yaml                send:lookup, send:.rook/bridges/slack/ask
   .rook/blocks/say.yaml and the rest   send: for the action of every bridge, as send:.rook/bridges/*/say
 
 - The client that submitted the project may send to and call every location in it, with no `send:`: `corbie run submit /my-bot/agents/helper --input '…'` runs one agent alone.
@@ -128,6 +128,7 @@ The machines in `.rook/` read `rules.yaml`, and call `lookup`, `attend`,
   blocks/attachments.yaml              downloads a message's files to answer it
   blocks/types.js                      a file's media type by its name
   blocks/ask.yaml, close.yaml          asks people and gives their answer, then shows it where it asked
+  blocks/direct.yaml, fail.js          calls a bridge's ask or say for a person, on their first bridge the project runs
   blocks/status.yaml                   shows a status at an address
   blocks/history.yaml, thread.js       what a thread held before a message
   blocks/form.yaml                     a form in the asker's Slack conversation, for the tool form
@@ -279,7 +280,7 @@ Any machine can run these blocks as jobs, as `machine:
 .rook/blocks/tell.yaml`. A path in a machine is read from the project's top
 directory, and a path starting `./` from the machine's own directory.
 
-  .rook/blocks/tell.yaml      person, text: says a text to a person named in lookup.yaml
+  .rook/blocks/tell.yaml      person, text: says a text to a person named in lookup.yaml, on their first bridge the project runs
   .rook/blocks/say.yaml       address, text: says a text at an address
   .rook/blocks/send.yaml      address, name, file or text: sends a blob, or a text as a file, at an address
   .rook/blocks/status.yaml    address, text: shows a status under a Slack thread or as "typing" on Telegram
@@ -298,7 +299,7 @@ directory, and a path starting `./` from the machine's own directory.
 
 - An address is a mapping, `{ bridge, id }`, with `answers` and `at` where a bridge uses them. A block takes the whole mapping.
 - On Slack, an address's `id` may be a channel's `#name`.
-- The chat gives the address of each message, and `lookup` with `do: reach` gives one for each person.
+- The chat gives the address of each message. `lookup` with `do: reach` gives each person's bridges that reach a person directly, in their entry's order, with their ids.
 - On `status.yaml`, an empty text clears the status on Slack, and Telegram's "typing" ends by itself. A status that fails gives `{ shown: false }`, and does not fail.
 
 A reply to a text goes to the chat as a new message. The agent that answers it
@@ -382,6 +383,7 @@ hold its run's ID, so a tap goes to it.
 
 - A machine calls the question, and never runs it as a child: a tap goes only to a run at `.rook/blocks/ask`.
 - A tap on a question that has ended is noted as undelivered in the bridge's record, and starts nothing. A tap or press that names no question is logged by the listener.
+- A person is asked on the first bridge in their entry that the project runs. `.rook/blocks/direct.yaml` calls each bridge's ask in turn, and goes to the next when nothing is recorded at `.rook/bridges/<bridge>/ask`.
 - A person with no bridge the project runs that reaches them directly cannot be asked: the call fails, naming their bridges.
 - GitLab and Jira only comment on an issue, so they ask no questions.
 - The tool `form` in `.rook/agents/base.yaml` asks the person who asked, in the Slack conversation the message came from, with the buttons Send and Cancel, for an hour. On another bridge it gives a note that forms are shown only on Slack.

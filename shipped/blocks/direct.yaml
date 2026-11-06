@@ -1,0 +1,19 @@
+# Calls a bridge's ask or say, named by `call`, for one person, with `input`
+# and `to` set to their id: on the first of `ways`, from lookup.yaml's reach,
+# whose bridge the project runs. A bridge the project does not run has nothing
+# recorded at .rook/bridges/<bridge>/, so its call fails and the next way is
+# tried. Only Telegram and Slack reach a person directly, so there are at most
+# two ways. When neither runs, it fails naming the person's bridges.
+flow: direct
+input: { person: string, ways: list, call: string, input: map }
+allow: ["send:.rook/bridges/*/ask", "send:.rook/bridges/*/say"]
+stages:
+  first:
+    job: { call: { at: ".rook/bridges/${input.ways[0].bridge}/${input.call}" }, input: "${ { ...input.input, to: input.ways[0].id } }" }
+  second:
+    when: "${input.ways.length > 1 && stages.first.failed && stages.first.error.includes('nothing is recorded at ')}"
+    job: { call: { at: ".rook/bridges/${input.ways[1].bridge}/${input.call}" }, input: "${ { ...input.input, to: input.ways[1].id } }" }
+  none:
+    when: "${stages.first.failed && stages.first.error.includes('nothing is recorded at ') && (stages.second.skipped || stages.second.failed && stages.second.error.includes('nothing is recorded at '))}"
+    job: { script: ./fail.js, input: { error: "${'people.yaml reaches ' + input.person + ' on ' + input.ways.map((w) => w.bridge).join(' and ') + ', which this project does not run'}" } }
+output: "${stages.second.skipped ? { bridge: input.ways[0].bridge, output: stages.first.output } : { bridge: input.ways[1].bridge, output: stages.second.output }}"

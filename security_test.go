@@ -590,7 +590,7 @@ func TestApprovalAsksOnlyThePartsPeople(t *testing.T) {
 	w.sync(dir)
 	question := w.question(map[string]bool{})
 	asked := inputs(t, w, "telegram-ask")
-	if len(asked) != 1 || fmt.Sprint(asked[0]["to"]) != "[2]" {
+	if len(asked) != 1 || fmt.Sprint(asked[0]["to"]) != "2" {
 		t.Fatalf("the question was sent to %v", asked)
 	}
 	w.tap(question.ID, "1", "yes")

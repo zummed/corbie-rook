@@ -103,12 +103,8 @@ if (input.do === "ask") {
   // A question with a button for each choice. A button holds the question
   // and the choice, which a tap names; Telegram takes at most 64 bytes.
   const buttons = input.choices.map((c) => ({ text: c[0].toUpperCase() + c.slice(1), callback_data: input.question + " " + c }))
-  const sent = []
-  for (const to of input.to) {
-    const m = call("sendMessage", { chat_id: to, text: input.text, reply_markup: { inline_keyboard: [buttons] } })
-    sent.push({ chat: to, id: m.message_id })
-  }
-  return { sent: sent }
+  const m = call("sendMessage", { chat_id: input.to, text: input.text, reply_markup: { inline_keyboard: [buttons] } })
+  return { sent: [{ chat: input.to, id: m.message_id }] }
 }
 
 if (input.do === "close") {

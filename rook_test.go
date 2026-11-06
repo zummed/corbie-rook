@@ -146,7 +146,7 @@ func heard(events ...map[string]any) string {
 		  ` + strings.Join(emits, "\n\t\t  ") + `
 		  return { cursor: 1 }
 		}
-		if (input.do === "ask") return { sent: input.to.map((to) => ({ chat: to, id: 101 })) }
+		if (input.do === "ask") return { sent: [{ chat: input.to, id: 101 }] }
 		if (input.do === "send") return { sent: input.to + ":1" }
 		if (input.do === "close" || input.do === "status") return {}
 		return { sent: [input.answers || ""] }
@@ -692,7 +692,7 @@ func TestAskPersonIsAnsweredByATap(t *testing.T) {
 	dir := copyStarter(t)
 	// The test's controller holds no secret, and this question is asked of no one.
 	write(t, dir, map[string]string{
-		".rook/bridges/slack/ask.yaml": "flow: slack-ask\ninput: { to: list, text: string, choices: list, question: string }\nstages:\n  question: { job: { script: ./asked.js } }\n",
+		".rook/bridges/slack/ask.yaml": "flow: slack-ask\ninput: { to: string, text: string, choices: list, question: string }\nstages:\n  question: { job: { script: ./asked.js } }\n",
 		".rook/bridges/slack/asked.js": "return {}",
 		"on/asker.yaml": `
 			flow: asker
@@ -965,7 +965,7 @@ func TestApprovalFromAChatGetsToTheApprover(t *testing.T) {
 	w.tap(w.question(map[string]bool{}).ID, "1", "yes")
 	w.until("the reply said", func() bool { return sayings(t, w)["told"]["to"] != nil })
 	said := sayings(t, w)
-	if to := said["hello"]; to == nil || to["bridge"] != "telegram" || to["id"] != "2" || to["to"] != "2" {
+	if to := said["hello"]; to == nil || to["to"] != "2" {
 		t.Errorf("the person was told at %v", to)
 	}
 	if to := said["told"]; to["id"] != "1" || to["to"] != "1" || to["answers"] != "1:10" {

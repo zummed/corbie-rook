@@ -265,7 +265,7 @@ func (w *world) until(what string, cond func() bool) {
 						w.t.Logf("%s %s %s in=%v out=%v", run.Machine, run.Status, run.Error, full.Input, full.Output)
 					}
 					if run.Status == "failed" {
-						w.t.Logf("%s failed: %s", run.Machine, run.Error)
+						w.t.Logf("%s failed: %s", run.Machine, w.show(run.ID).Error)
 					}
 				}
 			}

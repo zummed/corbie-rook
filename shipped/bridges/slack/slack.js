@@ -192,7 +192,7 @@ if (input.do === "send") {
 
 if (input.do === "ask") {
   // A question, with a button for each choice: in input.in, a channel's #name or
-  // a conversation, or else in a direct message to each person in input.to. Each
+  // a conversation, or else in a direct message to the person input.to. Each
   // of input.fields is a form field above the buttons. A button's value holds the
   // question and the choice, which a press names.
   const label = (s) => ({ type: "plain_text", text: String(s).slice(0, 75) })
@@ -203,15 +203,11 @@ if (input.do === "ask") {
   const fields = (input.fields || []).map((f) => ({ type: "input", block_id: f.name, optional: true, label: label(f.label || f.name), element: Object.assign({ action_id: f.name }, element(f)) }))
   const buttons = input.choices.map((c, n) => ({ type: "button", action_id: "choice-" + n, text: label(c[0].toUpperCase() + c.slice(1)), value: input.question + " " + c }))
   const blocks = [{ type: "section", text: { type: "mrkdwn", text: input.text } }, ...fields, { type: "actions", elements: buttons }]
-  const places = input.in ? [input.in] : input.to.map((id) => call("conversations.open", { users: id }).channel.id)
-  const sent = []
-  for (const place of places) {
-    const [to, thread] = place.split("/")
-    const channel = named(to)
-    const posted = call("chat.postMessage", Object.assign({ channel: channel, text: input.text, blocks: blocks }, thread ? { thread_ts: thread } : {}))
-    sent.push({ channel: channel, ts: posted.ts })
-  }
-  return { sent: sent }
+  const place = input.in || call("conversations.open", { users: input.to }).channel.id
+  const [to, thread] = place.split("/")
+  const channel = named(to)
+  const posted = call("chat.postMessage", Object.assign({ channel: channel, text: input.text, blocks: blocks }, thread ? { thread_ts: thread } : {}))
+  return { sent: [{ channel: channel, ts: posted.ts }] }
 }
 
 if (input.do === "close") {

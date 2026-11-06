@@ -1,4 +1,5 @@
-# Says a text to a person, wherever lookup.yaml says they are reached.
+# Says a text to a person, on the first bridge in their people.yaml entry that
+# the project runs, as lookup.yaml says.
 flow: tell
 input: { person: string, text: string }
 allow: [send:lookup]
@@ -6,4 +7,4 @@ stages:
   reach:
     job: { call: { at: lookup }, input: { do: reach, names: ["${input.person}"] } }
   say:
-    job: { machine: ./say.yaml, input: { address: "${stages.reach.output[0]}", text: "${input.text}" } }
+    job: { machine: ./direct.yaml, input: { person: "${input.person}", ways: "${stages.reach.output[0].ways}", call: say, input: { text: "${input.text}" } } }

@@ -1236,3 +1236,54 @@ func TestQuestionGoesToABridgeTheProjectRuns(t *testing.T) {
 		t.Fatal("no question waits")
 	}
 }
+
+// In a project that runs Telegram and not Slack, tell says the text to a person
+// whose people.yaml entry gives a Slack id first on Telegram.
+func TestTellGoesToABridgeTheProjectRuns(t *testing.T) {
+	w := newWorld(t)
+	dir := copyStarter(t)
+	write(t, dir, map[string]string{
+		"people.yaml": "people:\n  alice: { slack: U1, telegram: \"1\" }\ngroups: {}\n",
+		"on/teller.yaml": `
+			flow: teller
+			stages:
+			  telling: { job: { machine: .rook/blocks/tell.yaml, input: { person: alice, text: "hi" } } }
+		`,
+	})
+	removeListener(t, dir)
+	w.sync(dir)
+	teller := w.start("on/teller.yaml", nil)
+	w.until("the teller ends", func() bool { return w.show(teller).HasEnded() })
+	if run := w.show(teller); run.Status != "done" {
+		t.Fatalf("the teller is %s: %s", run.Status, run.Error)
+	}
+	if to := sayings(t, w)["hi"]["to"]; to != "1" {
+		t.Fatalf("alice was told at %v", to)
+	}
+}
+
+// A question whose bridge runs but fails is not asked on the person's next
+// bridge: it fails with the bridge's error.
+func TestQuestionOnAFailingBridgeFailsWithItsError(t *testing.T) {
+	w := newWorld(t)
+	dir := copyStarter(t)
+	write(t, dir, map[string]string{
+		".rook/bridges/telegram/telegram.js": `if (input.do === "ask") throw new Error("Telegram is down")
+			return {}`,
+		"people.yaml": "people:\n  alice: { telegram: \"1\", slack: U1 }\ngroups: {}\n",
+		"on/asker.yaml": `
+			flow: asker
+			allow: [send:.rook/blocks/ask]
+			stages:
+			  asking: { job: { call: { at: .rook/blocks/ask }, input: { people: [alice], text: "Well?", choices: ["yes", "no"] } } }
+			output: ${stages.asking.output.choice}
+		`,
+	})
+	removeListener(t, dir)
+	w.sync(dir)
+	asker := w.start("on/asker.yaml", nil)
+	w.until("the asker ends", func() bool { return w.show(asker).HasEnded() })
+	if run := w.show(asker); run.Status != "failed" || !strings.Contains(run.Error, "Telegram is down") {
+		t.Fatalf("the asker is %s: %s", run.Status, run.Error)
+	}
+}

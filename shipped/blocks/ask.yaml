@@ -1,9 +1,10 @@
 # Asks people, with a button for each choice, and gives `choice` and `person`:
 # the first tap on one of `choices` from someone `people` names, as lookup.yaml
 # says who they are, and who that was; or no and no person after `within`, by
-# default seven days. `people` names people and groups, each asked
-# on their own bridge; with `in`, a Slack channel's #name or a Slack
-# conversation's address, the question is posted there instead. `fields` are
+# default seven days. `people` names people and groups, each asked on the
+# first bridge in their people.yaml entry that the project runs; with `in`, a
+# Slack channel's #name or a Slack conversation's address, the question is
+# posted there instead. `fields` are
 # form fields, each { name, label, kind, choices } with kind text, long, number
 # or choice; the answer gives their values as `values`, by name. Only Slack
 # shows fields, so a question with fields is asked only there. A machine calls
@@ -22,21 +23,24 @@ states:
       machine:
         flow: ask-on
         input: { people: list, in: string, text: string, choices: list, fields: list, question: string }
-        allow: [send:lookup, send:.rook/bridges/telegram/ask, send:.rook/bridges/slack/ask]
+        allow: [send:lookup, send:.rook/bridges/slack/ask]
         stages:
           reach:
             job: { call: { at: lookup }, input: { do: reach, names: "${input.in ? [] : input.people}" } }
-          telegram:
-            when: "${!input.in && !input.fields.length && stages.reach.output.some((t) => t.bridge === 'telegram')}"
+          person:
+            each: "${stages.reach.output.map((p) => input.fields.length ? { ...p, ways: p.ways.filter((w) => w.bridge === 'slack') } : p).filter((p) => p.ways.length)}"
             job:
-              call: { at: .rook/bridges/telegram/ask }
-              input: { to: "${stages.reach.output.filter((t) => t.bridge === 'telegram').map((t) => t.id)}", text: "${input.text}", choices: "${input.choices}", question: "${input.question}" }
-          slack:
-            when: "${!!input.in || stages.reach.output.some((t) => t.bridge === 'slack')}"
+              machine: ./direct.yaml
+              input: { person: "${item.person}", ways: "${item.ways}", call: ask, input: "${ { text: input.text, choices: input.choices, question: input.question, ...(input.fields.length ? { fields: input.fields } : {}) } }" }
+          unasked:
+            when: "${stages.person.output.some((p) => p.error)}"
+            job: { script: ./fail.js, input: { error: "${stages.person.output.find((p) => p.error).error}" } }
+          channel:
+            when: "${!!input.in}"
             job:
               call: { at: .rook/bridges/slack/ask }
-              input: { to: "${stages.reach.output.filter((t) => t.bridge === 'slack').map((t) => t.id)}", in: "${input.in}", text: "${input.text}", choices: "${input.choices}", fields: "${input.fields}", question: "${input.question}" }
-        output: "${ { telegram: stages.telegram.skipped ? [] : (stages.telegram.output || {}).sent || [], slack: stages.slack.skipped ? [] : (stages.slack.output || {}).sent || [] } }"
+              input: { in: "${input.in}", text: "${input.text}", choices: "${input.choices}", fields: "${input.fields}", question: "${input.question}" }
+        output: "${ { telegram: stages.person.output.filter((p) => p.output && p.output.bridge === 'telegram').flatMap((p) => (p.output.output || {}).sent || []), slack: [...stages.person.output.filter((p) => p.output && p.output.bridge === 'slack').flatMap((p) => (p.output.output || {}).sent || []), ...(stages.channel.skipped ? [] : (stages.channel.output || {}).sent || [])] } }"
     on: { done: open }
   open:
     timers: { unanswered: "${input.within || '7d'}" }
