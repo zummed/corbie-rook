@@ -276,6 +276,14 @@ func TestTraceMessageToToolsAndApproval(t *testing.T) {
 	if asked != question.ID || w.show(asked).StartedBy != approval {
 		t.Errorf("the approval called %s, and the question is %s", asked, question.ID)
 	}
+	// 6. question -> the bridge's ask that posted it, by direct's call
+	var posted []string
+	for _, run := range stubs(t, w, "direct") {
+		posted = append(posted, w.sentFrom(run.ID, instance.AskCall, location(".rook/bridges/telegram/ask"))...)
+	}
+	if ask := lastOf(t, "the bridge's ask", posted); w.show(ask).Machine != "telegram-ask" {
+		t.Errorf("the question's call went to %+v", w.show(ask))
+	}
 	var answer any
 	for _, run := range stubs(t, w, "tap") {
 		if run.Parent == asked {

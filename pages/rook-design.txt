@@ -41,19 +41,18 @@ they were sent.
 Following a message
 -------------------
 
-Each run that a send or a call started names the run that started it, and a
-send names the run it went to in the sender's record. These commands show
-them.
+Each send and each call names, in the sender's record, the run it went to,
+and that run names the run that started it. These commands show them.
 
   corbie run ls --all              each run, its location, its key, and the run it is a child of
   corbie run show <id>             the run, with started by: the run whose send or call started it
-  corbie run show <id> --record    each step of the run and its child runs, and each send with the run it went to
+  corbie run show <id> --record    each step of the run and its child runs, and each send or call with the run it went to
 
 1. In the bridge's record, each message is a send to `/my-bot/.rook/blocks/chat#<bridge>:<chat>`, naming the chat's run.
 2. In the chat's record, `who` gives `rule`, the entry of `rules.yaml` that chose the agent, and the send names the conversation's run.
-3. The agent's run is at `/my-bot/agents/<agent>`, started by the conversation's child run `message`.
-4. The agent's record shows each tool as a job, a held tool as `hold <tool> for the ask`, and its part's approval as a child run.
-5. A question is a run at `/my-bot/.rook/blocks/ask`, started by the approval.
+3. In the conversation's record, the call to `/my-bot/agents/<agent>` names the agent's run.
+4. The agent's record shows each tool as a job, a held tool as `hold <tool> for the ask`, and its part's approval as a child run, whose call to `/my-bot/.rook/blocks/ask` names the question's run.
+5. The question's record names the run of the bridge's ask that posted it.
 
 Record lines are shown without their time and run, and a name in angle
 brackets, such as `<chat>`, stands for a run's ID.
@@ -61,10 +60,14 @@ brackets, such as `<chat>`, stands for a run's ID.
     corbie run show <chat> --record
       step 2  <- done from who {"agent":"helper","groups":[],"person":"alice","rule":{"for":["alice"],"name":"helper"}}
       step 2  -> send message to /my-bot/.rook/blocks/conversation#telegram:1:helper · started <conversation>
-    corbie run show <agent>
-      <agent>  done  flow helper  step 2
-        at: /my-bot/agents/helper
-        started by: <message>
+    corbie run show <conversation> --record
+      step 3  -> job answer: a call to /my-bot/agents/helper, <agent>
+    corbie run show <agent> --record
+      step 6  -> hold tell for the ask
+      step 6  -> job ask: a machine, <approval>
+      step 2  -> job person: a call to /my-bot/.rook/blocks/ask, <question>
+    corbie run show <question> --record
+      step 1  -> job first: a call to /my-bot/.rook/bridges/telegram/ask, <ask>
 
 Who may talk to whom
 --------------------
