@@ -470,6 +470,10 @@ func (gl *gitlab) serve(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(404)
 	case r.Method == "POST" && r.URL.EscapedPath() == "/api/v4/projects/group%2Fproject/uploads":
 		if gl.full {
+			// The body is read first: a server that answers before it has
+			// read a request may close the connection under the sender, who
+			// then sees a broken write in place of the 413.
+			io.Copy(io.Discard, r.Body)
 			w.WriteHeader(413)
 			return
 		}
