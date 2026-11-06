@@ -125,6 +125,18 @@ if (input.do === "hear") {
     emit("message", message)
   }
 
+  // stopped emits a press of the stop button Slack shows under a thread while
+  // the bot's status is set there, as stop to that thread's chat. Slack sends
+  // agent_session_stopped to an app that subscribes to it.
+  const stopped = (e) => {
+    if (e.type !== "agent_session_stopped") return
+    if (!e.channel || !e.thread_ts || !e.user || !e.event_ts) return log("a stop names no channel, thread, person or time")
+    if (heard.includes(e.channel + "/" + e.event_ts)) return
+    const channel = call("conversations.info", null, { channel: e.channel }).channel
+    heard.push(e.channel + "/" + e.event_ts)
+    emit("stop", { bridge: "slack", chat: e.channel + "/" + e.thread_ts, from: e.user, place: channel.is_im ? "dm" : "#" + channel.name })
+  }
+
   // Slack gives the app-level token the address of one connection, and sends
   // each event in an envelope, again if it is not told the envelope was received.
   const link = call("apps.connections.open", {}, null, "SLACK_APP_TOKEN")
@@ -155,6 +167,7 @@ if (input.do === "hear") {
     try {
       if (envelope.type === "interactive" && body.type === "block_actions") pressed(body)
       if (envelope.type === "events_api" && body.event) said(body.event)
+      if (envelope.type === "events_api" && body.event) stopped(body.event)
     } catch (e) {
       log(e.message)
       continue

@@ -173,8 +173,8 @@ piece `.rook/bridges/<name>/listen.yaml`.
 - A listener reads a value when it starts. After changing one, run `corbie run cancel /my-bot/bridges/<name>`, then `corbie run submit .`.
 - A bridge the project does not run has no machines in `.rook/`, and needs no secret.
 
-  Telegram    hears a direct message, except /start, and logs a message in a group
-  Slack       hears a direct message, or a message that names the bot, over Socket Mode
+  Telegram    hears a direct message, except /start, and logs a message in a group; /stop is a stop
+  Slack       hears a direct message, a message that names the bot, and a press of the stop button, over Socket Mode
   GitLab      reads every 30 seconds each issue opened or commented on that names the bot
   Jira        reads every 30 seconds each issue opened or commented on that names the bot
 
@@ -262,6 +262,23 @@ the conversation so far.
   a bridge, its listener  Slack bridge, Slack listener
 
 These are the runs' titles, as `corbie ui` lists them.
+
+Stopping an answer
+------------------
+
+A person stops what their agent is doing in a thread with `/stop` on
+Telegram, or with the stop button Slack shows under a thread while the bot's
+status is set there.
+
+1. The listener sends `stop` to `.rook/blocks/chat` with the key `<bridge>:<chat>`.
+2. The chat runs `who.yaml` for the sender, and sends `stop` to the conversation of the agent they get there.
+3. The conversation leaves the state that waits on the answer, which cancels the agent's run, its tools' runs, and any approval and question they wait on.
+4. The conversation clears the status and says `Stopped.`, and answers the next message with the conversation as it was before the stopped message.
+
+- A stop from someone with no agent in that place goes no further than the chat, so nobody can stop another person's agent.
+- A stop with nothing being answered is told `Nothing is running.`
+- A question that is cancelled keeps its buttons. A tap on one is noted as undelivered in the bridge's record, and runs nothing.
+- The conversation's record shows the event `stop`, with `asker`, the person, and `message.from`, their id on the bridge.
 
 Your machines
 -------------

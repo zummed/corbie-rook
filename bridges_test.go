@@ -981,6 +981,10 @@ func (s *slack) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(map[string]any{"ok": true, "messages": messages, "response_metadata": meta})
 	case "/api/conversations.info":
+		if strings.HasPrefix(r.URL.Query().Get("channel"), "D") {
+			fmt.Fprint(w, `{"ok": true, "channel": {"is_im": true}}`)
+			return
+		}
 		fmt.Fprint(w, `{"ok": true, "channel": {"name": "help"}}`)
 	case "/api/conversations.open":
 		fmt.Fprint(w, `{"ok": true, "channel": {"id": "D9"}}`)

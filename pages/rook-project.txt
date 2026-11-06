@@ -31,6 +31,7 @@ project, and one set at `/` by every tree.
 
 - Until the project has an agent, the bot tells anyone who names it that it answers only the people it belongs to.
 - Submit the project from a client no gateway uses: a gateway whose client submitted the project can call any of its locations with any input.
+- A person stops what their agent is doing in a thread with Slack's stop button, or with `/stop` on Telegram, as `corbie rook manual rook-design` says under Stopping an answer.
 - `corbie ui` shows each run and what waits on a person. Its Parts page shows each part, the agents that open it, and which of its tools have `approve: true`.
 
 After a change
@@ -209,7 +210,8 @@ nothing on the internet connects to this computer.
           "bot_events": [
             "message.channels",
             "message.groups",
-            "message.im"
+            "message.im",
+            "agent_session_stopped"
           ]
         },
         "interactivity": {
@@ -228,7 +230,8 @@ nothing on the internet connects to this computer.
   files:write                                       sends a file an agent gives
 
 The bot hears a direct message, and a message that names it in a channel it
-was invited to.
+was invited to. With the event `agent_session_stopped`, Slack shows a stop
+button under a thread while the bot works there.
 
 Reference
 ---------

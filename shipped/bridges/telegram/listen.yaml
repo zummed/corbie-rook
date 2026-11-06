@@ -1,8 +1,9 @@
 # Telegram's listener, which bridges/telegram.yaml includes: it asks for each
-# new update. Each message goes to its chat's run at .rook/blocks/chat, keyed
-# telegram:<chat>, which starts when the chat has none. Each tap on a button goes
-# to the question's run at .rook/blocks/ask. A button holds the run's ID without
-# its client's name, since Telegram keeps 64 bytes, and this adds the name back.
+# new update. Each message, and /stop as a stop, goes to its chat's run at
+# .rook/blocks/chat, keyed telegram:<chat>, which starts when the chat has none.
+# Each tap on a button goes to the question's run at .rook/blocks/ask. A button
+# holds the run's ID without its client's name, since Telegram keeps 64 bytes,
+# and this adds the name back.
 title: Telegram listener
 input: { type: object, additionalProperties: false }   # it takes no input, such as overhear
 allow: [send:.rook/blocks/chat, send:.rook/blocks/ask]
@@ -20,6 +21,7 @@ states:
       timeout: 2m
     on:
       message: { send: { to: { at: .rook/blocks/chat, key: "telegram:${event.data.chat}" }, event: message, data: "${event.data}" } }
+      stop: { send: { to: { at: .rook/blocks/chat, key: "telegram:${event.data.chat}" }, event: stop, data: "${event.data}" } }
       answer: { send: { to: { at: .rook/blocks/ask, run: "${run.id.slice(0, run.id.indexOf('/') + 1) + event.data.question}" }, event: answer, data: "${event.data}" } }
       done: hearing
       failed: resting

@@ -9,9 +9,13 @@
 # works, and an empty reply says nothing. A question the agent fails on, for any
 # reason, such as rules.yaml naming an agent with no file, is told it could not
 # be answered, and the message's record shows why. It starts the conversation
-# again, so one the agent cannot take does not stop the next. A conversation
-# quiet for a day ends, and its next message starts a new one with the agent as
-# it is then.
+# again, so one the agent cannot take does not stop the next. A stop that
+# chat.yaml sends while a message is answered cancels the answer, and with it the
+# agent's run, its tools' runs and any question they wait on; the thread is told
+# `Stopped.`, and the next message is answered as usual. A stop with nothing
+# being answered is told `Nothing is running.` Either clears the status. A
+# conversation quiet for a day ends, and its next message starts a new one with
+# the agent as it is then.
 statechart: conversation
 lifetime: keyed
 input: { message: map, asker: string, agent: string, address: map, history: "any?" }
@@ -22,7 +26,7 @@ initial: waiting
 states:
   waiting:
     timers: { quiet: 1d }
-    on: { message: answering, quiet: over }
+    on: { message: answering, stop: nothing, quiet: over }
   answering:
     defer: [message]
     job:
@@ -72,5 +76,17 @@ states:
         output:
           conversation: "${stages.answer.failed ? null : (stages.answer.output || {}).conversation}"
           said: "${input.said}"
+    on: { done: waiting, failed: waiting, stop: stopped }
+  stopped:
+    defer: [message]
+    jobs:
+      stopped_status: { machine: ./status.yaml, input: { address: "${event.data.address}", text: "" } }
+      stopped_say: { machine: ./say.yaml, input: { address: "${event.data.address}", text: Stopped. } }
+    on: { done: waiting, failed: waiting }
+  nothing:
+    defer: [message]
+    jobs:
+      nothing_status: { machine: ./status.yaml, input: { address: "${event.data.address}", text: "" } }
+      nothing_say: { machine: ./say.yaml, input: { address: "${event.data.address}", text: Nothing is running. } }
     on: { done: waiting, failed: waiting }
   over: { end: done }

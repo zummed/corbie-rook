@@ -2,7 +2,8 @@
 # Mode, so nothing need reach this computer. A direct message and a message
 # naming the bot each go to their thread's run at .rook/blocks/chat, keyed
 # slack:<chat>, and with overhear, a reply in a thread the bot has said something
-# in. Each press of a button goes to the question's run at .rook/blocks/ask. A
+# in. A press of Slack's stop button under a thread goes there as a stop. Each
+# press of a question's button goes to the question's run at .rook/blocks/ask. A
 # job ends after four minutes, and the next connects again. An event Slack sends
 # again is heard once.
 title: Slack listener
@@ -18,6 +19,7 @@ states:
       timeout: 5m
     on:
       message: { send: { to: { at: .rook/blocks/chat, key: "slack:${event.data.chat}" }, event: message, data: "${event.data}" } }
+      stop: { send: { to: { at: .rook/blocks/chat, key: "slack:${event.data.chat}" }, event: stop, data: "${event.data}" } }
       answer: { send: { to: { at: .rook/blocks/ask, run: "${run.id.slice(0, run.id.indexOf('/') + 1) + event.data.question}" }, event: answer, data: "${event.data}" } }
       done: hearing
       failed: resting

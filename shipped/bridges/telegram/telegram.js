@@ -41,9 +41,9 @@ if (input.do === "hear") {
   // One update at a time, waiting up to fifty seconds for it. Asking from
   // the cursor tells Telegram every update before it was heard; with no
   // cursor, Telegram gives the oldest it has not been told of. A message in
-  // a person's own chat with the bot is emitted as message, except /start; a
-  // tap on a button of a question is emitted as answer. A message in a group
-  // is logged.
+  // a person's own chat with the bot is emitted as message, except /start and
+  // /stop; /stop is emitted as stop; a tap on a button of a question is emitted
+  // as answer. A message in a group is logged.
   //
   // An update that lacks what the listener reads is logged and passed over.
   // An update the listener fails on for any other reason is given again, by
@@ -85,6 +85,7 @@ if (input.do === "hear") {
     const text = m.text || m.caption || ""
     // Telegram sends /start when a person opens the bot.
     if (text === "/start" || text.startsWith("/start ")) return log("a /start is not passed on")
+    if (text === "/stop") return emit("stop", { bridge: "telegram", chat: String(m.chat.id), from: String(m.from.id), place: "dm", answers: m.chat.id + ":" + m.message_id })
     const file = attachment(m)
     if (!text && !file) return
     // Each item of an album comes as its own update, so it is a message of
