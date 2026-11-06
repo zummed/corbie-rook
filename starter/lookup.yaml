@@ -7,6 +7,6 @@ stages:
   find:
     job:
       script: .rook/people/file.js
-      files: [people.yaml]
+      files: [people.yaml, .rook/people/running.yaml]
       input: { do: "${input.do}", bridge: "${input.bridge}", id: "${input.id}", names: "${input.names}" }
 output: ${stages.find.output}

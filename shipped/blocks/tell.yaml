@@ -1,10 +1,11 @@
-# Says a text to a person, on the first bridge in their people.yaml entry that
-# the project runs, as lookup.yaml says.
+# Says a text to a person, on the first of their ways that lookup.yaml gives.
 flow: tell
 input: { person: string, text: string }
-allow: [send:lookup]
+allow: [send:lookup, "send:.rook/bridges/*/say"]
 stages:
   reach:
     job: { call: { at: lookup }, input: { do: reach, names: ["${input.person}"] } }
   say:
-    job: { machine: ./direct.yaml, input: { person: "${input.person}", ways: "${stages.reach.output[0].ways}", call: say, input: { text: "${input.text}" } } }
+    job:
+      call: { at: ".rook/bridges/${stages.reach.output[0].ways[0].bridge}/say" }
+      input: { to: "${stages.reach.output[0].ways[0].id}", text: "${input.text}" }

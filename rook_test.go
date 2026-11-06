@@ -794,7 +794,8 @@ func TestNoModelInWhatRookWrites(t *testing.T) {
 
 // A project has the machines of the bridges it runs and of no other, so one it
 // does not run costs it nothing: those named, and each whose file is in
-// bridges/, added by hand or not. It reads with only those.
+// bridges/, added by hand or not. It reads with only those, and
+// .rook/people/running.yaml lists the same bridges.
 func TestBridgesOnlyRunWhenChosen(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "project")
 	there := func(want map[string]bool) {
@@ -805,11 +806,31 @@ func TestBridgesOnlyRunWhenChosen(t *testing.T) {
 			}
 		}
 	}
+	listed := func(want ...string) {
+		t.Helper()
+		text, err := os.ReadFile(filepath.Join(dir, ".rook/people/running.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got struct{ Running []string }
+		if err := yaml.Unmarshal(text, &got); err != nil {
+			t.Fatal(err)
+		}
+		var machines []string
+		entries, _ := os.ReadDir(filepath.Join(dir, ".rook/bridges"))
+		for _, e := range entries {
+			machines = append(machines, e.Name())
+		}
+		if !reflect.DeepEqual(got.Running, want) || !reflect.DeepEqual(machines, want) {
+			t.Errorf("running.yaml lists %v and .rook/bridges holds %v, and not %v", got.Running, machines, want)
+		}
+	}
 	if err := rook.Init(dir, []string{"slack", "gitlab"}); err != nil {
 		t.Fatal(err)
 	}
 	there(map[string]bool{"bridges/slack.yaml": true, "bridges/gitlab.yaml": true, "bridges/telegram.yaml": false, "bridges/jira.yaml": false,
 		".rook/bridges/slack/say.yaml": true, ".rook/bridges/gitlab/listen.yaml": true, ".rook/bridges/telegram": false, ".rook/bridges/jira": false})
+	listed("gitlab", "slack")
 	tree, err := client.ReadTree(dir, "")
 	if err != nil {
 		t.Fatal(err)
@@ -833,6 +854,7 @@ func TestBridgesOnlyRunWhenChosen(t *testing.T) {
 		t.Fatal(err)
 	}
 	there(map[string]bool{".rook/bridges/telegram/say.yaml": true, ".rook/bridges/slack/say.yaml": true, ".rook/bridges/gitlab": false})
+	listed("slack", "telegram")
 }
 
 // Init again rewrites .rook, and changes nothing of the person's.

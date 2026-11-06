@@ -138,7 +138,8 @@ func Running(dir string) []string {
 // files if dir has no rules.yaml, each of Named that is not there, and the file
 // of each bridge named that is not there, so it changes no file of the
 // person's. It rewrites .rook, with the page rook as .rook/AGENTS.md, and the
-// machines of each bridge whose file is in bridges/.
+// machines of each bridge whose file is in bridges/, which it lists in
+// .rook/people/running.yaml.
 func Init(dir string, bridges []string) error {
 	for _, name := range bridges {
 		if _, ok := Secrets[name]; !ok {
@@ -179,10 +180,15 @@ func Init(dir string, bridges []string) error {
 			return err
 		}
 	}
-	for _, name := range Running(dir) {
+	running := Running(dir)
+	for _, name := range running {
 		if err := copyTree("shipped/bridges/"+name, filepath.Join(shipped, "bridges", name), true); err != nil {
 			return err
 		}
+	}
+	list := "# The bridges this project runs, whose machines corbie rook init wrote into\n# .rook/bridges/. file.js reaches a person only on these.\nrunning: [" + strings.Join(running, ", ") + "]\n"
+	if err := os.WriteFile(filepath.Join(shipped, "people", "running.yaml"), []byte(list), 0o644); err != nil {
+		return err
 	}
 	return copyFile("pages/rook.txt", filepath.Join(shipped, "AGENTS.md"), true)
 }

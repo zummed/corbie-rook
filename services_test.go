@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -1242,7 +1243,7 @@ func TestGitLabRequestApprovedOnSlack(t *testing.T) {
 }
 
 // In a project with only GitLab, a question to a person whose people.yaml entry
-// has a Slack id fails at once, saying the project does not run Slack.
+// has a Slack id fails at once, saying once that the project does not run Slack.
 func TestGitLabOnlyProjectAskingASlackPersonFailsClearly(t *testing.T) {
 	gl := newGitLab(t)
 	w := newWorld(t)
@@ -1274,7 +1275,7 @@ func TestGitLabOnlyProjectAskingASlackPersonFailsClearly(t *testing.T) {
 		}
 		t.Fatalf("the asker is %s after 5s; the question's runs: %v; failures: %v", run.Status, qs, failures(w))
 	}
-	if !strings.Contains(run.Error, "people.yaml reaches alice on slack, which this project does not run") {
+	if !strings.Contains(run.Error, "people.yaml reaches alice on slack, which this project does not run") || strings.Count(run.Error, " at line ") != 1 {
 		t.Errorf("the asker failed with %q", run.Error)
 	}
 }
@@ -1411,7 +1412,7 @@ func TestTellGoesToABridgeTheProjectRuns(t *testing.T) {
 }
 
 // A question whose bridge runs but fails is not asked on the person's next
-// bridge: it fails with the bridge's error.
+// bridge: it fails with the bridge's error, given once.
 func TestQuestionOnAFailingBridgeFailsWithItsError(t *testing.T) {
 	w := newWorld(t)
 	dir := copyStarter(t)
@@ -1433,5 +1434,53 @@ func TestQuestionOnAFailingBridgeFailsWithItsError(t *testing.T) {
 	w.until("the asker ends", func() bool { return w.show(asker).HasEnded() })
 	if run := w.show(asker); run.Status != "failed" || !strings.Contains(run.Error, "Telegram is down") {
 		t.Fatalf("the asker is %s: %s", run.Status, run.Error)
+	}
+	if got := w.show(asker).Error; strings.Count(got, "Telegram is down") != 1 || strings.Count(got, " at line ") > 2 {
+		t.Errorf("the asker's error repeats what failed: %s", got)
+	}
+}
+
+// In a project that runs Telegram and Slack, tell says the text on the first
+// bridge in the person's people.yaml entry: Telegram for alice, whose entry
+// gives it first, and Slack for bob, whose entry gives Slack first.
+func TestTellGoesToTheFirstBridgeInTheEntry(t *testing.T) {
+	w := newWorld(t)
+	dir := filepath.Join(t.TempDir(), "project")
+	if err := exampleProject(dir, []string{"telegram", "slack"}); err != nil {
+		t.Fatal(err)
+	}
+	write(t, dir, map[string]string{
+		".rook/bridges/telegram/telegram.js": telegramScript,
+		".rook/bridges/slack/slack.js":       `return input.do === "cut" ? [{ plain: input.text }] : { sent: input.to + ":1" }`,
+		"people.yaml":                        "people:\n  alice: { telegram: \"1\", slack: U1 }\n  bob: { slack: U2, telegram: \"2\" }\ngroups: {}\n",
+		"on/teller.yaml": `
+			flow: teller
+			stages:
+			  alice: { job: { machine: .rook/blocks/tell.yaml, input: { person: alice, text: "hi alice" } } }
+			  bob: { job: { machine: .rook/blocks/tell.yaml, input: { person: bob, text: "hi bob" } } }
+		`,
+	})
+	for _, name := range []string{"telegram", "slack"} {
+		if err := os.Remove(filepath.Join(dir, "bridges", name+".yaml")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.secret("TELEGRAM_TOKEN", "123:abc")
+	w.secret("SLACK_TOKEN", "xoxb-bot")
+	w.sync(dir)
+	teller := w.start("on/teller.yaml", nil)
+	w.until("the teller ends", func() bool { return w.show(teller).HasEnded() })
+	to := func(path string) []any {
+		var out []any
+		for _, run := range w.at(path) {
+			out = append(out, w.show(run.ID).Input.(map[string]any)["to"])
+		}
+		return out
+	}
+	if got := to(".rook/bridges/telegram/say.yaml"); !reflect.DeepEqual(got, []any{"1"}) {
+		t.Errorf("Telegram was told at %v", got)
+	}
+	if got := to(".rook/bridges/slack/say.yaml"); !reflect.DeepEqual(got, []any{"U2"}) {
+		t.Errorf("Slack was told at %v", got)
 	}
 }
