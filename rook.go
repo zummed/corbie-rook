@@ -4,6 +4,7 @@ package rook
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"io/fs"
 	"maps"
@@ -184,7 +185,28 @@ func Init(dir string, bridges []string) error {
 			return err
 		}
 	}
+	if err := writeRunning(filepath.Join(shipped, "people", "file.js"), Running(dir)); err != nil {
+		return err
+	}
 	return copyFile("pages/rook.txt", filepath.Join(shipped, "AGENTS.md"), true)
+}
+
+// writeRunning writes into the people script the bridges the project runs, so
+// that it reaches a person only on one of them.
+func writeRunning(script string, running []string) error {
+	text, err := os.ReadFile(script)
+	if err != nil {
+		return err
+	}
+	list, err := json.Marshal(append([]string{}, running...))
+	if err != nil {
+		return err
+	}
+	const empty = "const running = []\n"
+	if !strings.Contains(string(text), empty) {
+		return fmt.Errorf("%s holds no %q", script, strings.TrimSpace(empty))
+	}
+	return os.WriteFile(script, []byte(strings.Replace(string(text), empty, "const running = "+string(list)+"\n", 1)), 0o644)
 }
 
 // copyTree copies a tree of files to a directory.

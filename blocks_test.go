@@ -574,7 +574,7 @@ func TestFormIsAnsweredInTheThread(t *testing.T) {
 	}})
 	w.until("the form done", func() bool { return w.show(former).Status == "done" })
 	got, _ := json.Marshal(w.show(former).Output)
-	if string(got) != `{"choice":"send","values":{"hours":2.5,"size":"big","title":"Login fails"}}` {
+	if string(got) != `{"choice":"send","person":"alice","values":{"hours":2.5,"size":"big","title":"Login fails"}}` {
 		t.Fatalf("the form gave %s", got)
 	}
 	w.until("the form closed", func() bool {

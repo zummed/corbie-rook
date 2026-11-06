@@ -278,7 +278,7 @@ func TestAMessageCanBeFollowed(t *testing.T) {
 	`})
 	w.sync(dir)
 	question := w.question(map[string]bool{})
-	if text := fmt.Sprint(w.show(question.ID).Input); !strings.Contains(text, "alice: the plan is ready\nalice: tell bob") {
+	if text := fmt.Sprint(w.show(question.ID).Input); !strings.Contains(text, "> alice: the plan is ready\n> alice: tell bob") {
 		t.Errorf("the approver was shown %s", text)
 	}
 	w.tap(question.ID, "1", "yes")

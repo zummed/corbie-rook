@@ -177,6 +177,130 @@ func lastOf(t *testing.T, what string, runs []string) string {
 	return runs[len(runs)-1]
 }
 
+// The trail of one message that leads to two tools and an approval: a person
+// can go from the listener to the chat, from the chat to the conversation, from
+// the conversation to the agent, and from the agent to each tool's name, input
+// and result, the held call, its approval and the question that approval asked,
+// and see who answered it. The chat's record says which rule chose the agent.
+func TestTraceMessageToToolsAndApproval(t *testing.T) {
+	w := newWorld(t)
+	dir, _ := traceProject(t, w, from("1", "tell bob the build is green", 10))
+	w.sync(dir)
+	question := w.question(map[string]bool{})
+	w.tap(question.ID, "1", "yes")
+	w.until("the reply said", func() bool { return sayings(t, w)["done: told bob"] != nil })
+
+	bridge := w.kept("bridges/telegram.yaml")
+	listener := ""
+	for _, run := range w.at("bridges/telegram.yaml") {
+		if run.Parent == bridge {
+			listener = run.ID
+		}
+	}
+	// 1. listener -> chat
+	chat := lastOf(t, "chat", w.sentFrom(listener, instance.AskEvent, location(".rook/blocks/chat")))
+	if run := w.show(chat); run.StartedBy != listener || run.Key != "telegram:1" || run.Title != "dm: tell bob the build is green" {
+		t.Errorf("the chat is %+v", run)
+	}
+	// 2. chat -> who's rule, and the conversation
+	var rule any
+	for _, run := range stubs(t, w, "who") {
+		if out, ok := w.show(run.ID).Output.(map[string]any); ok {
+			rule = out["rule"]
+		}
+	}
+	if fmt.Sprint(rule) != "map[for:[alice] name:helper]" {
+		t.Errorf("who gives the rule %v", rule)
+	}
+	conversation := lastOf(t, "conversation", w.sentFrom(chat, instance.AskEvent, location(".rook/blocks/conversation")))
+	if run := w.show(conversation); run.StartedBy != chat || run.Key != "telegram:1:helper" || run.Title != "helper in dm: tell bob the build is green" {
+		t.Errorf("the conversation is %+v", run)
+	}
+	// 3. conversation -> agent, by the call its child message made
+	var message string
+	for _, run := range stubs(t, w, "message") {
+		if run.Parent == conversation {
+			message = run.ID
+		}
+	}
+	agent := lastOf(t, "agent", w.sentFrom(message, instance.AskCall, location("agents/helper")))
+	if run := w.show(agent); run.StartedBy != message || run.Location != location("agents/helper") || run.Title != "alice: tell bob the build is green" {
+		t.Errorf("the agent is %+v", run)
+	}
+	// 4. agent -> each tool: its name and input as asked, and its result
+	var names []string
+	for _, out := range w.arrived(agent, "done", "turn") {
+		for _, call := range out.(map[string]any)["calls"].([]any) {
+			c := call.(map[string]any)
+			names = append(names, fmt.Sprint(c["name"], c["args"]))
+		}
+	}
+	if want := []string{"openmap[part:messages]", "clockmap[zone:UTC]", "tellmap[person:bob text:the build is green]"}; !slices.Equal(names, want) {
+		t.Errorf("the model's calls in the record are %q", names)
+	}
+	var clockInput any
+	for _, a := range w.ownAsks(agent, instance.AskScript) {
+		if a.Name == "clock" {
+			clockInput = a.Job.Input
+		}
+	}
+	if fmt.Sprint(clockInput) != "map[zone:UTC]" {
+		t.Errorf("the clock's input in the record is %v", clockInput)
+	}
+	if got := w.arrived(agent, "done", "clock"); len(got) != 1 || fmt.Sprint(got[0]) != "map[time:12:00 zone:UTC]" {
+		t.Errorf("the clock's result in the record is %v", got)
+	}
+	held := w.ownAsks(agent, instance.AskHold)
+	if len(held) != 1 || held[0].Name != "tell" {
+		t.Errorf("the held calls are %+v", held)
+	}
+	children := map[string]string{}
+	for _, a := range w.ownAsks(agent, instance.AskChild) {
+		children[a.Name] = a.Child
+	}
+	if children["ask"] == "" || children["tell"] == "" {
+		t.Fatalf("the agent's children are %v", children)
+	}
+	if in := fmt.Sprint(w.show(children["tell"]).Input); in != "map[person:bob text:the build is green]" {
+		t.Errorf("tell's run was given %s", in)
+	}
+	if got := w.arrived(agent, "done", "ask"); len(got) != 1 || fmt.Sprint(got[0]) != "map[approve:[tell] note:alice said yes.]" {
+		t.Errorf("the approval gave the agent %v", got)
+	}
+	// 5. approval -> question, and who answered it
+	approval := children["ask"]
+	if run := w.show(approval); run.Machine != "approval" || run.Title != "Approve tell: alice: tell bob the build is green" {
+		t.Errorf("the approval is %+v", run)
+	}
+	asked := lastOf(t, "question", w.sentFrom(approval, instance.AskCall, location(".rook/blocks/ask")))
+	if asked != question.ID || w.show(asked).StartedBy != approval {
+		t.Errorf("the approval called %s, and the question is %s", asked, question.ID)
+	}
+	var answer any
+	for _, run := range stubs(t, w, "tap") {
+		if run.Parent == asked {
+			answer = w.show(run.ID).Output
+		}
+	}
+	if m, _ := answer.(map[string]any); m["person"] != "alice" || m["counts"] != true {
+		t.Errorf("the question's record says it was answered by %v", answer)
+	}
+}
+
+// An approval's result names who answered, so the agent's record says who
+// approved.
+func TestApprovalResultNamesTheApprover(t *testing.T) {
+	w := newWorld(t)
+	dir, _ := traceProject(t, w, from("1", "tell bob", 10))
+	w.sync(dir)
+	w.tap(w.question(map[string]bool{}).ID, "1", "yes")
+	w.until("the reply said", func() bool { return sayings(t, w)["done: told bob"] != nil })
+	agent := stubs(t, w, "helper")[0].ID
+	if got := fmt.Sprint(w.arrived(agent, "done", "ask")); got != "[map[approve:[tell] note:alice said yes.]]" {
+		t.Errorf("the approval gave %s", got)
+	}
+}
+
 // A project with no model: the agent is a flow. It says something at the
 // message's address, calls a question for alice, and replies with her answer.
 // The submit names no secret that is missing, and the trail goes from the
@@ -235,6 +359,32 @@ func TestNoModelFlowAgentIsFollowed(t *testing.T) {
 	}
 	if w.show(w.show(desk[0].ID).StartedBy).Machine != "message" {
 		t.Errorf("the desk was not started by a conversation's message")
+	}
+}
+
+// A project with no agent and no model: alice, whom people.yaml names, is told
+// the bot does not answer her here, and the chat's record shows who gave no
+// agent and no rule.
+func TestNoAgentProjectRefusesAndSaysWhy(t *testing.T) {
+	w := newWorld(t)
+	dir := copyStarter(t)
+	write(t, dir, map[string]string{
+		".rook/bridges/telegram/telegram.js": heard(from("1", "hello", 10)),
+		"rules.yaml":                         "places:\n  dm: { readers: [asker] }\nagents: []\n",
+	})
+	for _, name := range []string{"agents/helper.yaml", "agents/team.yaml", "parts/messages/part.yaml"} {
+		os.Remove(filepath.Join(dir, name))
+	}
+	w.sync(dir)
+	w.until("the refusal", func() bool { return sayings(t, w)["This bot does not answer you here."] != nil })
+	for _, run := range stubs(t, w, "who") {
+		out := w.show(run.ID).Output.(map[string]any)
+		if out["person"] != "alice" || out["agent"] != nil || out["rule"] != nil {
+			t.Errorf("who gave %v", out)
+		}
+	}
+	if runs := stubs(t, w, "conversation"); len(runs) != 0 {
+		t.Errorf("a conversation started: %v", runs)
 	}
 }
 
@@ -381,6 +531,23 @@ func TestDeletedAgentWhileQuestionWaits(t *testing.T) {
 	}
 	if !strings.Contains(failure, "agents/desk") {
 		t.Errorf("the record does not say the agent has no file: %q", failure)
+	}
+}
+
+// A no is followed the same way: the agent's record shows the approval's no,
+// and tell never runs.
+func TestApprovalNoIsFollowed(t *testing.T) {
+	w := newWorld(t)
+	dir, _ := traceProject(t, w, from("1", "tell bob", 10))
+	w.sync(dir)
+	w.tap(w.question(map[string]bool{}).ID, "1", "no")
+	w.until("the reply said", func() bool { return sayings(t, w)["done: told bob"] != nil })
+	agent := stubs(t, w, "helper")[0].ID
+	if got := fmt.Sprint(w.arrived(agent, "done", "ask")); got != "[map[approve:[] note:alice said no.]]" {
+		t.Errorf("the approval gave %s", got)
+	}
+	if runs := stubs(t, w, "tell"); len(runs) != 0 {
+		t.Errorf("tell ran after a no")
 	}
 }
 

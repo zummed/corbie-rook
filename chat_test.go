@@ -203,6 +203,39 @@ const teamRules = `
 	  - { name: team, for: [team] }
 `
 
+// Three people write at once in their own chats: each gets the agent rules.yaml
+// gives them, in a conversation of their own, and carol, in no group, is
+// told the bot does not answer her here.
+func TestSeveralPeopleGetTheirOwnAgents(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorld(t)
+	dir := chatProject(t, w, tg, map[string]string{
+		"agents/helper.yaml": echoAgent("helper"),
+		"agents/team.yaml":   echoAgent("team"),
+		"agents/turn.js":     turnJS,
+		"rules.yaml":         teamRules,
+	})
+	tg.dm(1, "a1")
+	tg.dm(2, "b1")
+	tg.dm(3, "c1")
+	tg.dm(1, "a2")
+	tg.dm(2, "b2")
+	w.sync(dir)
+	tg.waitFor(w, "1", "helper to alice (2): a2")
+	tg.waitFor(w, "2", "team to bob (2): b2")
+	tg.waitFor(w, "3", "This bot does not answer you here.")
+	if got := tg.texts("1"); !slices.Equal(got, []string{"helper to alice (1): a1", "helper to alice (2): a2"}) {
+		t.Errorf("alice was told %q", got)
+	}
+	if got := tg.texts("2"); !slices.Equal(got, []string{"team to bob (1): b1", "team to bob (2): b2"}) {
+		t.Errorf("bob was told %q", got)
+	}
+	keys := keyed(w, ".rook/blocks/conversation.yaml")
+	if len(keys) != 2 || keys["telegram:1:helper"] == nil || keys["telegram:2:team"] == nil {
+		t.Errorf("the conversations are %v", keys)
+	}
+}
+
 // A message in a Telegram group is not heard, even from someone with an agent
 // and even when it names the bot: Telegram's listener hears only direct
 // messages, as rook-design says. Nothing is said in the group, and no chat run
@@ -310,6 +343,29 @@ func TestRouterAgentChoosesByWords(t *testing.T) {
 	w.sync(dir)
 	tg.waitFor(w, "1", "deploy to alice (1): please deploy the site")
 	tg.waitFor(w, "1", "helper to alice (2): how are you")
+}
+
+// An entry of rules.yaml written without for: fails the route, which names the
+// entry, and the person is told the message could not be answered.
+func TestRuleWithoutForTellsSomeone(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorld(t)
+	dir := chatProject(t, w, tg, map[string]string{
+		"agents/helper.yaml": echoAgent("helper"),
+		"agents/turn.js":     turnJS,
+		"rules.yaml": `
+			places:
+			  dm: { readers: [asker] }
+			agents:
+			  - { name: helper }
+		`,
+	})
+	tg.dm(1, "hello")
+	w.sync(dir)
+	tg.waitFor(w, "1", "That could not be answered. Ask again in a while.")
+	if f := failures(w); !slices.ContainsFunc(f, func(s string) bool { return strings.Contains(s, "rules.yaml: the agent helper has no for: list") }) {
+		t.Errorf("no failure names the entry: %q", f)
+	}
 }
 
 // rules.yaml names an agent that has no file. The message fails, and the
@@ -494,6 +550,29 @@ func TestApprovalByATapOnYes(t *testing.T) {
 	}
 }
 
+// A tap on No: the tool does not run, the model is told alice said no,
+// and alice gets the model's reply.
+func TestApprovalRefusedByATap(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorld(t)
+	dir, model := houseProject(t, w, tg, "", nil)
+	tg.dm(1, "tell bob hello")
+	w.sync(dir)
+	w.until("a question", func() bool { return len(tg.buttons()) == 2 })
+	tg.tapOn(t, 0, 1, "no")
+	tg.waitFor(w, "1", "tell gave")
+	quiet()
+	if got := tg.texts("2"); len(got) != 0 {
+		t.Errorf("bob was told %q after a no", got)
+	}
+	if got := last(model.Calls[len(model.Calls)-1]); !strings.Contains(got, "alice said no.") {
+		t.Errorf("the model was told %s", got)
+	}
+	if got := tg.edited(); len(got) != 1 || !strings.HasSuffix(got[0], "alice said no.") {
+		t.Errorf("the question shows %q", got)
+	}
+}
+
 // Bob, who is not the part's approver, and a stranger tap Yes: neither counts,
 // the question stays open, and then alice's No counts.
 func TestOnlyTheApproversTapCounts(t *testing.T) {
@@ -517,6 +596,29 @@ func TestOnlyTheApproversTapCounts(t *testing.T) {
 	tg.waitFor(w, "1", "tell gave")
 }
 
+// A question nobody answers gives no after seven days: the message shows that
+// no one answered, the tool does not run, and alice gets a reply.
+func TestApprovalTimesOut(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorld(t)
+	dir, model := houseProject(t, w, tg, "", nil)
+	tg.dm(1, "tell bob hello")
+	w.sync(dir)
+	w.until("a question", func() bool { return len(tg.buttons()) == 2 })
+	w.until("the question waiting", func() bool { return len(questions(w)) == 1 })
+	w.set(w.now().Add(7*24*time.Hour + time.Minute))
+	tg.waitFor(w, "1", "tell gave")
+	if got := tg.edited(); len(got) != 1 || !strings.HasSuffix(got[0], "No one answered in time, so the answer is no.") {
+		t.Errorf("the question shows %q", got)
+	}
+	if got := last(model.Calls[len(model.Calls)-1]); !strings.Contains(got, "No one answered in time, so the answer is no.") {
+		t.Errorf("the model was told %s", got)
+	}
+	if got := tg.texts("2"); len(got) != 0 {
+		t.Errorf("bob was told %q", got)
+	}
+}
+
 // Two held calls in one turn are one question, and one Yes runs both.
 func TestTwoHeldCallsAreOneQuestion(t *testing.T) {
 	tg := newTelegram(t)
@@ -536,6 +638,30 @@ func TestTwoHeldCallsAreOneQuestion(t *testing.T) {
 	tg.waitFor(w, "2", "first")
 	tg.waitFor(w, "3", "second")
 	tg.waitFor(w, "1", "twice gave")
+}
+
+// A tap whose choice is not one of the buttons (Telegram's callback data is
+// whatever the client sends) does not count, and the question waits for one
+// that does.
+func TestForgedChoiceApprovesNothing(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorld(t)
+	dir, _ := houseProject(t, w, tg, "", nil)
+	tg.dm(1, "tell bob hello")
+	w.sync(dir)
+	w.until("a question", func() bool { return len(tg.buttons()) == 2 })
+	q, _, _ := strings.Cut(tg.buttons()[0][1], " ")
+	tg.tapData(1, q+" YES")
+	w.until("the tap heard", tg.consumed)
+	quiet()
+	if got := tg.edited(); len(got) != 0 {
+		t.Fatalf("a choice that is no button closed the question: %q", got)
+	}
+	tg.tapOn(t, 0, 1, "yes")
+	tg.waitFor(w, "2", "hello from alice")
+	if got := tg.edited(); len(got) != 1 || !strings.HasSuffix(got[0], "alice said yes.") {
+		t.Errorf("the question shows %q", got)
+	}
 }
 
 // Five quick messages to a model agent are answered one at a time, in the order
@@ -847,6 +973,32 @@ func TestAttendDecides(t *testing.T) {
 	}
 }
 
+// attend.yaml that fails, or that gives a reply of another shape, answers
+// nothing, and the chat goes on.
+func TestAttendThatFailsOrMisspeaks(t *testing.T) {
+	for name, attend := range map[string]string{
+		"fails":       "flow: attend\ninput: { said: string }\nstages:\n  x: { job: { script: ./judge.js } }\n",
+		"plain true":  "flow: attend\ninput: { said: string }\nstages:\n  x: { job: { script: ./ok.js } }\noutput: { reply: true }\n",
+		"string false": "flow: attend\ninput: { said: string }\nstages:\n  x: { job: { script: ./ok.js } }\noutput: { reply: { answer: \"false\" } }\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			w := newWorld(t)
+			dir := copyStarter(t)
+			removeListener(t, dir)
+			write(t, dir, map[string]string{"attend.yaml": attend, "judge.js": `throw new Error("no model")`, "ok.js": "return 1"})
+			w.sync(dir)
+			w.sendTo(".rook/blocks/chat.yaml", "telegram:1", "message", overheard("1", "overheard"))
+			w.sendTo(".rook/blocks/chat.yaml", "telegram:1", "message", message("named"))
+			w.until("the answer", func() bool { return sayings(t, w)["named"] != nil })
+			quiet()
+			// rook-design: answered only when attend gives { reply: { answer: true } }.
+			if sayings(t, w)["overheard"] != nil {
+				t.Errorf("attend that gives %s answered the overheard message", name)
+			}
+		})
+	}
+}
+
 // reviewSays is review.yaml as a flow with no model that says one word.
 func reviewSays(word string) string {
 	return "flow: review\ninput: { context: string }\nstages:\n  x: { job: { script: ./ok.js } }\noutput: { reply: { says: " + word + ", note: because } }\n"
@@ -868,6 +1020,33 @@ func TestReviewMissing(t *testing.T) {
 	}
 	tg.tapOn(t, 0, 1, "yes")
 	tg.waitFor(w, "2", "hello from alice")
+}
+
+// review.yaml that gives no reply, or a word it does not know, is taken as
+// refer: alice is asked, and her yes runs the held call.
+func TestReviewMisspeaks(t *testing.T) {
+	for name, review := range map[string]string{
+		"no reply":     "flow: review\ninput: { context: string }\nstages:\n  x: { job: { script: ./ok.js } }\noutput: { verdict: yes }\n",
+		"unknown word": reviewSays("maybe"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			tg := newTelegram(t)
+			w := newWorld(t)
+			dir, model := houseProject(t, w, tg, ", review: true, alone: [tell]", map[string]string{"review.yaml": review, "ok.js": "return 1"})
+			tg.dm(1, "tell bob hello")
+			w.sync(dir)
+			w.until("a question or a reply", func() bool { return len(tg.texts("1")) > 0 })
+			if len(tg.buttons()) == 0 {
+				t.Errorf("review that gives %s: alice was not asked, and the model was told %s", name, last(model.Calls[len(model.Calls)-1]))
+				return
+			}
+			if q := tg.texts("1")[0]; name == "no reply" && !strings.Contains(q, "Review failed: it gave no reply") {
+				t.Errorf("alice was asked %q", q)
+			}
+			tg.tapOn(t, 0, 1, "yes")
+			tg.waitFor(w, "2", "hello from alice")
+		})
+	}
 }
 
 // review.yaml as the page shows it, an agent that includes
@@ -1334,3 +1513,30 @@ func TestApprovalOutlivesTheChat(t *testing.T) {
 	}
 }
 
+// people.yaml without its groups: line, as a person with no groups writes it:
+// alice is answered and the stranger refused.
+func TestPeopleWithoutGroups(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorld(t)
+	dir := chatProject(t, w, tg, map[string]string{
+		"agents/helper.yaml": echoAgent("helper"),
+		"agents/turn.js":     turnJS,
+		"people.yaml":        "people:\n  alice: { telegram: \"1\" }\n",
+	})
+	tg.dm(1, "hello")
+	tg.dm(9, "hello")
+	w.sync(dir)
+	w.until("both routes ended", func() bool {
+		n := 0
+		for _, r := range stubs(t, w, "route") {
+			if w.show(r.ID).HasEnded() {
+				n++
+			}
+		}
+		return n == 2
+	})
+	quiet()
+	if a, s := tg.texts("1"), tg.texts("9"); !slices.Equal(a, []string{"helper to alice (1): hello"}) || !slices.Equal(s, []string{"This bot answers only the people it belongs to."}) {
+		t.Errorf("with no groups: in people.yaml alice was told %q and the stranger %q; failures: %q", a, s, failedRuns(t, w))
+	}
+}

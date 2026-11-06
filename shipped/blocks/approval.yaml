@@ -7,8 +7,8 @@
 #   alone    tools whose calls the review's yes approves with no person asked
 #   request  what was asked, the agent's input request, which everyone is shown
 # A review's refuse ends it, and anything else goes to the people, shown the
-# review's word. A review that fails is taken as refer, and the people are
-# shown its error.
+# review's word. A review that fails, or gives no reply, is taken as refer, and
+# the people are shown why. The note names who answered.
 flow: approval
 title: "Approve ${(Array.isArray(input.jobs) ? input.jobs : []).map((j) => j.name).join(', ')}${input.request ? ': ' + input.request.split('\\n').pop() : ''}"
 input: { asking: any, jobs: any, part: string, people: "list?", in: "string?", review: "boolean?", alone: "list?", request: "string?" }
@@ -20,16 +20,16 @@ stages:
     when: "${!!input.review}"
     job: { call: { at: review }, input: { context: "${stages.brief.output.context + '\\n\\n' + stages.brief.output.rule}" } }
   person:
-    when: "${(input.people || []).length > 0 && (stages.review.skipped || stages.review.failed || !(stages.review.output.reply.says === 'refuse' || stages.review.output.reply.says === 'yes' && stages.brief.output.alone))}"
+    when: "${(input.people || []).length > 0 && (stages.review.skipped || stages.review.failed || !(((stages.review.output || {}).reply || {}).says === 'refuse' || ((stages.review.output || {}).reply || {}).says === 'yes' && stages.brief.output.alone))}"
     job:
       call: { at: .rook/blocks/ask }
       input:
         people: "${input.people}"
         in: "${input.in || ''}"
         choices: ["yes", "no"]
-        text: "An agent wants to run ${stages.brief.output.names.join(', ')}.\n\n${stages.brief.output.context}${stages.review.skipped ? '' : stages.review.failed ? '\\n\\nReview failed: ' + stages.review.error : '\\n\\nReview: ' + stages.review.output.reply.says + ', ' + stages.review.output.reply.note}"
+        text: "An agent wants to run ${stages.brief.output.names.join(', ')}.\n\n${stages.brief.output.context}${stages.review.skipped ? '' : stages.review.failed ? '\\n\\nReview failed: ' + stages.review.error : !(stages.review.output || {}).reply ? '\\n\\nReview failed: it gave no reply' : '\\n\\nReview: ' + stages.review.output.reply.says + ', ' + stages.review.output.reply.note}"
 output: >-
-  ${!stages.person.skipped ? { approve: stages.person.output.choice === 'yes' ? stages.brief.output.names : [], note: 'The approver said ' + stages.person.output.choice + '.' }
-  : !stages.review.skipped && !stages.review.failed && (stages.review.output.reply.says === 'refuse' || stages.review.output.reply.says === 'yes' && stages.brief.output.alone)
+  ${!stages.person.skipped ? { approve: stages.person.output.choice === 'yes' ? stages.brief.output.names : [], note: stages.person.output.person ? stages.person.output.person + ' said ' + stages.person.output.choice + '.' : 'No one answered in time, so the answer is no.' }
+  : !stages.review.skipped && !stages.review.failed && (((stages.review.output || {}).reply || {}).says === 'refuse' || ((stages.review.output || {}).reply || {}).says === 'yes' && stages.brief.output.alone)
   ? { approve: stages.review.output.reply.says === 'yes' ? stages.brief.output.names : [], note: 'The review said ' + stages.review.output.reply.says + ': ' + stages.review.output.reply.note }
   : { approve: [], note: 'The part ' + input.part + ' names no one in people to approve its calls.' }}

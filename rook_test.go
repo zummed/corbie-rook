@@ -440,7 +440,7 @@ func TestHeldCallWaitsForItsApprovers(t *testing.T) {
 	w.sync(dir)
 	id := w.start("agents/helper.yaml", map[string]any{"said": "q", "asker": "alice", "request": "alice: before\nalice: q", "home": dir})
 	question := w.question(map[string]bool{})
-	if text := fmt.Sprint(w.show(question.ID).Input); !strings.Contains(text, "Request, the latest message last:\nalice: before\nalice: q") {
+	if text := fmt.Sprint(w.show(question.ID).Input); !strings.Contains(text, "Request, the latest message last:\n> alice: before\n> alice: q") {
 		t.Errorf("the approver was shown %s", text)
 	}
 	w.tap(question.ID, "1", "no")
@@ -450,7 +450,7 @@ func TestHeldCallWaitsForItsApprovers(t *testing.T) {
 	}
 	said := model.Calls[2].Messages
 	text, _ := json.Marshal(said[len(said)-1])
-	if !strings.Contains(string(text), "The approver said no") {
+	if !strings.Contains(string(text), "alice said no.") {
 		t.Errorf("the held call came back as %s", text)
 	}
 	if runs := stubs(t, w, "tell"); len(runs) != 0 {
@@ -626,7 +626,7 @@ func TestApprovalWithNoReviewAsksThePeople(t *testing.T) {
 	}
 	w.tap(question.ID, "1", "yes")
 	w.until("the approval", func() bool { return w.show(id).HasEnded() })
-	if got := fmt.Sprint(w.show(id).Output); got != "map[approve:[tell] note:The approver said yes.]" {
+	if got := fmt.Sprint(w.show(id).Output); got != "map[approve:[tell] note:alice said yes.]" {
 		t.Fatalf("it gave %s", got)
 	}
 }

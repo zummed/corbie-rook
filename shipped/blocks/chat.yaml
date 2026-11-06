@@ -9,7 +9,9 @@
 #      is not answered.
 #   4. A message to answer goes to the conversation of this thread and that
 #      agent, at .rook/blocks/conversation, keyed <bridge>:<chat>:<agent>.
-# Someone with no agent who names the bot is told the bot is not theirs. A chat
+# Someone with no agent who names the bot is told the bot is not theirs, or not
+# theirs here when lookup.yaml knows them. A message that names the bot and
+# whose who.yaml fails is told it could not be answered. A chat
 # quiet for a day ends, and its next message starts a new one. Its title is
 # where it is and the first line said: "#help: …", "dm: …", "#7 …" for a GitLab
 # issue, "OPS-1 …" for a Jira one.
@@ -53,15 +55,18 @@ states:
                 history: "${(stages.history.output || {}).text}"
           refuse:
             when: "${!stages.who.output.agent && !input.message.unaddressed}"
-            job: { machine: ./say.yaml, input: { address: "${input.address}", text: This bot answers only the people it belongs to. } }
+            job: { machine: ./say.yaml, input: { address: "${input.address}", text: "${stages.who.output.person ? 'This bot does not answer you here.' : 'This bot answers only the people it belongs to.'}" } }
+          sorry:
+            when: "${stages.who.failed && !input.message.unaddressed}"
+            job: { machine: ./say.yaml, input: { address: "${input.address}", text: That could not be answered. Ask again in a while. } }
         output:
-          answer: "${!!stages.who.output.agent && (!input.message.unaddressed || !stages.attend.failed && !stages.attend.skipped && !!((stages.attend.output || {}).reply || {}).answer)}"
-          agent: "${stages.who.output.agent}"
-          rule: "${stages.who.output.rule}"
+          answer: "${stages.sorry.skipped && !!stages.who.output.agent && (!input.message.unaddressed || !stages.attend.failed && !stages.attend.skipped && ((stages.attend.output || {}).reply || {}).answer === true)}"
+          agent: "${(stages.who.output || {}).agent}"
+          rule: "${(stages.who.output || {}).rule}"
           given:
             message: "${input.message}"
-            asker: "${stages.who.output.person || input.message.bridge + ' user ' + input.message.from}"
-            agent: "${stages.who.output.agent}"
+            asker: "${(stages.who.output || {}).person || input.message.bridge + ' user ' + input.message.from}"
+            agent: "${(stages.who.output || {}).agent}"
             address: "${input.address}"
             history: "${stages.history.output}"
     on:

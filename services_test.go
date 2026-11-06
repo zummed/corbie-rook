@@ -216,6 +216,22 @@ func TestSlackDirectMessageThreadIsItsOwnChat(t *testing.T) {
 	}
 }
 
+// alice, whom people.yaml names, names the bot in a channel rules.yaml does
+// not list, which anyone reads, so her agent, for [alice], does not answer
+// there. She is told the bot does not answer her there.
+func TestSlackOwnerInAnUnlistedChannelIsToldTheBotIsNotForHere(t *testing.T) {
+	s := newSlack(t)
+	w := newWorld(t)
+	dir := slackProject(t, w, s)
+	w.sync(dir)
+	w.until("Slack connected", s.connected)
+	s.says("a", inChannel("U1", "4.0", "", "<@UBOT> hello"))
+	w.until("an answer", func() bool { return len(s.posted()) >= 1 })
+	if got := s.posted()[0]["markdown_text"]; got != "This bot does not answer you here." {
+		t.Errorf("alice was told %q in #help, which rules.yaml does not list", got)
+	}
+}
+
 // Slack sends an envelope again after the listener reconnects, under a new
 // envelope ID. The event in it is answered once, since the listener's cursor
 // carries what it heard to the next job.
@@ -979,6 +995,44 @@ func TestGitLabRequestApprovedOnSlack(t *testing.T) {
 	}
 }
 
+// In a project with only GitLab, a question to a person whose people.yaml entry
+// has a Slack id fails at once, saying the project does not run Slack.
+func TestGitLabOnlyProjectAskingASlackPersonFailsClearly(t *testing.T) {
+	gl := newGitLab(t)
+	w := newWorld(t)
+	w.secret("GITLAB_TOKEN", "gl-token")
+	dir := pointed(t, "gitlab", gl.Server)
+	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
+	write(t, dir, map[string]string{"on/asker.yaml": `
+		flow: asker
+		allow: [send:.rook/blocks/ask]
+		stages:
+		  asking: { job: { call: { at: .rook/blocks/ask }, input: { people: [alice], text: "Well?", choices: ["yes", "no"] } } }
+		output: ${stages.asking.output.choice}
+	`})
+	w.sync(dir)
+	asker := w.start("on/asker.yaml", nil)
+	var run *client.Run
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		run = w.show(asker)
+		if run.Status != "running" && run.Status != "waiting" {
+			break
+		}
+		time.Sleep(interval)
+	}
+	if run.Status != "failed" {
+		var qs []string
+		for _, q := range w.at(".rook/blocks/ask.yaml") {
+			qs = append(qs, q.Machine+" "+q.Status+" "+w.show(q.ID).Error)
+		}
+		t.Fatalf("the asker is %s after 5s; the question's runs: %v; failures: %v", run.Status, qs, failures(w))
+	}
+	if !strings.Contains(run.Error, "people.yaml reaches alice on slack, which this project does not run") {
+		t.Errorf("the asker failed with %q", run.Error)
+	}
+}
+
 // Starter with no model
 
 // init's reminders
@@ -1054,3 +1108,33 @@ func TestJiraOverheardCommentGoesToAttend(t *testing.T) {
 	}
 }
 
+// In a project that runs Telegram and not Slack, a person whose people.yaml
+// entry gives a Slack id before a Telegram one is asked on Telegram, the bridge
+// that reaches them.
+func TestQuestionGoesToABridgeTheProjectRuns(t *testing.T) {
+	w := newWorld(t)
+	dir := copyStarter(t)
+	write(t, dir, map[string]string{
+		"people.yaml": "people:\n  alice: { slack: U1, telegram: \"1\" }\ngroups: {}\n",
+		"on/asker.yaml": `
+			flow: asker
+			allow: [send:.rook/blocks/ask]
+			stages:
+			  asking: { job: { call: { at: .rook/blocks/ask }, input: { people: [alice], text: "Well?", choices: ["yes", "no"] } } }
+			output: ${stages.asking.output.choice}
+		`,
+	})
+	removeListener(t, dir)
+	w.sync(dir)
+	asker := w.start("on/asker.yaml", nil)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && len(questions(w)) == 0 && w.show(asker).Status != "failed" {
+		time.Sleep(interval)
+	}
+	if run := w.show(asker); run.Status == "failed" {
+		t.Fatalf("alice, reached on Telegram, was not asked there: %s", run.Error)
+	}
+	if len(questions(w)) == 0 {
+		t.Fatal("no question waits")
+	}
+}
