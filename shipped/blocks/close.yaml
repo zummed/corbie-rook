@@ -1,12 +1,10 @@
 # Shows the answer on each message a question posted, and takes its buttons away.
-# `sent` is what the bridges' asks gave.
+# `sent` is what the bridges' asks gave, by bridge. It calls each bridge's close
+# at .rook/bridges/<bridge>/close.
 flow: close
 input: { sent: map, text: string }
-allow: [send:.rook/bridges/telegram/close, send:.rook/bridges/slack/close]
+allow: ["send:.rook/bridges/*/close"]
 stages:
-  telegram:
-    when: "${(input.sent.telegram || []).length > 0}"
-    job: { call: { at: .rook/bridges/telegram/close }, input: { sent: "${input.sent.telegram}", text: "${input.text}" } }
-  slack:
-    when: "${(input.sent.slack || []).length > 0}"
-    job: { call: { at: .rook/bridges/slack/close }, input: { sent: "${input.sent.slack}", text: "${input.text}" } }
+  close:
+    each: "${Object.keys(input.sent).filter((bridge) => (input.sent[bridge] || []).length > 0)}"
+    job: { call: { at: ".rook/bridges/${item}/close" }, input: { sent: "${input.sent[item]}", text: "${input.text}" } }

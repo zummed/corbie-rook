@@ -98,9 +98,9 @@ if (input.do === "hear") {
   }
 
   // said emits a message said to the bot: in a direct message, or naming it in a
-  // channel. With input.overhear, a reply in a thread the bot has said something
-  // in is emitted too, marked unaddressed. What a bot says is left out, the bot's
-  // own included.
+  // channel. With input.overhear, a channel's message outside a thread, and a
+  // reply in a thread the bot has said something in, are emitted too, marked
+  // unaddressed. What a bot says is left out, the bot's own included.
   const said = (e) => {
     if (e.type !== "message" || (e.subtype && e.subtype !== "file_share" && e.subtype !== "thread_broadcast")) return
     if (!e.channel || !e.ts) return log("a message names no channel or no time")
@@ -113,7 +113,7 @@ if (input.do === "hear") {
     if (!text && !files.length) return
     let unaddressed = false
     if (!direct && !text.includes(mention)) {
-      if (!input.overhear || !e.thread_ts || !spoken(e.channel, e.thread_ts)) return
+      if (!input.overhear || e.thread_ts && !spoken(e.channel, e.thread_ts)) return
       unaddressed = true
     }
     const place = direct ? "dm" : "#" + call("conversations.info", null, { channel: e.channel }).channel.name

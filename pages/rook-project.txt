@@ -134,7 +134,7 @@ Common changes
 - To add a bridge, run `corbie rook init . --bridges <name>`, set the secrets and values it names, and submit.
 - To stop a bridge, delete its file, then run `corbie rook init .`, which removes its machines from `.rook/`, and submit. Until init runs, people are still asked and told on it.
 - To read people from somewhere else, change the job in `lookup.yaml`.
-- To answer replies in a Slack thread without being named, add `overhear: true` to the input in `bridges/slack.yaml`. A reply in a thread the bot has said something in, from someone who gets an agent there, then goes to `attend.yaml`, and is not answered while the project has none.
+- To answer Slack messages that do not name the bot, add `overhear: true` to the input in `bridges/slack.yaml`. A channel's message outside a thread, or a reply in a thread the bot has said something in, from someone who gets an agent there, then goes to `attend.yaml`, and is not answered while the project has none.
 - To hear every public issue and comment on GitLab or Jira, add `overhear: true` to the input in the bridge's file. One that does not name the bot then goes to `attend.yaml`.
 - To answer some of those messages, write `attend.yaml`: an agent that includes `.rook/attend/agent.yaml`, as `corbie rook manual rook-design` says under Attend, or a machine of your own.
 - To wait until an issue is finished being written, add `settle: 2m` to the input in `bridges/gitlab.yaml` or `bridges/jira.yaml`. An opened issue is then heard once nobody has changed it for two minutes.

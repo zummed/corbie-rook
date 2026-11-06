@@ -183,7 +183,7 @@ the run whose ID the button holds.
 
 These settings go in a listener's input:
 
-  overhear: true    Slack: hears a reply in a thread the bot has said something in
+  overhear: true    Slack: hears a channel's message outside a thread, and a reply in a thread the bot has said something in
   overhear: true    GitLab, Jira: hears every issue opened and every public comment
   settle: 2m        GitLab, Jira: hears an opened issue once nobody has changed it for 2 minutes; 0s by default
 

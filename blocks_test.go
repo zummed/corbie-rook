@@ -160,10 +160,10 @@ const attendStub = `
 	  e: { end: done, output: { reply: { answer: "${input.said.includes('please')}" } } }
 `
 
-// With overhear, a reply in a thread the bot has said something in goes to
-// attend.yaml, and is answered only if it says so. A stranger's is not answered
-// and not told anything, and a message outside a thread is not heard.
-func TestSlackOverhearsAThreadItSpokeIn(t *testing.T) {
+// With overhear, a reply in a thread the bot has said something in, and a
+// channel's message outside a thread, go to attend.yaml, and are answered only
+// if it says so. A stranger's is not answered and not told anything.
+func TestSlackOverhearsAChannelAndAThreadItSpokeIn(t *testing.T) {
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
@@ -190,18 +190,23 @@ func TestSlackOverhearsAThreadItSpokeIn(t *testing.T) {
 	in("b", "U1", "6.0", "1.0", "just chatting")
 	in("c", "U9", "7.0", "1.0", "please too")
 	in("d", "U1", "8.0", "", "please, not in a thread")
-	w.until("the answer", func() bool { return len(s.posted()) >= 1 })
-	w.until("both asked", func() bool { return len(stubs(t, w, "attend-stub")) == 2 })
+	w.until("the answers", func() bool { return len(s.posted()) >= 2 })
+	w.until("all three asked", func() bool { return len(stubs(t, w, "attend-stub")) == 3 })
 	time.Sleep(20 * interval)
-	if got := s.posted(); len(got) != 1 || !strings.Contains(fmt.Sprint(got[0]["markdown_text"]), "please help") {
-		t.Fatalf("the bot posted %v", got)
+	var said []string
+	for _, p := range s.posted() {
+		said = append(said, fmt.Sprint(p["markdown_text"]))
+	}
+	if got := strings.Join(said, "\n"); len(said) != 2 || !strings.Contains(got, "please help") || !strings.Contains(got, "please, not in a thread") {
+		t.Fatalf("the bot posted %q", said)
 	}
 	for _, run := range stubs(t, w, "attend-stub") {
-		if history := fmt.Sprint(w.show(run.ID).Input.(map[string]any)["history"]); !strings.Contains(history, "you: my earlier reply") {
-			t.Errorf("attend was given %q", history)
+		input := w.show(run.ID).Input.(map[string]any)
+		if history := fmt.Sprint(input["history"]); input["said"] != "please, not in a thread" && !strings.Contains(history, "you: my earlier reply") {
+			t.Errorf("attend was given %q for %q", history, input["said"])
 		}
 	}
-	if n := len(stubs(t, w, "attend-stub")); n != 2 {
+	if n := len(stubs(t, w, "attend-stub")); n != 3 {
 		t.Fatalf("attend ran %d times", n)
 	}
 }
