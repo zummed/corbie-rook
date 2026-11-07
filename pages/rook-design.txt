@@ -58,10 +58,17 @@ thread's entries before the message, oldest first, each { line, attachments },
 and `complete` says whether it goes back to the thread's start.
 
 Telegram's Bot API keeps no history a bot can read, so Telegram's listener
-keeps what it heard: 20 entries and 8000 characters a chat, 250,000 characters
-in all, and no chat quiet for a day. A new run of the listener starts with
-none. A Telegram answer also holds `callback`, the tap's ID, which the
-question answers to tell the presser.
+keeps the person's messages it heard, never the bot's replies, which the agent
+has in its kept conversation while that run lasts. `complete` says the
+listener heard the chat's /start and dropped none of the person's messages
+since. A new run of the listener starts with no history.
+
+  each chat                at most 20 entries and 8000 bytes, but always its latest entry
+  all chats                at most 64 KiB, a quarter of what Corbie takes as a job's input or result
+  a chat quiet for a day   dropped
+
+A Telegram answer also holds `callback`, the tap's ID, which the question
+answers to tell the presser.
 
 A router sends a message and a stop to the conversation keyed
 `<service>:<chat>:<user>:<agent>`, so each person in a thread has their own

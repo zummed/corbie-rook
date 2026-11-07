@@ -558,7 +558,7 @@ func TestTelegramHistoryIsKeptForEachChat(t *testing.T) {
 	}
 }
 
-// A chat's history holds at most 20 entries and 8000 characters: past either,
+// A chat's history holds at most 20 entries and 8000 bytes: past either,
 // its oldest entries are dropped, and it is no longer complete.
 func TestTelegramHistoryIsBounded(t *testing.T) {
 	tg := newTelegram(t)
@@ -606,30 +606,42 @@ func TestTelegramHistoryIsDroppedAfterADay(t *testing.T) {
 	}
 }
 
-// The listener keeps at most 250,000 characters of history in all, so its
-// output stays under a quarter of what a job may give: past that, the chat
-// quiet longest is dropped.
+// The listener keeps at most 64 KiB of history in all, counted in UTF-8 bytes,
+// so its output stays well under the 256 KiB Corbie takes as a job's result:
+// past that, the chat quiet longest is dropped. Six chats of a 4096-character
+// message, as long as Telegram sends, of 3-byte characters pass the bound, and
+// the listener goes on hearing after it.
 func TestTelegramHistoryIsBoundedInAll(t *testing.T) {
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir := chatProject(t, w, tg, historyAgent)
-	// Telegram takes 4096 characters a message, and the stand-in any number,
-	// so that three chats pass the bound.
-	long := strings.Repeat("x", 90000)
-	for chat := 100; chat < 103; chat++ {
+	long := strings.Repeat("字", 4096)
+	for chat := 100; chat < 106; chat++ {
 		tg.dm(chat, "/start", map[string]any{"date": 1700000000 + chat})
 		tg.dm(chat, long, map[string]any{"date": 1700000000 + chat})
 	}
 	tg.dm(100, "again", map[string]any{"date": 1700000200})
-	tg.dm(102, "again", map[string]any{"date": 1700000200})
+	tg.dm(105, "again", map[string]any{"date": 1700000200})
+	tg.dm(103, "still", map[string]any{"date": 1700000300})
 	w.sync(dir)
-	tg.waitFor(w, "100", "] again")
-	tg.waitFor(w, "102", "] again")
+	tg.waitFor(w, "103", "] still")
 	if got := tg.texts("100"); got[len(got)-1] != "partial [] again" {
 		t.Errorf("the chat quiet longest was given %.80q", got[len(got)-1])
 	}
-	if got := tg.texts("102"); !strings.HasSuffix(got[len(got)-1], "x] again") {
-		t.Errorf("the latest chat was given %.80q", got[len(got)-1])
+	// A reply past 4096 characters is posted in parts.
+	for chat, last := range map[string]string{"105": "again", "103": "still"} {
+		if got := strings.Join(tg.texts(chat), ""); !strings.HasSuffix(got, "complete ["+chat+": "+long+"] "+last) {
+			t.Errorf("chat %s was given %.80q", chat, got[len(got)-80:])
+		}
+	}
+	for _, run := range listenerRuns(w, "telegram") {
+		for _, e := range w.record(run.ID) {
+			for _, ev := range e.Events {
+				if ev.Name == "failed" {
+					t.Errorf("the listener failed: %v", ev.Data)
+				}
+			}
+		}
 	}
 }
 

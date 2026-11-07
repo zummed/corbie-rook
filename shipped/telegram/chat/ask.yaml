@@ -6,7 +6,8 @@
 # `asker`'s. Telegram shows the presser why a tap does not count, and the
 # buttons stay. The first tap that counts ends the question with { choice, by }
 # and shows it under the text. No tap that counts within `within`, by default a
-# week, ends it with { choice: no }.
+# week, ends it with { choice: no }. A tap that cannot be checked, such as when
+# the lookup fails, fails the question with that error.
 statechart: telegram-chat-ask
 description: Asks a question in a Telegram chat, with a button for each choice, and gives the first choice pressed by an approver.
 title: "${input.text.split('\\n')[0]}"
@@ -68,7 +69,6 @@ states:
           done:
             - { go: answered, when: "${event.data.counts}" }
             - waiting
-          failed: waiting
     on: { unanswered: unanswered }
   answered:
     job:

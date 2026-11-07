@@ -7,13 +7,34 @@ const api = "https://api.telegram.org"
 const token = secrets.get(input.token)
 
 // The history the listener keeps of each chat: at most 20 entries and 8000
-// characters a chat, and at most 250,000 characters in all, so the listener's
-// output stays under a quarter of the 4 MiB a job may give. A chat with no
-// message for a day is dropped.
+// bytes a chat, though always its latest entry, and at most 64 KiB in all. The
+// history is both the listener's input and its output, and Corbie takes a job's
+// input and its result at 256 KiB each, sealed and base64-encoded, so about
+// 190 KB of JSON; a quarter of the 256 KiB leaves room for the rest of each.
+// Telegram takes at most 4096 characters a message, so a chat's latest entry
+// alone is far under the bound in all. Each is measured as the bytes of
+// its JSON in UTF-8, as Corbie sends it. A chat with no message for a day is
+// dropped.
 const mostEntries = 20
-const mostChars = 8000
-const mostKept = 250000
+const mostChat = 8000
+const mostKept = 64 << 10
 const quiet = 24 * 60 * 60
+
+// size gives the bytes of a value's JSON in UTF-8.
+function size(v) {
+  const s = JSON.stringify(v)
+  let n = 0
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    if (c < 0x80) n += 1
+    else if (c < 0x800) n += 2
+    else if (c >= 0xd800 && c < 0xdc00 && i + 1 < s.length) {
+      n += 4
+      i++
+    } else n += 3
+  }
+  return n
+}
 
 // call calls a method of the Bot API and gives its result, sending body as
 // JSON, or with upload as a form that holds a file, which may take four minutes. Telegram's refusal is
@@ -68,8 +89,10 @@ if (input.do === "hear") {
   // entries }, at being the time of its latest message in seconds, and each
   // entry { line, attachments } as shared/thread.js reads it. The Bot API
   // keeps no history a bot can read, so the listener keeps what it heard, and
-  // a run that starts with no output has none. A chat's history is complete
-  // when the listener heard the /start that began the chat and dropped no entry
+  // a run that starts with no output has none. getUpdates never gives the
+  // bot's own messages, so a history holds the person's messages only, never
+  // the bot's replies. A chat's history is complete when the listener heard
+  // the /start that began the chat and dropped none of the person's messages
   // since.
   const ask = { timeout: 50, limit: 1, allowed_updates: ["message", "callback_query"] }
   if (input.cursor !== null && input.cursor !== undefined) ask.offset = input.cursor
@@ -145,7 +168,7 @@ if (input.do === "hear") {
     if (!history) return
     for (const id of Object.keys(chats)) if (chats[id].at <= now - quiet) delete chats[id]
     chats[chat] = history
-    while (JSON.stringify(chats).length > mostKept) {
+    while (size(chats) > mostKept) {
       const oldest = Object.keys(chats).reduce((a, b) => (chats[b].at < chats[a].at ? b : a))
       delete chats[oldest]
     }
@@ -177,7 +200,7 @@ function named(from) {
 function added(history, entry, at) {
   const entries = history.entries.concat([entry])
   let complete = history.complete
-  while (entries.length > mostEntries || (entries.length > 1 && JSON.stringify(entries).length > mostChars)) {
+  while (entries.length > mostEntries || (entries.length > 1 && size(entries) > mostChat)) {
     entries.shift()
     complete = false
   }

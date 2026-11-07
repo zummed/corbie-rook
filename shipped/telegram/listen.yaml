@@ -3,7 +3,8 @@
 # answer for a tap on a question's button. A button holds the question's run ID
 # without its client's name, since Telegram keeps 64 bytes of it. The Bot API
 # keeps no history a bot can read, so the listener keeps each chat's history in
-# its output, and a new run of it starts with none.
+# its output, and a new run of it starts with none. getUpdates never gives the
+# bot's own messages, so a history holds the person's messages only.
 statechart: telegram-listen
 description: Sends its parent each Telegram message, button press and stop meant for the bot.
 title: Telegram listener

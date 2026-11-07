@@ -567,6 +567,30 @@ func TestAskPersonIsAnsweredByATap(t *testing.T) {
 	w.titled(map[string][]string{"telegram-chat-ask": {"Well?"}})
 }
 
+// A tap the question cannot check, because the lookup fails, fails the
+// question with the lookup's error, and the machine that asked with it.
+func TestTapTheLookupFailsOnFailsTheQuestion(t *testing.T) {
+	w := newWorld(t)
+	dir := copyStarter(t)
+	write(t, dir, map[string]string{
+		"agents/asker.yaml":  asker,
+		"people/find.yaml":   telegramFind,
+		"people/scopes.yaml": "bob@example.com: { name: [bob\n",
+	})
+	removeListener(t, dir)
+	w.sync(dir)
+	id := w.start("agents/asker.yaml", nil)
+	question := w.question(map[string]bool{})
+	w.tap(question.ID, "2", "yes")
+	w.until("the asker ends", func() bool { return w.show(id).HasEnded() })
+	if run := w.show(id); run.Status != "failed" || !strings.Contains(run.Error, "scopes.yaml") {
+		t.Fatalf("the asker is %s: %s", run.Status, run.Error)
+	}
+	if run := w.show(question.ID); run.Status != "failed" {
+		t.Errorf("the question is %s", run.Status)
+	}
+}
+
 // A project with a bot on every service reads: the routers are singletons,
 // the conversation is keyed, nothing under .rook has a location, and .rook/,
 // people/scopes.yaml and testdata's toolkits/ are listed. Every machine Rook
