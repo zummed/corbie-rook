@@ -1,5 +1,6 @@
-# `in` is conversation/thread. An empty text clears the status and Slack's stop
-# button. A late status is worse than none, so it is not tried again.
+# `in` is conversation/thread. Any text shows "Working..." and Slack's stop
+# button under the thread; an empty text clears them. A late status is worse
+# than none, so it is not tried again.
 flow: slack-assistant-status
 description: "Shows a status, such as \"Working...\", under a Slack thread."
 input: { in: string, text: string }
@@ -7,6 +8,6 @@ stages:
   status:
     job:
       script: .rook/slack/slack.js
-      input: { do: status, to: "${input.in}", text: "${input.text}" }
+      input: { do: status, in: "${input.in}", text: "${input.text}" }
       allow: [net:slack.com, "secret:SLACK_TOKEN@net:slack.com"]
       timeout: 20s

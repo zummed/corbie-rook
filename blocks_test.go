@@ -15,12 +15,13 @@ import (
 	"github.com/zummed/corbie/client"
 )
 
-// replying puts in an agent that gives one reply to everything.
+// replying puts in an agent at agents/assistant that gives one reply to
+// everything.
 func replying(t *testing.T, dir, reply string) {
 	t.Helper()
 	quoted, _ := json.Marshal(reply)
-	stub := "statechart: helper\ninput: { said: string, asker: string, home: string, conversation: \"any?\" }\ninitial: e\nstates:\n  e: { end: done, output: { reply: " + string(quoted) + " } }\n"
-	if err := os.WriteFile(filepath.Join(dir, "agents/helper.yaml"), []byte(stub), 0o644); err != nil {
+	stub := "statechart: assistant\ninput: { messages: list, medium: string, asker: map, thread: \"any?\", attachments: \"any?\", conversation: \"any?\" }\ninitial: e\nstates:\n  e: { end: done, output: { reply: " + string(quoted) + " } }\n"
+	if err := os.WriteFile(filepath.Join(dir, "agents/assistant.yaml"), []byte(stub), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -34,7 +35,6 @@ const charts = "Here.\n\n" +
 // Slack draws a chart it can, and shows one it cannot as a table. A message Slack
 // refuses is posted again as markdown, each chart as its table.
 func TestSlackDrawsCharts(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
 	for _, refuse := range []bool{false, true} {
 		t.Run(fmt.Sprint("refused ", refuse), func(t *testing.T) {
 			s := newSlack(t)
@@ -111,7 +111,7 @@ func TestGitLabSaysAChartAsATable(t *testing.T) {
 // once the reply is posted, when the answer says nothing, and when the answer
 // fails and the thread is told so.
 func TestSlackShowsAStatusWhileAnswering(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
+	t.Skip("R7 revives this: conversation, agent and starter")
 	for name, agent := range map[string]string{
 		"reply":   "Done.",
 		"nothing": "",
@@ -123,7 +123,7 @@ func TestSlackShowsAStatusWhileAnswering(t *testing.T) {
 			dir := slackProject(t, w, s)
 			replying(t, dir, agent)
 			if name == "failure" {
-				write(t, dir, map[string]string{"agents/helper.yaml": "flow: helper\nstages:\n  fail: { job: { script: ./fail.js } }\n", "agents/fail.js": `throw new Error("no answer")`})
+				write(t, dir, map[string]string{"agents/assistant.yaml": "flow: assistant\nstages:\n  fail: { job: { script: ./fail.js } }\n", "agents/fail.js": `throw new Error("no answer")`})
 			}
 			w.sync(dir)
 			w.until("Slack connected", s.connected)
@@ -152,6 +152,31 @@ func TestSlackShowsAStatusWhileAnswering(t *testing.T) {
 	}
 }
 
+// A status shows "Working..." under a thread for any text, and an empty text
+// clears it. Outside a thread Slack keeps no status, and nothing is asked.
+func TestSlackStatusShowsAndClears(t *testing.T) {
+	s := newSlack(t)
+	w := newWorld(t)
+	dir := slackProject(t, w, s)
+	write(t, dir, map[string]string{"on/status.yaml": `
+		flow: status
+		allow: [send:gromit/slack/assistant/status]
+		stages:
+		  outside: { job: { call: { at: gromit/slack/assistant/status }, input: { in: D1, text: Working on it. } } }
+		  show: { follows: [outside], job: { call: { at: gromit/slack/assistant/status }, input: { in: D1/4.0, text: Working on it. } } }
+		  clear: { follows: [show], job: { call: { at: gromit/slack/assistant/status }, input: { in: D1/4.0, text: "" } } }
+	`})
+	w.sync(dir)
+	id := w.start("on/status.yaml", nil)
+	w.until("the flow done", func() bool { return w.show(id).Status == "done" })
+	s.mu.Lock()
+	got, _ := json.Marshal(s.status)
+	s.mu.Unlock()
+	if string(got) != `[{"channel_id":"D1","status":"processing","thread_ts":"4.0"},{"channel_id":"D1","status":"active","thread_ts":"4.0"}]` {
+		t.Fatalf("the statuses are %s", got)
+	}
+}
+
 // attendStub stands in for attend.yaml: it answers a message holding "please".
 const attendStub = `
 	statechart: attend-stub
@@ -161,55 +186,37 @@ const attendStub = `
 	  e: { end: done, output: { reply: { answer: "${input.said.includes('please')}" } } }
 `
 
-// With overhear, a reply in a thread the bot has said something in, and a
-// channel's message outside a thread, go to attend.yaml, and are answered only
-// if it says so. A stranger's is not answered and not told anything.
+// With overhear, the listener sends a reply in a thread the bot has said
+// something in, with what the thread held before it, and a channel's message
+// outside a thread, each marked unaddressed; a reply in another thread is not
+// sent. The starter's router answers none of them.
 func TestSlackOverhearsAChannelAndAThreadItSpokeIn(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
-	echoing(t, dir)
-	setSite(t, dir, router("slack"), "      restart: { when: always }\n", "      restart: { when: always }\n      input: { overhear: true }\n")
-	setSite(t, dir, "rules.yaml", "  dm: { readers: [asker] }\n", "  dm: { readers: [asker] }\n  \"#help\": { readers: [asker] }\n")
-	if err := os.WriteFile(filepath.Join(dir, "attend.yaml"), []byte(dedent(attendStub)), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	setSite(t, dir, router("slack"), "job: { machine: .rook/slack/listen.yaml,", "job: { machine: .rook/slack/listen.yaml, input: { overhear: true },")
 	s.thread = []map[string]any{
 		{"ts": "1.0", "user": "U1", "text": "<@UBOT> start"},
 		{"ts": "2.0", "user": "UBOT", "text": "my earlier reply"},
 	}
 	w.sync(dir)
 	w.until("Slack connected", s.connected)
-	in := func(id, user, ts, thread, text string) {
-		e := map[string]any{"type": "message", "channel": "C1", "channel_type": "channel", "user": user, "ts": ts, "text": text}
-		if thread != "" {
-			e["thread_ts"] = thread
-		}
-		s.says(id, e)
-	}
-	in("a", "U1", "5.0", "1.0", "please help")
-	in("b", "U1", "6.0", "1.0", "just chatting")
-	in("c", "U9", "7.0", "1.0", "please too")
-	in("d", "U1", "8.0", "", "please, not in a thread")
-	w.until("the answers", func() bool { return len(s.posted()) >= 2 })
-	w.until("all three asked", func() bool { return len(stubs(t, w, "attend-stub")) == 3 })
+	s.says("a", inChannel("U1", "5.0", "1.0", "please help"))
+	w.until("the reply received", func() bool { return s.acked() == 1 })
+	s.mu.Lock()
+	s.thread = []map[string]any{{"ts": "3.0", "user": "U2", "text": "between people"}}
+	s.mu.Unlock()
+	s.says("b", inChannel("U2", "6.0", "3.0", "just chatting"))
+	s.says("c", inChannel("U1", "8.0", "", "please, not in a thread"))
+	w.until("every envelope received", func() bool { return s.acked() == 3 })
 	time.Sleep(20 * interval)
-	var said []string
-	for _, p := range s.posted() {
-		said = append(said, fmt.Sprint(p["markdown_text"]))
+	sent := emitted(w, "slack", "message")
+	if len(sent) != 2 || sent[0]["text"] != "please help" || sent[0]["chat"] != "C1/1.0" || sent[0]["unaddressed"] != true || sent[0]["history"] == nil ||
+		sent[1]["text"] != "please, not in a thread" || sent[1]["chat"] != "C1/8.0" || sent[1]["unaddressed"] != true || sent[1]["history"] != nil {
+		t.Fatalf("the listener sent %v", sent)
 	}
-	if got := strings.Join(said, "\n"); len(said) != 2 || !strings.Contains(got, "please help") || !strings.Contains(got, "please, not in a thread") {
-		t.Fatalf("the bot posted %q", said)
-	}
-	for _, run := range stubs(t, w, "attend-stub") {
-		input := w.show(run.ID).Input.(map[string]any)
-		if history := fmt.Sprint(input["history"]); input["said"] != "please, not in a thread" && !strings.Contains(history, "you: my earlier reply") {
-			t.Errorf("attend was given %q for %q", history, input["said"])
-		}
-	}
-	if n := len(stubs(t, w, "attend-stub")); n != 3 {
-		t.Fatalf("attend ran %d times", n)
+	if got := s.posted(); len(got) != 0 || len(w.at("conversation.yaml")) != 0 {
+		t.Errorf("the bot posted %v", got)
 	}
 }
 
@@ -400,19 +407,17 @@ func TestChangedAgentAnswersTheNextMessage(t *testing.T) {
 	}
 }
 
-// A machine says a text in a Slack channel named as #name.
+// A machine posts a text in a Slack channel named as #name.
 func TestSlackSaysInAChannelByName(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
-	if err := os.WriteFile(filepath.Join(dir, "on/log.yaml"), []byte(dedent(`
+	write(t, dir, map[string]string{"on/log.yaml": `
 		flow: log
+		allow: [send:gromit/slack/chat/post]
 		stages:
-		  say: { job: { machine: .rook/blocks/say.yaml, input: { address: { bridge: slack, id: "#approvals" }, text: Moved. } } }
-	`)), 0o644); err != nil {
-		t.Fatal(err)
-	}
+		  say: { job: { call: { at: gromit/slack/chat/post }, input: { in: "#approvals", text: Moved. } } }
+	`})
 	w.sync(dir)
 	w.start("on/log.yaml", nil)
 	w.until("the text", func() bool { return len(s.posted()) == 1 })
@@ -428,7 +433,6 @@ const layout = "Done.\n\n```blocks\n" +
 // Slack posts a layout's blocks as they are, and a message Slack refuses is posted
 // again as markdown, each layout as its text.
 func TestSlackPostsALayout(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
 	for _, refuse := range []bool{false, true} {
 		t.Run(fmt.Sprint("refused ", refuse), func(t *testing.T) {
 			s := newSlack(t)

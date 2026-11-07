@@ -9,6 +9,7 @@ import (
 	"io"
 	"io/fs"
 	"maps"
+	"reflect"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -1570,8 +1571,8 @@ func slackProject(t *testing.T, w *world, s *slack) string {
 
 // A direct message is answered, a message naming the bot in a channel is answered
 // in its thread, and one that does not name it, or a bot's own, is only received.
+// Each message goes to the conversation of its thread and person.
 func TestSlackMessagesAreAnswered(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
@@ -1591,22 +1592,22 @@ func TestSlackMessagesAreAnswered(t *testing.T) {
 	if len(s.posted()) != 2 || seen["D1"]["markdown_text"] != "in private" || seen["D1"]["thread_ts"] != nil {
 		t.Fatalf("the bot posted %v", s.posted())
 	}
-	if !strings.Contains(fmt.Sprint(seen["C1"]["markdown_text"]), "only the people") || seen["C1"]["thread_ts"] != "4.0" {
+	if seen["C1"]["markdown_text"] != "hello" || seen["C1"]["thread_ts"] != "4.0" {
 		t.Fatalf("the bot posted %v", s.posted())
 	}
+	conversations := keyed(w, "conversation.yaml")
+	if len(conversations) != 2 || conversations["slack:D1:U1:assistant"] == nil || conversations["slack:C1/4.0:U9:assistant"] == nil {
+		t.Errorf("the conversations are %v", slices.Collect(maps.Keys(conversations)))
+	}
 	w.titled(map[string][]string{
-		"slack-bridge": {"Slack bridge"},
 		"slack-listen": {"Slack listener"},
-		"chat":         {"#help: hello", "dm: in private"},
-		"route":        {"hello", "in private"},
-		"message":      {"in private"},
+		"conversation": {"slack #help: hello", "slack dm: in private"},
 	})
 }
 
 // Slack sends an envelope again when its receipt is late, and the event in it
 // is answered once.
 func TestSlackResentEventIsAnsweredOnce(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
@@ -1623,22 +1624,17 @@ func TestSlackResentEventIsAnsweredOnce(t *testing.T) {
 	}
 }
 
-// A question goes to a person on Slack with a button for each choice. A press by
-// anyone else changes nothing, and a press by them answers it.
+// A question goes to a person on Slack with a button for each choice. A press
+// by someone whose scopes lack the approvers' is refused, and they alone are
+// told why, and the buttons stay. A press by someone whose scopes hold it
+// answers the question, which shows the answer in place of its buttons.
 func TestSlackQuestionIsAnsweredByAPress(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
-	write(t, dir, map[string]string{"on/asker.yaml": `
-		flow: asker
-		allow: [send:.rook/blocks/ask]
-		stages:
-		  asking: { job: { call: { at: .rook/blocks/ask }, input: { people: [alice], text: "Well?", choices: ["yes", "no"] } } }
-		output: ${stages.asking.output.choice}
-	`})
+	write(t, dir, map[string]string{"agents/asker.yaml": asker("slack", `{ in: U1, text: "Well?", choices: ["yes", "no"], lookup: people/find, approvers: messages:approve }`)})
 	w.sync(dir)
-	asker := w.start("on/asker.yaml", nil)
+	asking := w.start("agents/asker.yaml", nil)
 	w.until("Slack connected", s.connected)
 	w.until("the question", func() bool { return len(s.posted()) == 1 })
 	post := s.posted()[0]
@@ -1646,55 +1642,47 @@ func TestSlackQuestionIsAnsweredByAPress(t *testing.T) {
 		t.Fatalf("the question went to %v", post)
 	}
 	// A button names the question's run by its ID without its client's name.
-	question := keyed(w, ".rook/blocks/ask.yaml")[""][0].ID
+	question := w.at(bot + "/slack/chat/ask.yaml")[0].ID
 	value := question[strings.Index(question, "/")+1:] + " no"
 	blocks, _ := json.Marshal(post["blocks"])
 	if !strings.Contains(string(blocks), `"value":"`+value+`"`) {
 		t.Fatalf("the buttons are %s", blocks)
 	}
-	press := func(id, user string) {
-		s.send(map[string]any{"envelope_id": id, "type": "interactive", "payload": map[string]any{
-			"type": "block_actions", "user": map[string]any{"id": user}, "actions": []any{map[string]any{"action_id": "choice-1", "value": value}},
-			"channel": map[string]any{"id": "D9"}, "message": map[string]any{"ts": "1.1", "text": "Well?"},
-		}})
+	s.press("a", "U2", value)
+	w.until("bob told", func() bool { return len(s.whispered()) == 1 })
+	if got := s.whispered()[0]; got["channel"] != "D9" || got["user"] != "U2" || got["text"] != "Only someone with the scope messages:approve can answer this." {
+		t.Fatalf("bob was told %v", got)
 	}
-	press("a", "U2")
-	w.until("the press received", func() bool { return s.acked() == 1 })
-	time.Sleep(10 * interval)
-	if run := w.show(asker); run.Status != "running" {
-		t.Fatalf("a press by someone else ended the asker: %+v", run)
+	if run := w.show(asking); run.Status != "running" || len(s.changed()) != 0 {
+		t.Fatalf("a press by bob ended the asker %+v, or changed the question %v", run, s.changed())
 	}
-	press("b", "U1")
-	w.until("the asker done", func() bool { return w.show(asker).Status == "done" })
-	if got := w.show(asker).Output; got != "no" {
-		t.Fatalf("the choice was %v", got)
+	s.press("b", "U1", value)
+	w.until("the asker done", func() bool { return w.show(asking).Status == "done" })
+	if got, _ := json.Marshal(w.show(asking).Output); string(got) != `{"by":"alice","choice":"no"}` {
+		t.Fatalf("the question gave %s", got)
 	}
-	w.until("the question closed", func() bool {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		return len(s.updates) == 1
-	})
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if got := s.updates[0]; got["channel"] != "D9" || got["ts"] != "1.1" || got["text"] != "Well?\n\nalice said no." {
+	w.until("the question closed", func() bool { return len(s.changed()) == 1 })
+	if got := s.changed()[0]; got["channel"] != "D9" || got["ts"] != "1.1" || got["text"] != "Well?\n\nalice said no." {
 		t.Fatalf("the question was changed to %v", got)
 	}
 }
 
-// echoHistory stands in for the agent, and says what it was given of the thread.
+// echoHistory stands in for the agent at agents/assistant: it replies with the
+// history its last message carries, in brackets, then that message's text, and
+// counts the turns of its conversation.
 const echoHistory = `
-	statechart: helper
-	input: { said: string, asker: string, home: string, history: "any?", conversation: "any?" }
-	initial: e
-	states:
-	  e: { end: done, output: { reply: "${'[' + input.history + '] ' + input.said}", conversation: "${(input.conversation || 0) + 1}" } }
+	flow: assistant
+	input: { messages: list, medium: string, asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
+	stages:
+	  echo: { job: { script: ./echo.js, input: { message: "${input.messages[input.messages.length - 1]}" } } }
+	output: { reply: "${stages.echo.output}", conversation: "${(input.conversation || 0) + 1}" }
 `
+
+const echoJS = `return "[" + (input.message.history ? blobs.read(input.message.history) : "") + "] " + input.message.text`
 
 func echoing(t *testing.T, dir string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, "agents/helper.yaml"), []byte(dedent(echoHistory)), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	write(t, dir, map[string]string{"agents/assistant.yaml": echoHistory, "agents/echo.js": echoJS})
 }
 
 // A chat with no conversation yet is told what the issue holds before the message,
@@ -1890,10 +1878,11 @@ func TestJiraChatReadsItsIssue(t *testing.T) {
 	})
 }
 
-// A person with no agent reads nothing of a thread, and Slack's thread is read to
-// the message and no further.
-func TestSlackChatReadsItsThread(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
+// A message outside a thread in a channel starts its thread, so nothing is read
+// and it carries no history. A message in a thread carries what the thread
+// held before it and no further, each person by their name, and whether that
+// is the whole thread.
+func TestSlackMessageCarriesItsThread(t *testing.T) {
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
@@ -1907,26 +1896,33 @@ func TestSlackChatReadsItsThread(t *testing.T) {
 	}
 	w.sync(dir)
 	w.until("Slack connected", s.connected)
-	s.says("a", map[string]any{"type": "message", "channel": "C1", "channel_type": "channel", "user": "U9", "ts": "9.0", "text": "<@UBOT> hello"})
-	w.until("the stranger told", func() bool { return len(s.posted()) >= 1 })
+	s.says("a", inChannel("U9", "9.0", "", "<@UBOT> hello"))
+	w.until("the first answer", func() bool { return len(s.posted()) >= 1 })
 	s.mu.Lock()
 	reads := len(s.reads)
 	s.mu.Unlock()
-	if reads != 0 {
-		t.Fatalf("a stranger's message read the thread %d times", reads)
+	if got := s.posted()[0]["markdown_text"]; reads != 0 || got != "[] hello" {
+		t.Fatalf("a message outside a thread read the thread %d times, and was answered %q", reads, got)
 	}
-	s.says("b", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "ts": "3.0", "text": "go on"})
-	w.until("the answer", func() bool { return len(s.posted()) >= 2 })
+	s.says("b", inChannel("U1", "3.0", "1.0", "<@UBOT> go on"))
+	w.until("the second answer", func() bool { return len(s.posted()) >= 2 })
 	got := fmt.Sprint(s.posted()[1]["markdown_text"])
-	if !strings.Contains(got, "<@U2>: earlier words") || !strings.Contains(got, "you: my earlier reply") || !strings.Contains(got, "<@B2>: another bot's words") || strings.Contains(got, "written later") {
+	if !strings.Contains(got, "Bob: earlier words") || !strings.Contains(got, "you: my earlier reply") || !strings.Contains(got, "<@B2>: another bot's words") || strings.Contains(got, "written later") {
 		t.Fatalf("the bot said %q", got)
+	}
+	var complete []any
+	for _, m := range emitted(w, "slack", "message") {
+		complete = append(complete, m["complete"])
+	}
+	if !reflect.DeepEqual(complete, []any{true, true}) {
+		t.Errorf("the messages' complete are %v", complete)
 	}
 }
 
 // A long thread gives its latest entries, oldest of them first, though Slack gives
-// a thread oldest first and in pages.
+// a thread oldest first and in pages, and the message says it is not the whole
+// thread.
 func TestSlackLongThreadGivesItsLatest(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
@@ -1942,6 +1938,9 @@ func TestSlackLongThreadGivesItsLatest(t *testing.T) {
 	first, last := strings.Index(got, "word 430"), strings.Index(got, "word 449")
 	if first < 0 || last < first || strings.Contains(got, "word 429") {
 		t.Fatalf("the bot said %q", got)
+	}
+	if m := emitted(w, "slack", "message"); len(m) != 1 || m[0]["complete"] != false {
+		t.Errorf("the listener sent %v", m)
 	}
 }
 

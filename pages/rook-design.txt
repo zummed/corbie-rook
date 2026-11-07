@@ -49,12 +49,20 @@ A listener sends its parent, the router, three events. Each holds `service`:
 slack, telegram, gitlab or jira.
 
   message   service, place, chat, user, name, email, text, history, complete, attachments, unaddressed, own, change, answers
-  answer    service, run, user, name, email, choice, values
+  answer    service, run, user, name, email, choice
   stop      service, place, chat, user, name, email
 
 `user` is the sender's ID on the service, and `email` is given where the
 service gives one. `run` is the ID of the question's run without its client's
 name, which the button holds.
+
+`history` is a blob of text: what the thread held before the message, no more
+than a model needs. It is left out when nothing came before, as for a Slack
+message outside a thread in a channel, which starts its thread. `complete` is
+true when `history` holds the whole thread. On Slack a message also carries
+`at`, its time, by which conversations/replies reads what came before it. A
+Slack reaction is a message with `change: reaction` and no history: its text
+is the emoji, such as `:eyes:`, and its `at` the message reacted to.
 
 A router sends a message and a stop to the conversation keyed
 `<service>:<chat>:<user>:<agent>`, so each person in a thread has their own
