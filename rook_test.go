@@ -571,16 +571,17 @@ func sayings(t *testing.T, w *world) map[string]map[string]any {
 	return said
 }
 
-// approving makes a project whose bridge hears what the script says, and whose
-// helper asks a stand-in model, which opens the part messages and tells bob
-// hello, and then says told.
+// approving makes a project whose listener hears what the script says, and
+// whose agent at agents/assistant asks a stand-in model, which opens the
+// toolkit messages, tells bob hello, and then says told. The lookup knows
+// the people by their Telegram IDs: alice may ask, and carol may approve.
 func approving(t *testing.T, w *world, script string) (string, *llmstandin.Server) {
 	t.Helper()
 	w.secret("TEST_KEY", "sk-test")
 	dir := copyStarter(t)
 	replies := []llmstandin.Reply{
 		{Calls: []llmstandin.ToolCall{{ID: "c1", Name: "open", Args: `{"toolkit": "messages"}`}}},
-		{Calls: []llmstandin.ToolCall{{ID: "c2", Name: "tell", Args: `{"person": "bob", "text": "hello"}`}}},
+		{Calls: []llmstandin.ToolCall{{ID: "c2", Name: "tell", Args: `{"chat": "2", "text": "hello"}`}}},
 		{Text: "told"},
 	}
 	turn := 0
@@ -591,7 +592,11 @@ func approving(t *testing.T, w *world, script string) (string, *llmstandin.Serve
 	web := httptest.NewServer(model)
 	t.Cleanup(web.Close)
 	realAgent(t, dir, web.URL)
-	write(t, dir, map[string]string{".rook/telegram/telegram.js": script})
+	write(t, dir, map[string]string{
+		".rook/telegram/telegram.js": script,
+		"people/find.yaml":           telegramFind,
+		"people/scopes.yaml":         "alice@example.com: { name: alice, scopes: [messages] }\ncarol@example.com: { name: carol, scopes: [messages:approve] }\n",
+	})
 	return dir, model
 }
 
