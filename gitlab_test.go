@@ -177,7 +177,8 @@ func TestGitLabUnreadableCommentsAreReadAgain(t *testing.T) {
 }
 
 // A comment that ends a sentence with the bot's name, as "can you look @bot.",
-// names the bot, as GitLab itself takes it.
+// names the bot, as GitLab itself takes it. Both comments are answered, in
+// one turn or two.
 func TestGitLabNameAtTheEndOfASentenceIsHeard(t *testing.T) {
 	gl := newGitLab(t)
 	w := newWorld(t)
@@ -185,8 +186,9 @@ func TestGitLabNameAtTheEndOfASentenceIsHeard(t *testing.T) {
 	gl.comment("group/project", 7, 2, "The build fails, can you look @bot.")
 	gl.comment("group/project", 7, 2, "Thanks, @bot!")
 	tick(w, gl.asked)
-	w.until("two answers", func() bool { return len(gl.said()) >= 2 })
-	if got := gl.said(); len(got) != 2 {
+	w.until("both answered", func() bool { return strings.Count(strings.Join(gl.said(), "\n"), "\n") == 1 })
+	quiet()
+	if got := strings.Join(gl.said(), "\n"); !strings.Contains(got, "can you look") || !strings.Contains(got, "Thanks") {
 		t.Fatalf("the bot said %q", got)
 	}
 }
@@ -673,13 +675,16 @@ func TestGitLabTakesOnlyTheIssuesOwnFiles(t *testing.T) {
 	if !slices.Equal(names, []string{"shot.png", "big.zip", "long.log"}) {
 		t.Fatalf("the message's attachments are %v", files)
 	}
+	// The conversation downloads them too, before it answers.
+	w.until("the answer", func() bool { return len(gl.said()) > 0 })
+	before := len(gl.fetched())
 	run := ran(t, w, "gromit/gitlab/files/get.yaml", map[string]any{"attachments": files})
 	if run.Status != "done" {
 		t.Fatalf("files/get ended %s: %s", run.Status, run.Error)
 	}
 	p := "/api/v4/projects/group%2Fproject"
 	want := []string{"HEAD " + p + shot, "GET " + p + shot, "HEAD " + p + big, "HEAD " + p + long, "GET " + p + long}
-	if got := gl.fetched(); !slices.Equal(got, want) {
+	if got := gl.fetched()[before:]; !slices.Equal(got, want) {
 		t.Errorf("GitLab was asked for %q; want %q", got, want)
 	}
 	out, _ := json.Marshal(run.Output)

@@ -4,7 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"maps"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -21,7 +21,7 @@ import (
 func replying(t *testing.T, dir, reply string) {
 	t.Helper()
 	quoted, _ := json.Marshal(reply)
-	stub := "statechart: assistant\ninput: { messages: list, medium: string, asker: map, thread: \"any?\", attachments: \"any?\", conversation: \"any?\" }\ninitial: e\nstates:\n  e: { end: done, output: { reply: " + string(quoted) + " } }\n"
+	stub := "statechart: assistant\ninput: { messages: list, medium: string, format: \"any?\", asker: map, thread: \"any?\", attachments: \"any?\", conversation: \"any?\" }\ninitial: e\nstates:\n  e: { end: done, output: { reply: " + string(quoted) + " } }\n"
 	if err := os.WriteFile(filepath.Join(dir, "agents/assistant.yaml"), []byte(stub), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,6 @@ func TestSlackDrawsCharts(t *testing.T) {
 // once the reply is posted, when the answer says nothing, and when the answer
 // fails and the thread is told so.
 func TestSlackShowsAStatusWhileAnswering(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
 	for name, agent := range map[string]string{
 		"reply":   "Done.",
 		"nothing": "",
@@ -121,6 +120,36 @@ func TestSlackShowsAStatusWhileAnswering(t *testing.T) {
 	}
 }
 
+// When Slack answers each status with a 500, the message is still answered
+// and the reply posted: the status is not part of the answer.
+func TestSlackFailedStatusStillAnswers(t *testing.T) {
+	s := newSlack(t)
+	override(s.Server, func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path != "/api/agents.sessions.setStatus" {
+			return false
+		}
+		w.WriteHeader(500)
+		fmt.Fprint(w, "upstream error")
+		return true
+	})
+	w := newWorld(t)
+	dir := slackProject(t, w, s)
+	replying(t, dir, "Done.")
+	w.sync(dir)
+	w.until("Slack connected", s.connected)
+	s.says("a", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "thread_ts": "4.0", "ts": "5.0", "text": "hello"})
+	w.until("the reply posted", func() bool { return len(s.posted()) == 1 })
+	quiet()
+	if post := s.posted(); len(post) != 1 || post[0]["markdown_text"] != "Done." || post[0]["thread_ts"] != "4.0" {
+		t.Errorf("the bot posted %v", post)
+	}
+	for _, f := range failedRuns(t, w) {
+		if !strings.HasPrefix(f, "slack-assistant-status:") {
+			t.Errorf("a run failed: %s", f)
+		}
+	}
+}
+
 // A status shows "Working..." under a thread for any text, and an empty text
 // clears it. Outside a thread Slack keeps no status, and nothing is asked.
 func TestSlackStatusShowsAndClears(t *testing.T) {
@@ -145,15 +174,6 @@ func TestSlackStatusShowsAndClears(t *testing.T) {
 		t.Fatalf("the statuses are %s", got)
 	}
 }
-
-// attendStub stands in for attend.yaml: it answers a message holding "please".
-const attendStub = `
-	statechart: attend-stub
-	input: { said: string, asker: string, address: map, history: "any?" }
-	initial: e
-	states:
-	  e: { end: done, output: { reply: { answer: "${input.said.includes('please')}" } } }
-`
 
 // With overhear, the listener sends a reply in a thread the bot has said
 // something in, with what the thread held before it, and a channel's message
@@ -208,17 +228,15 @@ func stubs(t *testing.T, w *world, machine string) []*client.Run {
 	return out
 }
 
-// With overhear and no attend.yaml, a message that does not name the bot is not
-// answered: the call to attend fails, which the chat's record shows, and a
-// message that names it is answered.
-func TestOverheardWithNoAttendIsNotAnswered(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
+// With overhear, the listener sends a message that does not name the bot,
+// marked unaddressed, and the starter's router drops it: it reaches no
+// conversation. A message that names the bot is answered.
+func TestOverheardIsDroppedByTheStarterRouter(t *testing.T) {
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
 	echoing(t, dir)
-	setSite(t, dir, router("slack"), "      restart: { when: always }\n", "      restart: { when: always }\n      input: { overhear: true }\n")
-	setSite(t, dir, "rules.yaml", "  dm: { readers: [asker] }\n", "  dm: { readers: [asker] }\n  \"#help\": { readers: [asker] }\n")
+	setSite(t, dir, router("slack"), "restart: { after: always } }", "restart: { after: always }, input: { overhear: true } }")
 	s.thread = []map[string]any{{"ts": "1.0", "user": "UBOT", "text": "my earlier reply"}}
 	w.sync(dir)
 	w.until("Slack connected", s.connected)
@@ -229,26 +247,21 @@ func TestOverheardWithNoAttendIsNotAnswered(t *testing.T) {
 	if got := s.posted(); len(got) != 1 || !strings.Contains(fmt.Sprint(got[0]["markdown_text"]), "named") {
 		t.Fatalf("the bot posted %v", got)
 	}
-	failed := 0
-	for _, run := range stubs(t, w, "route") {
-		for _, e := range w.record(run.ID) {
-			for _, ev := range e.Events {
-				if ev.Name == "failed" && ev.From == "attend" && strings.Contains(fmt.Sprint(ev.Data), "/project/attend") {
-					failed++
-				}
+	if m := emitted(w, "slack", "message"); len(m) != 2 || m[0]["unaddressed"] != true {
+		t.Errorf("the listener sent %v", m)
+	}
+	for _, run := range w.at("agents/assistant.yaml") {
+		for _, text := range w.texts(run) {
+			if text == "please help" {
+				t.Errorf("the agent was given the overheard message")
 			}
 		}
-	}
-	if failed != 1 {
-		t.Errorf("the chat's record shows %d failed calls of attend", failed)
 	}
 }
 
 // A changed agent answers the next message of a conversation already under way,
-// and a changed bridge file restarts its listener and starts no new chat or
-// conversation.
+// and a changed router restarts its listener, and the conversation goes on.
 func TestChangedAgentAnswersTheNextMessage(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
@@ -257,7 +270,7 @@ func TestChangedAgentAnswersTheNextMessage(t *testing.T) {
 	w.until("Slack connected", s.connected)
 	s.says("a", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "ts": "3.0", "text": "first"})
 	w.until("the first answer", func() bool { return len(s.posted()) >= 1 })
-	setSite(t, dir, "agents/helper.yaml", "${'[' + input.history + '] ' + input.said}", "${'changed: ' + input.said}")
+	setSite(t, dir, "agents/assistant.yaml", `output: { reply: "${stages.echo.output}"`, `output: { reply: "${'changed: ' + input.messages.at(-1).text}"`)
 	w.sync(dir)
 	s.says("b", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "ts": "4.0", "text": "second"})
 	w.until("the second answer", func() bool { return len(s.posted()) >= 2 })
@@ -265,21 +278,19 @@ func TestChangedAgentAnswersTheNextMessage(t *testing.T) {
 		t.Fatalf("the bot said %q", got)
 	}
 	listener := w.kept(router("slack"))
-	setSite(t, dir, router("slack"), "title: Slack bridge\n", "title: Slack bridge\nmeta: { changed: true }\n")
+	setSite(t, dir, router("slack"), "lifetime: singleton\n", "lifetime: singleton\nmeta: { changed: true }\n")
 	s.mu.Lock()
 	s.socket = nil
 	s.mu.Unlock()
 	w.sync(dir)
 	if w.kept(router("slack")) == listener {
-		t.Fatal("the changed bridge file did not restart its listener")
+		t.Fatal("the changed router did not restart its listener")
 	}
 	w.until("Slack connected again", s.connected)
 	s.says("c", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "ts": "5.0", "text": "third"})
 	w.until("the third answer", func() bool { return len(s.posted()) >= 3 })
-	for _, path := range []string{".rook/blocks/chat.yaml", ".rook/blocks/conversation.yaml"} {
-		if runs := keyed(w, path); len(runs) != 1 || len(slices.Collect(maps.Values(runs))[0]) != 1 {
-			t.Errorf("%s has the runs %v", path, runs)
-		}
+	if runs := keyed(w, "conversation.yaml"); len(runs) != 1 || len(runs["slack:D1:U1:assistant"]) != 1 {
+		t.Errorf("the conversations are %v", runs)
 	}
 }
 

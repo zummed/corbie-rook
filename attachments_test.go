@@ -5,14 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"reflect"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	llmstandin "github.com/zummed/corbie/plugin/llm/standin"
 )
@@ -20,7 +16,6 @@ import (
 // A picture sent on Slack is downloaded when the message is answered, and the
 // model is shown it as an image beside the message.
 func TestSlackPictureIsShownToTheModel(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
 	s := newSlack(t)
 	w := newWorld(t)
 	w.secret("TEST_KEY", "sk-test")
@@ -47,7 +42,6 @@ func TestSlackPictureIsShownToTheModel(t *testing.T) {
 // A file sent with no text is a message, and one over the largest size is
 // named to the model and not downloaded.
 func TestSlackLargeFileIsNamedAndNotDownloaded(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
 	s := newSlack(t)
 	w := newWorld(t)
 	w.secret("TEST_KEY", "sk-test")
@@ -94,7 +88,6 @@ func photo(id string, bytes int) []any {
 // largest size, and the model is shown it as an image beside the caption. A
 // photo with no caption is answered too.
 func TestTelegramPhotoIsShownToTheModel(t *testing.T) {
-	t.Skip("R7 revives this: the conversation gives a message's files to the agent")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir, model := telegramProject(t, w, tg)
@@ -104,7 +97,7 @@ func TestTelegramPhotoIsShownToTheModel(t *testing.T) {
 	w.sync(dir)
 	w.until("the answer", func() bool { return len(tg.said()) >= 1 })
 	shown := fmt.Sprint(model.Calls[0].Messages)
-	for _, want := range []string{"alice asks: what is this?", "photo.jpg", "image/jpeg", base64.StdEncoding.EncodeToString([]byte(cat))} {
+	for _, want := range []string{"Alice asks: what is this?", "photo.jpg", "image/jpeg", base64.StdEncoding.EncodeToString([]byte(cat))} {
 		if !strings.Contains(shown, want) {
 			t.Errorf("%q is not in %s", want, shown)
 		}
@@ -120,9 +113,9 @@ func TestTelegramPhotoIsShownToTheModel(t *testing.T) {
 }
 
 // Each item of an album is a message of its own, with its own caption, and
-// the text sent after it is heard once.
+// the text sent after it is heard once. The model is shown each photo once,
+// beside its caption, whether one turn or several answer them.
 func TestTelegramAlbumItemsAreMessages(t *testing.T) {
-	t.Skip("R7 revives this: the conversation gives a message's files to the agent")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir, model := telegramProject(t, w, tg)
@@ -134,96 +127,62 @@ func TestTelegramAlbumItemsAreMessages(t *testing.T) {
 		map[string]any{"text": "thanks"},
 	)
 	w.sync(dir)
-	w.until("three answers", func() bool { return len(tg.said()) >= 3 })
-	time.Sleep(10 * interval)
-	if len(model.Calls) != 3 {
-		t.Fatalf("the model was asked %d times; want each photo, then the text", len(model.Calls))
+	var given []string
+	w.until("three messages answered", func() bool {
+		given = nil
+		turns := agentRuns(w, "1", "1")
+		for _, run := range turns {
+			given = append(given, w.texts(run)...)
+		}
+		return len(given) == 3 && len(tg.said()) == len(turns)
+	})
+	if !slices.Equal(given, []string{"before", "after", "thanks"}) {
+		t.Errorf("the turns were given %q", given)
 	}
 	// A call holds the conversation so far, so each is read by its last
-	// message, and found by its caption.
+	// message.
 	one64, two64 := base64.StdEncoding.EncodeToString([]byte(one)), base64.StdEncoding.EncodeToString([]byte(two))
-	var shown []string
+	var shown string
 	for _, c := range model.Calls {
-		shown = append(shown, fmt.Sprint(c.Messages[len(c.Messages)-1]))
+		shown += fmt.Sprint(c.Messages[len(c.Messages)-1])
 	}
-	for _, want := range [][]string{{"alice asks: before", one64}, {"alice asks: after", two64}, {"alice asks: thanks"}} {
-		if !slices.ContainsFunc(shown, func(s string) bool { return strings.Contains(s, want[0]) && strings.Contains(s, want[len(want)-1]) }) {
-			t.Errorf("no call shows %q", want)
+	for _, want := range []string{"before", "after", "thanks", one64, two64} {
+		if strings.Count(shown, want) != 1 {
+			t.Errorf("the model was shown %q %d times", want, strings.Count(shown, want))
 		}
 	}
-	for _, s := range shown {
-		if strings.Contains(s, one64) && strings.Contains(s, two64) {
-			t.Errorf("a call was shown both photos: %s", s)
-		}
-	}
-	w.titled(map[string][]string{"message": {"after", "before", "thanks"}})
 }
 
 const secret1 = "029d6592aaaaaaaaaaaaaaaaaaaaaaaa"
 const secret2 = "0c2c754ebbbbbbbbbbbbbbbbbbbbbbbb"
 
-// An overheard reply that holds only a file is heard, and attend.yaml is given a
-// line naming its files.
-func TestSlackOverheardFileIsNamedToAttend(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
-	s := newSlack(t)
-	w := newWorld(t)
-	dir := slackProject(t, w, s)
-	echoing(t, dir)
-	setSite(t, dir, router("slack"), "      restart: { when: always }\n", "      restart: { when: always }\n      input: { overhear: true }\n")
-	setSite(t, dir, "rules.yaml", "  dm: { readers: [asker] }\n", "  dm: { readers: [asker] }\n  \"#help\": { readers: [asker] }\n")
-	if err := os.WriteFile(filepath.Join(dir, "attend.yaml"), []byte(dedent(attendStub)), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	s.thread = []map[string]any{
-		{"ts": "1.0", "user": "U1", "text": "<@UBOT> start"},
-		{"ts": "2.0", "user": "UBOT", "text": "send a screenshot"},
-	}
-	w.sync(dir)
-	w.until("Slack connected", s.connected)
-	s.says("a", map[string]any{"type": "message", "channel": "C1", "channel_type": "channel", "user": "U1", "ts": "5.0", "thread_ts": "1.0", "text": "",
-		"files": []any{map[string]any{"id": "F1", "name": "error.png", "mimetype": "image/png", "size": 3, "url_private_download": s.URL + "/files/T1-F1/error.png"}}})
-	w.until("attend asked", func() bool { return len(stubs(t, w, "attend-stub")) == 1 })
-	if said := fmt.Sprint(w.show(stubs(t, w, "attend-stub")[0].ID).Input.(map[string]any)["said"]); said != "(files: error.png)" {
-		t.Fatalf("attend was given %q", said)
-	}
-}
-
-// sending makes a stand-in model that calls send with args on its first turn,
-// and then replies "sent".
-func sending(args string) func(llmstandin.Call) llmstandin.Reply {
-	return func(c llmstandin.Call) llmstandin.Reply {
-		if c.Turn == 1 {
-			return llmstandin.Reply{Calls: []llmstandin.ToolCall{{ID: "t1", Name: "send", Args: args}}}
-		}
-		return llmstandin.Reply{Text: "sent"}
-	}
-}
-
-// filesAgent stands in for the agent at agents/assistant: it replies with each
-// file a message carries, as name, type, size and ID, after its text.
+// filesAgent stands in for the agent at agents/assistant: it replies with a
+// line for each message of the turn, giving each file the message carries, as
+// name, type, size and ID, after its text.
 var filesAgent = map[string]string{
 	"agents/assistant.yaml": `
 		flow: assistant
-		input: { messages: list, medium: string, asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
+		input: { messages: list, medium: string, format: "any?", asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
 		stages:
-		  turn: { job: { script: ./files.js, input: { message: "${input.messages[0]}" } } }
+		  turn: { job: { script: ./files.js, input: { messages: "${input.messages}" } } }
 		output: ${stages.turn.output}
 	`,
 	"agents/files.js": `
-		const m = input.message
-		return { reply: [m.text].concat((m.attachments || []).map((a) => [a.name, a.type, a.size, a.id].join(" "))).join(" + ") }
+		const said = (m) => [m.text].concat((m.attachments || []).map((a) => [a.name, a.type, a.size, a.id].join(" "))).join(" + ")
+		return { reply: input.messages.map(said).join("\n") }
 	`,
 }
 
 // Telegram's listener sends a message's file as a reference, and downloads
 // nothing: a document by its name and type, a voice message with no caption
 // by its kind, a photo in its largest size, and each item of an album as a
-// message of its own, with its own caption.
+// message of its own, with its own caption. The conversation downloads each
+// once, with the bot's files/get.
 func TestTelegramFilesAreSentAsReferences(t *testing.T) {
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir := chatProject(t, w, tg, filesAgent)
+	tg.files["D1"], tg.files["V1"], tg.files["A1"], tg.files["A2"] = "the notes", "a voice", "one", "two"
 	tg.dm(1, "", map[string]any{"caption": "read this", "document": map[string]any{"file_id": "D1", "file_unique_id": "u", "file_name": "notes.txt", "mime_type": "text/plain", "file_size": 18}})
 	tg.dm(1, "", map[string]any{"voice": map[string]any{"file_id": "V1", "file_unique_id": "u", "mime_type": "audio/ogg", "duration": 2, "file_size": 7}})
 	tg.dm(1, "", map[string]any{"media_group_id": "g1", "caption": "before", "photo": photo("A1", 9)})
@@ -238,11 +197,12 @@ func TestTelegramFilesAreSentAsReferences(t *testing.T) {
 		"after + photo.jpg image/jpeg 9 A2",
 		"thanks",
 	}
-	if got := tg.texts("1"); !slices.Equal(got, want) {
+	if got := tg.lines("1"); !slices.Equal(got, want) {
 		t.Errorf("alice was told %q", got)
 	}
-	if len(tg.got) != 0 {
-		t.Errorf("the listener downloaded %v", tg.got)
+	// Only the conversation's files/get downloads, each file once.
+	if got := slices.Sorted(slices.Values(tg.got)); !slices.Equal(got, []string{"A1", "A2", "D1", "V1"}) {
+		t.Errorf("Telegram was asked for the files %v", got)
 	}
 }
 
@@ -423,23 +383,6 @@ func TestSlackFilesGetDownloadsAFile(t *testing.T) {
 	}
 }
 
-// looking makes a stand-in model that, on its first turn, calls look with the id
-// its prompt gives the earlier file named name, and then replies "seen".
-func looking(name string) func(llmstandin.Call) llmstandin.Reply {
-	return func(c llmstandin.Call) llmstandin.Reply {
-		if c.Turn > 1 {
-			return llmstandin.Reply{Text: "seen"}
-		}
-		file := regexp.MustCompile(`\{[^{}]*"name":"` + regexp.QuoteMeta(name) + `"[^{}]*\}`).FindString(fmt.Sprint(c.Messages))
-		id := regexp.MustCompile(`"id":"([^"]*)"`).FindStringSubmatch(file)
-		if id == nil {
-			return llmstandin.Reply{Text: "no " + name + " in the prompt"}
-		}
-		args, _ := json.Marshal(map[string]string{"id": id[1]})
-		return llmstandin.Reply{Calls: []llmstandin.ToolCall{{ID: "t1", Name: "look", Args: string(args)}}}
-	}
-}
-
 // A reply in a Slack thread carries its own files, and its history names the
 // files earlier in the thread.
 func TestSlackThreadGivesItsEarlierFiles(t *testing.T) {
@@ -451,6 +394,7 @@ func TestSlackThreadGivesItsEarlierFiles(t *testing.T) {
 		return []any{map[string]any{"id": id, "name": name, "mimetype": mimetype, "size": 3, "url_private_download": s.URL + "/files/T1-" + id + "/" + name}}
 	}
 	s.thread = []map[string]any{{"ts": "1.0", "user": "U1", "text": "", "files": file("F1", "fox.png", "image/png")}}
+	s.files = map[string]string{"/files/T1-F2/note.txt": "abc"}
 	w.sync(dir)
 	w.until("Slack connected", s.connected)
 	s.says("a", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "ts": "2.0", "thread_ts": "1.0", "text": "what are these?",

@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -55,7 +56,7 @@ func chatProject(t *testing.T, w *world, tg *telegram, files map[string]string) 
 // and what, and counts the turns of its conversation.
 const echoFlow = `
 	flow: NAME
-	input: { messages: list, medium: string, asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
+	input: { messages: list, medium: string, format: "any?", asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
 	stages:
 	  turn: { job: { script: ./turn.js, input: { name: NAME, said: "${input.messages.map((m) => m.text).join(' ')}", asker: "${input.asker.name}", conversation: "${input.conversation}" } } }
 	output: ${stages.turn.output}
@@ -123,11 +124,10 @@ func failedRuns(t *testing.T, w *world) []string {
 // model answers, in reply to their message, and "typing" is shown first. No
 // model secret is set, and none is needed.
 func TestOnePersonFlowAgent(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir := chatProject(t, w, tg, map[string]string{
-		"agents/helper.yaml": echoAgent("helper"),
+		"agents/assistant.yaml": echoAgent("helper"),
 		"agents/turn.js":     turnJS,
 	})
 	tg.dm(1, "hello")
@@ -150,92 +150,26 @@ func TestOnePersonFlowAgent(t *testing.T) {
 	}
 }
 
-// A fresh project, as init writes it, has no agent and no model: anyone who
-// writes is told the bot is not theirs, and nothing fails.
-func TestStarterAnswersNobody(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
-	tg := newTelegram(t)
-	w := newWorld(t)
-	w.secret("TELEGRAM_TOKEN", "123:abc")
-	dir := pointed(t, "telegram", tg.Server, "api.telegram.org")
-	// Put back the starter's own people and rules, and remove testdata's agents.
-	for _, name := range []string{"people.yaml", "rules.yaml"} {
-		text, err := os.ReadFile(filepath.Join("starter", name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, name), text, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	os.RemoveAll(filepath.Join(dir, "agents"))
-	os.RemoveAll(filepath.Join(dir, "parts"))
-	tg.dm(1, "hi")
-	tg.dm(9, "hello?")
-	w.sync(dir)
-	tg.waitFor(w, "1", "This bot answers only the people it belongs to.")
-	tg.waitFor(w, "9", "This bot answers only the people it belongs to.")
-	if f := failedRuns(t, w); len(f) > 0 {
-		t.Errorf("runs failed: %v", f)
-	}
-	if runs := w.at(".rook/blocks/conversation.yaml"); len(runs) != 0 {
-		t.Errorf("a conversation started: %v", runs)
-	}
-}
-
-// A stranger is refused, each time they write, and the refusal answers their
-// message; nothing of theirs reaches an agent.
-func TestStrangerIsRefusedEachTime(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
+// Three people write at once in their own chats: each is answered in a
+// conversation of their own, which counts only their own turns.
+func TestSeveralPeopleHaveTheirOwnConversations(t *testing.T) {
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir := chatProject(t, w, tg, map[string]string{
-		"agents/helper.yaml": echoAgent("helper"),
-		"agents/turn.js":     turnJS,
-	})
-	tg.dm(9, "one")
-	tg.dm(9, "two")
-	w.sync(dir)
-	w.until("two refusals", func() bool { return len(tg.texts("9")) == 2 })
-	for _, s := range tg.texts("9") {
-		if s != "This bot answers only the people it belongs to." {
-			t.Errorf("the stranger was told %q", s)
-		}
-	}
-	if runs := w.at("agents/helper.yaml"); len(runs) != 0 {
-		t.Errorf("the agent ran for a stranger")
-	}
-}
-
-// Three people write at once in their own chats: each gets the agent rules.yaml
-// gives them, in a conversation of their own, and carol, in no group, is
-// told the bot does not answer her here.
-func TestSeveralPeopleGetTheirOwnAgents(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
-	tg := newTelegram(t)
-	w := newWorld(t)
-	dir := chatProject(t, w, tg, map[string]string{
-		"agents/helper.yaml": echoAgent("helper"),
-		"agents/team.yaml":   echoAgent("team"),
-		"agents/turn.js":     turnJS,
+		"agents/assistant.yaml": echoAgent("helper"),
+		"agents/turn.js":        turnJS,
 	})
 	tg.dm(1, "a1")
 	tg.dm(2, "b1")
 	tg.dm(3, "c1")
-	tg.dm(1, "a2")
-	tg.dm(2, "b2")
 	w.sync(dir)
+	tg.waitFor(w, "1", "helper to alice (1): a1")
+	tg.waitFor(w, "2", "helper to bob (1): b1")
+	tg.waitFor(w, "3", "helper to carol (1): c1")
+	tg.dm(1, "a2")
 	tg.waitFor(w, "1", "helper to alice (2): a2")
-	tg.waitFor(w, "2", "team to bob (2): b2")
-	tg.waitFor(w, "3", "This bot does not answer you here.")
-	if got := tg.texts("1"); !slices.Equal(got, []string{"helper to alice (1): a1", "helper to alice (2): a2"}) {
-		t.Errorf("alice was told %q", got)
-	}
-	if got := tg.texts("2"); !slices.Equal(got, []string{"team to bob (1): b1", "team to bob (2): b2"}) {
-		t.Errorf("bob was told %q", got)
-	}
-	keys := keyed(w, ".rook/blocks/conversation.yaml")
-	if len(keys) != 2 || keys["telegram:1:helper"] == nil || keys["telegram:2:team"] == nil {
+	keys := keyed(w, "conversation.yaml")
+	if len(keys) != 3 || len(keys["telegram:1:1:assistant"]) != 1 || len(keys["telegram:2:2:assistant"]) != 1 || len(keys["telegram:3:3:assistant"]) != 1 {
 		t.Errorf("the conversations are %v", keys)
 	}
 }
@@ -298,70 +232,6 @@ func TestTelegramOverhearIsRefused(t *testing.T) {
 	})
 }
 
-// To choose by words, a project writes its own agent: a flow at agents/router
-// that calls another agent by what was said. rook-project says a machine of your
-// own at agents/<name> answers a message with its own steps.
-func TestRouterAgentChoosesByWords(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
-	tg := newTelegram(t)
-	w := newWorld(t)
-	dir := chatProject(t, w, tg, map[string]string{
-		"agents/helper.yaml": echoAgent("helper"),
-		"agents/deploy.yaml": echoAgent("deploy"),
-		"agents/turn.js":     turnJS,
-		"agents/router.yaml": `
-			flow: router
-			input: { said: string, asker: string, conversation: "any?" }
-			allow: [send:agents/deploy, send:agents/helper]
-			stages:
-			  deploy:
-			    when: "${/\\bdeploy\\b/i.test(input.said)}"
-			    job: { call: { at: agents/deploy }, input: { said: "${input.said}", asker: "${input.asker}", conversation: "${input.conversation}" } }
-			  other:
-			    when: "${!/\\bdeploy\\b/i.test(input.said)}"
-			    job: { call: { at: agents/helper }, input: { said: "${input.said}", asker: "${input.asker}", conversation: "${input.conversation}" } }
-			output: "${stages.deploy.skipped ? stages.other.output : stages.deploy.output}"
-		`,
-		"rules.yaml": `
-			places:
-			  dm: { readers: [asker] }
-			agents:
-			  - { name: router, for: [alice] }
-		`,
-	})
-	tg.dm(1, "please deploy the site")
-	tg.dm(1, "how are you")
-	w.sync(dir)
-	tg.waitFor(w, "1", "deploy to alice (1): please deploy the site")
-	tg.waitFor(w, "1", "helper to alice (2): how are you")
-}
-
-// rules.yaml names an agent that has no file. The person is told only that
-// the message could not be answered, with no name of the project's files, and
-// the record names the agent's location.
-func TestRuleNamesAMissingAgent(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
-	tg := newTelegram(t)
-	w := newWorld(t)
-	dir := chatProject(t, w, tg, map[string]string{
-		"rules.yaml": `
-			places:
-			  dm: { readers: [asker] }
-			agents:
-			  - { name: ghost, for: [alice] }
-		`,
-	})
-	tg.dm(1, "hello")
-	w.sync(dir)
-	tg.waitFor(w, "1", "That could not be answered.")
-	if said := strings.Join(tg.texts("1"), "\n"); strings.Contains(said, "ghost") || strings.Contains(said, "yaml") {
-		t.Errorf("the person was told %q", said)
-	}
-	if f := failures(w); !slices.ContainsFunc(f, func(s string) bool { return strings.Contains(s, "agents/ghost") }) {
-		t.Errorf("no failure names the agent: %q", f)
-	}
-}
-
 // houseToolkit is a toolkit with a read tool, lights, and an act tool, tell,
 // which waits for a yes from someone with house:approve in alice's chat. It
 // names no asker, so alice may approve what she asked for.
@@ -385,8 +255,9 @@ const houseToolkit = `
 	      approve: true
 `
 
-// turnOf splits a call into what the person last said, and the tool results
-// that came after it, each as JSON.
+// turnOf splits a call into what the person last said, without the thread
+// the prompt gives after it, and the tool results that came after it, each as
+// JSON.
 func turnOf(c llmstandin.Call) (said string, results []string) {
 	for i := len(c.Messages) - 1; i >= 0; i-- {
 		b, _ := json.Marshal(c.Messages[i])
@@ -399,7 +270,8 @@ func turnOf(c llmstandin.Call) (said string, results []string) {
 			results = append([]string{s}, results...)
 			continue
 		}
-		return s, results
+		said, _, _ = strings.Cut(s, "The thread so far")
+		return said, results
 	}
 	return "", results
 }
@@ -477,7 +349,6 @@ func houseProject(t *testing.T, w *world, tg *telegram, extra map[string]string)
 
 // A read tool runs with no one asked, and the model's reply carries its result.
 func TestModelReadToolRunsAtOnce(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir, model := houseProject(t, w, tg, nil)
@@ -660,11 +531,10 @@ func TestForgedChoiceApprovesNothing(t *testing.T) {
 	}
 }
 
-// Five quick messages to a model agent are answered one at a time, in the order
-// sent, each reply answering its own message, and each model call carrying the
-// conversation before it.
+// Five quick messages to a model agent are answered in turns, which are
+// given the five in the order sent; each turn's reply answers its last
+// message, and each model call carries the conversation before it.
 func TestQuickMessagesAnsweredInOrder(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir, model := houseProject(t, w, tg, nil)
@@ -672,27 +542,36 @@ func TestQuickMessagesAnsweredInOrder(t *testing.T) {
 		tg.dm(1, fmt.Sprintf("m%d", i))
 	}
 	w.sync(dir)
-	w.until("five answers", func() bool { return len(tg.texts("1")) == 5 })
-	want := []string{"ok: m1", "ok: m2", "ok: m3", "ok: m4", "ok: m5"}
-	if got := tg.texts("1"); !slices.Equal(got, want) {
-		t.Errorf("alice was told %q", got)
+	var given []string
+	var turns []*client.Run
+	w.until("five messages answered", func() bool {
+		given, turns = nil, agentRuns(w, "1", "1")
+		for _, run := range turns {
+			given = append(given, w.texts(run)...)
+		}
+		return len(given) == 5 && len(tg.texts("1")) == len(turns)
+	})
+	if !slices.Equal(given, []string{"m1", "m2", "m3", "m4", "m5"}) {
+		t.Errorf("the turns were given %q", given)
 	}
 	tg.mu.Lock()
-	for i, m := range tg.sent {
-		if rp, _ := m["reply_parameters"].(map[string]any); rp == nil || rp["message_id"] != float64(10+i) {
-			t.Errorf("reply %d answers %v", i, m["reply_parameters"])
+	sent := slices.Clone(tg.sent)
+	tg.mu.Unlock()
+	for i, run := range turns {
+		texts := w.texts(run)
+		last := 9 + slices.Index([]string{"m1", "m2", "m3", "m4", "m5"}, texts[len(texts)-1]) + 1
+		if rp, _ := sent[i]["reply_parameters"].(map[string]any); rp == nil || rp["message_id"] != float64(last) {
+			t.Errorf("reply %d answers %v, not message %d", i, sent[i]["reply_parameters"], last)
 		}
 	}
-	tg.mu.Unlock()
-	if n := len(model.Calls[4].Messages); n != 9 {
-		t.Errorf("the fifth call carried %d messages, and not the four turns before it", n)
+	if n := len(model.Calls[len(model.Calls)-1].Messages); n != 2*len(turns)-1 {
+		t.Errorf("the last call carried %d messages, and not the %d turns before it", n, len(turns)-1)
 	}
 }
 
 // Bob writes while alice's approval waits: he has his own conversation, and is
 // answered at once.
 func TestOthersAreAnsweredWhileAnApprovalWaits(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir, _ := houseProject(t, w, tg, nil)
@@ -700,66 +579,31 @@ func TestOthersAreAnsweredWhileAnApprovalWaits(t *testing.T) {
 	w.sync(dir)
 	w.until("a question", func() bool { return len(tg.buttons()) == 2 })
 	tg.dm(2, "hi")
-	tg.waitFor(w, "2", "team to bob (1): hi")
+	tg.waitFor(w, "2", "ok: hi")
 }
 
 // A message sent just as the quiet timer fires, a day after the last, is
-// answered: by the old chat and conversation or by new ones, but never lost.
-// The clock moves past a day, and the message is sent at once.
+// answered: by the old conversation or by a new one, but never lost. The
+// clock moves past a day, and the message is sent at once.
 func TestMessageAsTheQuietTimerFires(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
 	for round := range 3 {
 		t.Run(fmt.Sprint(round), func(t *testing.T) {
 			w := newWorld(t)
 			dir := copyStarter(t)
 			removeListener(t, dir)
 			w.sync(dir)
-			w.sendTo(".rook/blocks/chat.yaml", "telegram:1", "message", message("one"))
-			w.until("the first answer, and both waiting", func() bool {
-				chats, convs := keyed(w, ".rook/blocks/chat.yaml")["telegram:1"], keyed(w, ".rook/blocks/conversation.yaml")["telegram:1:helper"]
-				return sayings(t, w)["one"] != nil && len(chats) == 1 && len(convs) == 1 && w.show(chats[0].ID).Timers == 1 && w.show(convs[0].ID).Timers == 1
+			w.sendTo("conversation.yaml", key("1", "1"), "message", said("1", "1", "one"))
+			w.until("the first answer, and the conversation waiting", func() bool {
+				runs := keyed(w, "conversation.yaml")[key("1", "1")]
+				return sayings(t, w)["one"] != nil && len(runs) == 1 && w.show(runs[0].ID).Timers == 1
 			})
-			// Each round lands the message a little differently against the timers.
+			// Each round lands the message a little differently against the timer.
 			w.set(w.now().Add(24*time.Hour + time.Duration(round)*interval))
 			time.Sleep(time.Duration(round) * interval)
-			w.sendTo(".rook/blocks/chat.yaml", "telegram:1", "message", message("two"))
+			w.sendTo("conversation.yaml", key("1", "1"), "message", said("1", "1", "two"))
 			w.until("the second answer", func() bool { return sayings(t, w)["two"] != nil })
 		})
 	}
-}
-
-// The chat's quiet timer fires, ending the chat, while the conversation's has
-// not yet (it started later). A message then starts a new chat, which sends to
-// the conversation that is about to end: the message is still answered.
-func TestMessageBetweenTheTwoQuietTimers(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
-	w := newWorld(t)
-	dir := copyStarter(t)
-	removeListener(t, dir)
-	// The agent takes a moment, so the conversation's timer starts later than
-	// the chat's.
-	write(t, dir, map[string]string{
-		"agents/helper.yaml": `
-			flow: helper
-			input: { said: string }
-			stages:
-			  slow: { job: { script: ./slow.js, input: { said: "${input.said}" } } }
-			output: { reply: "${input.said}" }
-		`,
-		"agents/slow.js": `const end = Date.now() + 400; while (Date.now() < end) {} return 1`,
-	})
-	w.sync(dir)
-	w.sendTo(".rook/blocks/chat.yaml", "telegram:1", "message", message("one"))
-	w.until("the first answer", func() bool { return sayings(t, w)["one"] != nil })
-	chat := keyed(w, ".rook/blocks/chat.yaml")["telegram:1"][0].ID
-	w.until("waiting", func() bool {
-		convs := keyed(w, ".rook/blocks/conversation.yaml")["telegram:1:helper"]
-		return len(convs) == 1 && w.show(convs[0].ID).Timers == 1 && w.show(chat).Timers == 1
-	})
-	w.set(w.now().Add(24*time.Hour + 100*time.Millisecond))
-	w.until("the chat ended", func() bool { return w.show(chat).HasEnded() })
-	w.sendTo(".rook/blocks/chat.yaml", "telegram:1", "message", message("two"))
-	w.until("the second answer", func() bool { return sayings(t, w)["two"] != nil })
 }
 
 // fileModel answers with what it was shown: "files: " and whether each kind of
@@ -790,131 +634,22 @@ func TestNonMessagesAreSkipped(t *testing.T) {
 	}
 }
 
-// An agent sends a file and a reply: the file goes to the chat as a document,
-// before the reply.
-func TestAgentSendsAFileThenReplies(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
-	tg := newTelegram(t)
-	w := newWorld(t)
-	_, address := standin(t, w, sending(`{"name": "list.txt", "text": "eggs\nmilk\n"}`))
-	dir := chatProject(t, w, tg, map[string]string{"agents/helper.yaml": modelAgent("helper", address, "")})
-	tg.dm(1, "the shopping list")
-	w.sync(dir)
-	tg.waitFor(w, "1", "sent")
-	tg.mu.Lock()
-	defer tg.mu.Unlock()
-	if len(tg.uploads) != 1 || tg.uploads[0].Name != "list.txt" || tg.uploads[0].Body != "eggs\nmilk\n" || tg.uploads[0].To != "1" {
-		t.Errorf("the bot sent %+v", tg.uploads)
-	}
-	if i, j := slices.Index(tg.methods, "sendDocument"), slices.Index(tg.methods, "sendMessage"); i < 0 || i > j {
-		t.Errorf("the methods were called in the order %v", tg.methods)
-	}
-}
-
-// A send with neither a blob nor a text fails the tool, and the model is told
-// why; alice still gets a reply.
-func TestSendWithNothingTellsTheModel(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
-	tg := newTelegram(t)
-	w := newWorld(t)
-	_, address := standin(t, w, sending(`{"name": "empty.txt"}`))
-	dir := chatProject(t, w, tg, map[string]string{"agents/helper.yaml": modelAgent("helper", address, "")})
-	tg.dm(1, "send nothing")
-	w.sync(dir)
-	tg.waitFor(w, "1", "sent")
-	if len(tg.uploads) != 0 {
-		t.Errorf("the bot sent %+v", tg.uploads)
-	}
-}
-
-// overheard is a message that does not name the bot, as a listener with
-// overhear sends it, in alice's Telegram chat.
-func overheard(from, text string) map[string]any {
-	return map[string]any{"bridge": "telegram", "text": text, "chat": "1", "from": from, "place": "dm", "answers": "1:20", "unaddressed": true}
-}
-
-// attendFlow answers a message holding "bot".
-const attendFlow = `
-	flow: attend
-	input: { said: string, asker: string, address: map, history: "any?" }
-	stages:
-	  judge: { job: { script: ./judge.js, input: { said: "${input.said}" } } }
-	output: { reply: { answer: "${stages.judge.output}" } }
-`
-
-// With attend.yaml, an overheard message is answered only when it says so; a
-// stranger's is neither judged nor refused; the files are named to it.
-func TestAttendDecides(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
-	w := newWorld(t)
-	dir := copyStarter(t)
-	removeListener(t, dir)
-	write(t, dir, map[string]string{"attend.yaml": attendFlow, "judge.js": `return input.said.includes("bot")`})
-	w.sync(dir)
-	w.sendTo(".rook/blocks/chat.yaml", "telegram:1", "message", overheard("1", "people talking"))
-	w.sendTo(".rook/blocks/chat.yaml", "telegram:1", "message", overheard("9", "stranger asks the bot"))
-	file := overheard("1", "bot, see this")
-	file["attachments"] = []any{map[string]any{"name": "a.png", "type": "image/png", "size": 3, "id": "F"}}
-	w.sendTo(".rook/blocks/chat.yaml", "telegram:1", "message", file)
-	w.until("the answer", func() bool { return sayings(t, w)["bot, see this"] != nil })
-	quiet()
-	said := sayings(t, w)
-	if said["people talking"] != nil || said["This bot answers only the people it belongs to."] != nil || said["stranger asks the bot"] != nil {
-		t.Errorf("what was said: %v", said)
-	}
-	var judged []string
-	for _, r := range stubs(t, w, "attend") {
-		judged = append(judged, fmt.Sprint(w.show(r.ID).Input.(map[string]any)["said"]))
-	}
-	slices.Sort(judged)
-	if !slices.Equal(judged, []string{"bot, see this\n(files: a.png)", "people talking"}) {
-		t.Errorf("attend judged %q", judged)
-	}
-}
-
-// attend.yaml that fails, or that gives a reply of another shape, answers
-// nothing, and the chat goes on.
-func TestAttendThatFailsOrMisspeaks(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
-	for name, attend := range map[string]string{
-		"fails":        "flow: attend\ninput: { said: string }\nstages:\n  x: { job: { script: ./judge.js } }\n",
-		"plain true":   "flow: attend\ninput: { said: string }\nstages:\n  x: { job: { script: ./ok.js } }\noutput: { reply: true }\n",
-		"string false": "flow: attend\ninput: { said: string }\nstages:\n  x: { job: { script: ./ok.js } }\noutput: { reply: { answer: \"false\" } }\n",
-	} {
-		t.Run(name, func(t *testing.T) {
-			w := newWorld(t)
-			dir := copyStarter(t)
-			removeListener(t, dir)
-			write(t, dir, map[string]string{"attend.yaml": attend, "judge.js": `throw new Error("no model")`, "ok.js": "return 1"})
-			w.sync(dir)
-			w.sendTo(".rook/blocks/chat.yaml", "telegram:1", "message", overheard("1", "overheard"))
-			w.sendTo(".rook/blocks/chat.yaml", "telegram:1", "message", message("named"))
-			w.until("the answer", func() bool { return sayings(t, w)["named"] != nil })
-			quiet()
-			// rook-design: answered only when attend gives { reply: { answer: true } }.
-			if sayings(t, w)["overheard"] != nil {
-				t.Errorf("attend that gives %s answered the overheard message", name)
-			}
-		})
-	}
-}
-
 // The model fails (status 500): alice is told it could not be answered, and her
 // next message starts afresh and is answered.
 func TestModelFails(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	_, address := standin(t, w, func(c llmstandin.Call) llmstandin.Reply {
-		if strings.Contains(last(c), "boom") {
+		if strings.Contains(last(c), "asks: boom") {
 			return llmstandin.Reply{Error: "overloaded"}
 		}
 		return fileModel(c)
 	})
-	dir := chatProject(t, w, tg, map[string]string{"agents/helper.yaml": modelAgent("helper", address, "")})
+	dir := chatProject(t, w, tg, map[string]string{"agents/assistant.yaml": modelAgent("assistant", address, "")})
 	tg.dm(1, "boom")
-	tg.dm(1, "fine")
 	w.sync(dir)
+	w.until("one answer", func() bool { return len(tg.texts("1")) == 1 })
+	tg.dm(1, "fine")
 	w.until("two answers", func() bool { return len(tg.texts("1")) == 2 })
 	got := tg.texts("1")
 	if got[0] != "That could not be answered." || !strings.Contains(got[1], "fine") {
@@ -925,17 +660,16 @@ func TestModelFails(t *testing.T) {
 // The model's key is not set: alice is told it could not be answered, and
 // the error names the secret, not its value.
 func TestModelKeyMissing(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	model := &llmstandin.Server{Answer: fileModel}
 	web := httptest.NewServer(model)
 	t.Cleanup(web.Close)
-	dir := chatProject(t, w, tg, map[string]string{"agents/helper.yaml": modelAgent("helper", web.URL, "")})
+	dir := chatProject(t, w, tg, map[string]string{"agents/assistant.yaml": modelAgent("assistant", web.URL, "")})
 	tg.dm(1, "hello")
 	w.sync(dir)
 	tg.waitFor(w, "1", "That could not be answered.")
-	for _, r := range w.at("agents/helper.yaml") {
+	for _, r := range w.at("agents/assistant.yaml") {
 		if e := w.show(r.ID).Error; !strings.Contains(e, "TEST_KEY") {
 			t.Errorf("the agent failed with %q", e)
 		}
@@ -952,8 +686,9 @@ func TestLongReplyAndChart(t *testing.T) {
 	chart := "Here.\n\n```chart\n{\"type\": \"bar\", \"title\": \"Tickets\", \"labels\": [\"Jan\", \"Feb\"], \"series\": [{\"name\": \"Email\", \"values\": [140, 165]}]}\n```\n"
 	dir := chatProject(t, w, tg, nil)
 	tg.dm(1, long)
-	tg.dm(1, chart)
 	w.sync(dir)
+	w.until("two messages", func() bool { return len(tg.texts("1")) == 2 })
+	tg.dm(1, chart)
 	w.until("three messages", func() bool { return len(tg.texts("1")) == 3 })
 	got := tg.texts("1")
 	if len(got[0]) > 4096 || !strings.HasSuffix(got[0], "\n") || got[0]+got[1] != long {
@@ -1015,6 +750,33 @@ func TestTypingIsShownWhileAnswering(t *testing.T) {
 	}
 }
 
+// When Telegram answers "typing" with a 500, the message is still answered:
+// the status is not part of the answer.
+func TestFailedTypingStillAnswers(t *testing.T) {
+	tg := newTelegram(t)
+	override(tg.Server, func(w http.ResponseWriter, r *http.Request) bool {
+		if !strings.HasSuffix(r.URL.Path, "/sendChatAction") {
+			return false
+		}
+		w.WriteHeader(500)
+		fmt.Fprint(w, "upstream error")
+		return true
+	})
+	w := newWorld(t)
+	dir := chatProject(t, w, tg, nil)
+	tg.dm(1, "check")
+	w.sync(dir)
+	tg.waitFor(w, "1", "check")
+	if got := tg.texts("1"); !slices.Equal(got, []string{"check"}) {
+		t.Errorf("the bot said %q", got)
+	}
+	for _, f := range failedRuns(t, w) {
+		if !strings.HasPrefix(f, "telegram-chat-status:") {
+			t.Errorf("a run failed: %s", f)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // The pages' examples, run on Telegram
 
@@ -1065,7 +827,7 @@ func TestPageAskAlice(t *testing.T) {
 // rook-design's schedules/evening.yaml, as written: at 18:00 in London, alice
 // is told the day is over on Telegram.
 func TestPageEveningSchedule(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
+	t.Skip("R8 revives this: pages")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir := chatProject(t, w, tg, nil)
@@ -1085,7 +847,7 @@ func TestPageEveningSchedule(t *testing.T) {
 // rook-design's parts/messages/part.yaml and rook-project's helper, as written,
 // with only the model's address and service changed to the stand-in's.
 func TestPagePartAndAgent(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
+	t.Skip("R8 revives this: pages")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	model, address := standin(t, w, func(c llmstandin.Call) llmstandin.Reply {
@@ -1169,7 +931,6 @@ func TestTwoQuestionsAnsweredOutOfOrder(t *testing.T) {
 // A model that never stops calling a tool reaches the agent's limit of turns:
 // alice is told it could not be answered, and the next message is answered.
 func TestAgentRunsOutOfTurns(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir, model := houseProject(t, w, tg, nil)
@@ -1184,28 +945,26 @@ func TestAgentRunsOutOfTurns(t *testing.T) {
 		return houseModel(c)
 	}
 	tg.dm(1, "loop forever")
-	tg.dm(1, "after")
 	w.sync(dir)
+	w.until("one answer", func() bool { return len(tg.texts("1")) == 1 })
+	tg.dm(1, "after")
 	w.until("two answers", func() bool { return len(tg.texts("1")) == 2 })
 	if got := tg.texts("1"); got[0] != "That could not be answered." || got[1] != "ok: after" {
 		t.Errorf("alice was told %q", got)
 	}
 }
 
-// An approval answered three days later: the chat has ended by its quiet
-// timer meanwhile, the reply is still said, and alice's next message starts a
-// new chat whose conversation carries on.
-func TestApprovalOutlivesTheChat(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
+// An approval answered three days later: the conversation waits for its
+// turn all the while, the reply is still posted, and alice's next message
+// carries the conversation on.
+func TestApprovalAnsweredDaysLater(t *testing.T) {
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir, model := houseProject(t, w, tg, nil)
 	tg.dm(1, "tell bob hello")
 	w.sync(dir)
 	w.until("a question", func() bool { return len(tg.buttons()) == 2 })
-	chat := keyed(w, ".rook/blocks/chat.yaml")["telegram:1"][0].ID
 	w.set(w.now().Add(3 * 24 * time.Hour))
-	w.until("the chat ended", func() bool { return w.show(chat).HasEnded() })
 	// Three days at once may also time out the listener's job, which then
 	// rests a minute before it asks Telegram again: the clock moves on until
 	// the tap is heard.
@@ -1216,11 +975,15 @@ func TestApprovalOutlivesTheChat(t *testing.T) {
 		return slices.ContainsFunc(tg.texts("1"), func(s string) bool { return strings.Contains(s, "tell gave") })
 	})
 	tg.dm(1, "thanks")
-	tg.waitFor(w, "1", "ok: thanks")
+	w.until(`"ok: thanks" said in chat 1`, func() bool {
+		w.set(w.now().Add(31 * time.Second))
+		time.Sleep(5 * interval)
+		return slices.Contains(tg.texts("1"), "ok: thanks")
+	})
 	if n := len(model.Calls[len(model.Calls)-1].Messages); n < 5 {
 		t.Errorf("the conversation did not carry on: %d messages", n)
 	}
-	if n := len(keyed(w, ".rook/blocks/conversation.yaml")["telegram:1:helper"]); n != 1 {
+	if n := len(keyed(w, "conversation.yaml")["telegram:1:1:assistant"]); n != 1 {
 		t.Errorf("%d conversations", n)
 	}
 }

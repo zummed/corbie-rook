@@ -405,9 +405,11 @@ func TestJiraCommentHasTheFilesItNames(t *testing.T) {
 	if got := m["history"].([]map[string]any)[0]["attachments"]; !slices.Contains(fileNames(got), "bird.png") {
 		t.Errorf("the issue's files are %v", got)
 	}
+	// The conversation downloaded them before it answered.
+	before := len(j.downloaded())
 	id := w.start(bot+"/jira/attachment/get.yaml", map[string]any{"attachments": m["attachments"]})
 	got := ended(w, id).([]any)
-	if downloaded := j.downloaded(); !slices.Equal(slices.Sorted(slices.Values(downloaded)), []string{"2", "4"}) {
+	if downloaded := j.downloaded()[before:]; !slices.Equal(slices.Sorted(slices.Values(downloaded)), []string{"2", "4"}) {
 		t.Errorf("Jira gave the files %v", downloaded)
 	}
 	film := got[1].(map[string]any)

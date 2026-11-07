@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -480,21 +481,24 @@ func TestTelegramUpdateThatAlwaysFailsIsPassedOver(t *testing.T) {
 	}
 }
 
-// historyAgent stands in for the agent at agents/assistant: it replies with
-// the history its message carries, each entry's line and files, whether that
-// history is complete, and the message's text.
+// historyAgent stands in for the agent at agents/assistant: it replies with a
+// line for each message of the turn, giving the history the message carries,
+// each entry's line and files, whether that history is complete, and the
+// message's text.
 var historyAgent = map[string]string{
 	"agents/assistant.yaml": `
 		flow: assistant
-		input: { messages: list, medium: string, asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
+		input: { messages: list, medium: string, format: "any?", asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
 		stages:
-		  turn: { job: { script: ./history.js, input: { message: "${input.messages[0]}" } } }
+		  turn: { job: { script: ./history.js, input: { messages: "${input.messages}" } } }
 		output: ${stages.turn.output}
 	`,
 	"agents/history.js": `
-		const m = input.message
-		const lines = Array.from(blobs.items(m.history)).map((e) => e.line + e.attachments.map((a) => " +" + a.name).join(""))
-		return { reply: (m.complete ? "complete" : "partial") + " [" + lines.join(" | ") + "] " + m.text }
+		const said = (m) => {
+		  const lines = Array.from(blobs.items(m.history)).map((e) => e.line + e.attachments.map((a) => " +" + a.name).join(""))
+		  return (m.complete ? "complete" : "partial") + " [" + lines.join(" | ") + "] " + m.text
+		}
+		return { reply: input.messages.map(said).join("\n") }
 	`,
 }
 
@@ -520,7 +524,7 @@ func TestTelegramHistoryIsKeptForEachChat(t *testing.T) {
 		"2": {"partial [] hello"},
 	}
 	for chat, said := range want {
-		if got := tg.texts(chat); !slices.Equal(got, said) {
+		if got := tg.lines(chat); !slices.Equal(got, said) {
 			t.Errorf("chat %s was told %q", chat, got)
 		}
 	}
@@ -546,14 +550,14 @@ func TestTelegramHistoryIsBounded(t *testing.T) {
 	w.sync(dir)
 	tg.waitFor(w, "1", "] m22")
 	tg.waitFor(w, "2", "] last")
-	said := tg.texts("1")
+	said := tg.lines("1")
 	if want := "complete [" + strings.Join(lines[:20], " | ") + "] m21"; said[20] != want {
 		t.Errorf("the 21st message was given %q", said[20])
 	}
 	if want := "partial [" + strings.Join(lines[1:21], " | ") + "] m22"; said[21] != want {
 		t.Errorf("the 22nd message was given %q", said[21])
 	}
-	if got := tg.texts("2"); got[len(got)-1] != "partial [Bob: "+long+"y] last" {
+	if got := tg.lines("2"); got[len(got)-1] != "partial [Bob: "+long+"y] last" {
 		t.Errorf("the message after two long ones was given %.80q", got[len(got)-1])
 	}
 }
@@ -569,7 +573,7 @@ func TestTelegramHistoryIsDroppedAfterADay(t *testing.T) {
 	tg.dm(1, "two", map[string]any{"date": 1700000000 + 24*60*60})
 	w.sync(dir)
 	tg.waitFor(w, "1", "] two")
-	if got := tg.texts("1"); !slices.Equal(got, []string{"complete [] one", "partial [] two"}) {
+	if got := tg.lines("1"); !slices.Equal(got, []string{"complete [] one", "partial [] two"}) {
 		t.Errorf("alice was told %q", got)
 	}
 }
@@ -593,7 +597,9 @@ func TestTelegramHistoryIsBoundedInAll(t *testing.T) {
 	tg.dm(103, "still", map[string]any{"date": 1700000300})
 	w.sync(dir)
 	tg.waitFor(w, "103", "] still")
-	if got := tg.texts("100"); got[len(got)-1] != "partial [] again" {
+	tg.waitFor(w, "100", "] again")
+	tg.waitFor(w, "105", "] again")
+	if got := tg.lines("100"); got[len(got)-1] != "partial [] again" {
 		t.Errorf("the chat quiet longest was given %.80q", got[len(got)-1])
 	}
 	// A reply past 4096 characters is posted in parts.
@@ -695,7 +701,7 @@ func TestSlackNameAloneIsHeard(t *testing.T) {
 	dir := slackProject(t, w, s)
 	write(t, dir, map[string]string{"agents/assistant.yaml": `
 		statechart: assistant
-		input: { messages: list, medium: string, asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
+		input: { messages: list, medium: string, format: "any?", asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
 		initial: e
 		states:
 		  e: { end: done, output: { reply: "said [${input.messages[0].text}]" } }
@@ -877,10 +883,9 @@ func TestSlackApprovalByButtonCanBeFollowed(t *testing.T) {
 }
 
 // One project runs Slack, GitLab and Jira at once. alice is answered on each
-// where she asked, in a chat of its own, and each service sees only its own
-// token.
-func TestEveryBridgeAtOnce(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
+// where she asked, in a conversation of its own, and each service sees only
+// its own token.
+func TestEveryServiceAtOnce(t *testing.T) {
 	s, gl, j := newSlack(t), newGitLab(t), newJira(t)
 	sh, gh, jh := &headers{}, &headers{}, &headers{}
 	sh.wrap(s.Server)
@@ -888,16 +893,16 @@ func TestEveryBridgeAtOnce(t *testing.T) {
 	jh.wrap(j.Server)
 	w := newWorld(t)
 	dir := everyService(t, w, s, gl, j)
-	gl.note(1, 2, "al", "before")
+	gl.old("group/project", 7)
 	w.sync(dir)
-	for _, b := range []string{"slack", "gitlab", "jira"} {
-		w.kept("bridges/" + b + ".yaml")
+	for _, service := range []string{"slack", "gitlab", "jira"} {
+		w.kept(router(service))
 	}
 	w.until("Slack connected", s.connected)
-	w.until("GitLab asked", func() bool { return gl.asked() > 0 })
+	gl.idle(w)
 	tick(w, j.asked)
 	s.says("a", dm("U1", "3.0", "on slack"))
-	gl.note(2, 2, "al", "@bot on gitlab")
+	gl.comment("group/project", 7, 2, "@bot on gitlab")
 	j.comment("1", "acc-1", "[~accountid:acc-bot] on jira", time.Now().Add(time.Second))
 	w.until("each answered", func() bool {
 		w.set(w.now().Add(31 * time.Second))
@@ -907,10 +912,10 @@ func TestEveryBridgeAtOnce(t *testing.T) {
 	if s.posted()[0]["markdown_text"] != "on slack" || gl.said()[0] != "on gitlab" || j.saying()[0] != "on jira" {
 		t.Errorf("Slack was told %v, GitLab %q, Jira %q", s.posted()[0]["markdown_text"], gl.said(), j.saying())
 	}
-	chats := keyed(w, ".rook/blocks/chat.yaml")
-	for _, key := range []string{"slack:D1", "gitlab:group/project#7", "jira:OPS-12"} {
-		if chats[key] == nil {
-			t.Errorf("no chat %s", key)
+	conversations := keyed(w, "conversation.yaml")
+	for _, key := range []string{"slack:D1:U1:assistant", "gitlab:group/project#7:2:assistant", "jira:OPS-12:acc-1:assistant"} {
+		if conversations[key] == nil {
+			t.Errorf("no conversation %s among %v", key, slices.Collect(maps.Keys(conversations)))
 		}
 	}
 	for _, line := range sh.all() {
@@ -930,36 +935,50 @@ func TestEveryBridgeAtOnce(t *testing.T) {
 	}
 }
 
-// alice asks on a GitLab issue for a held tool. GitLab asks no questions, so
-// the approval asks her on Slack, where she is reached directly, and her press
-// there lets the tool tell bob on Slack. The answer goes back to the issue.
+// slackApprovedToolkit is a toolkit whose tell posts on Slack, held for a yes
+// on Slack, in alice's direct message, from someone who holds
+// messages:approve.
+const slackApprovedToolkit = `
+	description: Messages to people on Slack.
+	ask:
+	  machine: .rook/approval.yaml
+	  input: { ask: gromit/slack/chat/ask, lookup: people/find, approvers: "messages:approve", in: U1, request: "${input.messages.map((m) => m.text).join('\\n')}" }
+	tools:
+	  tell:
+	    description: Write a text to a person on Slack, by their member ID.
+	    args: { to: string, text: string }
+	    job:
+	      call: { at: gromit/slack/chat/post }
+	      input: { in: "${args.to}", text: "${args.text}" }
+	      allow: [send:gromit/slack/chat/post]
+	      approve: true
+`
+
+// Al asks on a GitLab issue for a held tool. GitLab has no buttons, so the
+// toolkit's ask asks on Slack, and alice's press there lets the tool tell bob
+// on Slack. The answer goes back to the issue.
 func TestGitLabRequestApprovedOnSlack(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
 	s, gl, j := newSlack(t), newGitLab(t), newJira(t)
 	w := newWorld(t)
 	dir := everyService(t, w, s, gl, j)
-	w.secret("TEST_KEY", "sk-test")
-	replies := []llmstandin.Reply{
-		{Calls: []llmstandin.ToolCall{{ID: "c1", Name: "open", Args: `{"toolkit": "messages"}`}}},
-		{Calls: []llmstandin.ToolCall{{ID: "c2", Name: "tell", Args: `{"person": "bob", "text": "hello bob"}`}}},
-		{Text: "told"},
-	}
-	var mu sync.Mutex
-	turn := 0
-	model := &llmstandin.Server{Answer: func(llmstandin.Call) llmstandin.Reply {
-		mu.Lock()
-		defer mu.Unlock()
-		turn++
-		return replies[min(turn, len(replies))-1]
-	}}
-	web := httptest.NewServer(model)
-	t.Cleanup(web.Close)
-	realAgent(t, dir, web.URL)
-	gl.note(1, 2, "al", "before")
+	gl.old("group/project", 7)
+	_, url := standin(t, w, func(c llmstandin.Call) llmstandin.Reply {
+		switch toolUses(c) {
+		case 0:
+			return calls("open", `{"toolkit": "slack"}`)
+		case 1:
+			return calls("tell", `{"to": "U2", "text": "hello bob"}`)
+		}
+		return llmstandin.Reply{Text: "told"}
+	})
+	write(t, dir, map[string]string{
+		"agents/assistant.yaml": modelAgent("assistant", url, "toolkits:\n  slack: { include: toolkits/slack.yaml }\n"),
+		"toolkits/slack.yaml":   slackApprovedToolkit,
+	})
 	w.sync(dir)
 	w.until("Slack connected", s.connected)
-	w.until("GitLab asked", func() bool { return gl.asked() > 0 })
-	gl.note(2, 2, "al", "@bot tell bob hello")
+	gl.idle(w)
+	gl.comment("group/project", 7, 2, "@bot tell bob hello")
 	w.until("the question on Slack", func() bool {
 		w.set(w.now().Add(31 * time.Second))
 		time.Sleep(5 * interval)
@@ -985,7 +1004,11 @@ func TestGitLabRequestApprovedOnSlack(t *testing.T) {
 	s.send(map[string]any{"envelope_id": "p1", "type": "interactive", "payload": map[string]any{
 		"type": "block_actions", "user": map[string]any{"id": "U1"}, "actions": []any{map[string]any{"action_id": "choice-0", "value": yes}},
 	}})
-	w.until("told on GitLab", func() bool { return len(gl.said()) >= 1 })
+	w.until("told on GitLab", func() bool {
+		w.set(w.now().Add(31 * time.Second))
+		time.Sleep(5 * interval)
+		return len(gl.said()) >= 1
+	})
 	if got := gl.said(); got[0] != "told" {
 		t.Errorf("the issue was told %q", got)
 	}

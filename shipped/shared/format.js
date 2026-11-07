@@ -1,5 +1,6 @@
-// How to write for the bridge a message came from, which an agent's system text
-// holds as ${input.format}. Charts and layouts are as rich.js reads them.
+// How to write for the service a message came from, which the conversation
+// gives an agent as `format`, and an agent's system text holds as
+// ${input.format}. Charts and layouts are as rich.js reads them.
 const chart = [
   "To show numbers as a chart, write a fenced block marked chart, holding one JSON object:",
   "",
@@ -26,4 +27,4 @@ const ways = {
 }
 // Only an agent's last text is its reply, so text written beside a tool call is lost.
 const last = "Only what you write after your last tool call is shown, so write the whole reply there."
-return ways[input.bridge] ? ways[input.bridge] + "\n\n" + last : ""
+return ways[input.service] ? ways[input.service] + "\n\n" + last : ""
