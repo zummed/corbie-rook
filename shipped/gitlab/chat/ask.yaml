@@ -4,6 +4,8 @@
 # the router sends it here. An answer counts when the person's scopes, by the
 # lookup at `lookup`, hold `approvers`, and the person's email is not
 # `asker`'s; anyone else is told so in a comment, and the question waits on.
+# A choice matches in any case. When the lookup or that comment fails, the
+# question fails with its error.
 # The first answer that counts closes the question with a comment, and the
 # run ends with { choice, by }. No answer that counts within `within`, by
 # default a week, ends it with { choice: no }.
@@ -53,7 +55,7 @@ states:
               choice: "${input.answer.choice}"
               by: "${stages.who.output.name}"
               counts: >-
-                ${input.choices.includes(input.answer.choice) && stages.who.output.scopes.includes(input.approvers)
+                ${input.choices.map((c) => String(c).toLowerCase()).includes(String(input.answer.choice).toLowerCase()) && stages.who.output.scopes.includes(input.approvers)
                   && !(input.asker && String(stages.who.output.email).toLowerCase() === input.asker.toLowerCase())}
               told: >-
                 ${input.asker && String(stages.who.output.email).toLowerCase() === input.asker.toLowerCase()
@@ -63,7 +65,6 @@ states:
           done:
             - { go: answered, when: "${event.data.counts}" }
             - telling
-          failed: open
       telling:
         defer: [answer]
         job:
@@ -71,7 +72,7 @@ states:
           files: [.rook/gitlab/api.js, .rook/shared/rich.js]
           input: { do: note, project: "${input.in.slice(0, input.in.lastIndexOf('#'))}", iid: "${input.in.slice(input.in.lastIndexOf('#') + 1)}", body: "${states.checking.output.told}", site: "${values.GITLAB_SITE}" }
           allow: ["net:${values.GITLAB_SITE}", "secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
-        on: { done: open, failed: open }
+        on: { done: open }
   answered:
     job:
       script: .rook/gitlab/gitlab.js

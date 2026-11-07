@@ -45,9 +45,15 @@ function attachments(text, project) {
 // show: <!-- rook question <run> <choice> ... --> while it waits, each choice
 // URL-encoded, and a later comment of the bot's that holds <!-- rook answered
 // <run> --> closes it. The listener reads these lines only in the bot's own
-// comments.
+// comments, and the bot writes them only at the end of a question and of the
+// comment that closes it: every text it is given to write has them taken out.
 const askedLine = /<!-- rook question (\S+)((?: \S+)+) -->/
 const closedLine = /<!-- rook answered (\S+) -->/
+function unmarked(text) {
+  let out = String(text)
+  while (askedLine.test(out) || closedLine.test(out)) out = out.replace(askedLine, "").replace(closedLine, "")
+  return out
+}
 
 // public says whether everyone who can read the issue can read a note: an
 // answer is public, so an internal note is not heard nor given as history.
@@ -62,19 +68,19 @@ if (input.do === "ask") {
   const { project, iid } = chatOf(input.in)
   const choices = input.choices.map(String)
   const line = "<!-- rook question " + input.question + " " + choices.map(encodeURIComponent).join(" ") + " -->"
-  const body = input.text + "\n\nAnswer with a comment that says " + choices.map((c) => "`" + c + "`").join(" or ") + ".\n\n" + line
+  const body = unmarked(input.text) + "\n\nAnswer with a comment that says " + choices.map((c) => "`" + c + "`").join(" or ") + ".\n\n" + line
   return { id: call("POST", issuePath(project, iid) + "/notes", { json: { body: body } }).id }
 }
 
 if (input.do === "closed") {
   const { project, iid } = chatOf(input.in)
-  const body = input.text + "\n\n<!-- rook answered " + input.question + " -->"
+  const body = unmarked(input.text) + "\n\n<!-- rook answered " + input.question + " -->"
   return { id: call("POST", issuePath(project, iid) + "/notes", { json: { body: body } }).id }
 }
 
 if (input.do === "note") {
   if (!input.body) throw new Error("the comment is empty")
-  const note = call("POST", issuePath(input.project, input.iid) + "/notes", { json: { body: require("../shared/rich.js").plain(String(input.body)) } })
+  const note = call("POST", issuePath(input.project, input.iid) + "/notes", { json: { body: unmarked(require("../shared/rich.js").plain(String(input.body))) } })
   return { id: note.id }
 }
 
@@ -102,7 +108,7 @@ if (input.do === "upload") {
   // the link GitLab gives for it.
   const file = call("POST", projectPath(input.project) + "/uploads", { upload: { file: { data: input.file, name: input.name } }, timeout: 120 })
   const out = { markdown: file.markdown, url: file.url }
-  if (input.iid) out.note = call("POST", issuePath(input.project, input.iid) + "/notes", { json: { body: file.markdown } }).id
+  if (input.iid) out.note = call("POST", issuePath(input.project, input.iid) + "/notes", { json: { body: unmarked(file.markdown) } }).id
   return out
 }
 
@@ -167,7 +173,8 @@ function newest(map, n) {
 //   since      GitLab's time, by its Date header, when the last ask started
 //   start      two minutes before the first ask started; nothing before it is read
 //   iids       the highest issue IID seen, by project: a higher one is opened;
-//              in a project not here, an issue made since the last ask is
+//              a project not here starts from GitLab's highest made before
+//              the ask's window
 //   seen       the notes and events already heard that a next ask reads again
 //   issues     each issue's labels, milestone and state when last read
 //   people     each person's email, by user ID, kept a day
@@ -331,12 +338,21 @@ function poll(before, bot, now, quiet) {
     return found.filter((e) => Date.parse(e.created_at) >= since && fresh(kind + e.id, Date.parse(e.created_at)))
   }
 
+  // highest gives the highest IID of a project's issues made before from, or 0
+  // for none. Any issue made since is listed in this ask or was in an earlier
+  // one, so this is the mark of a project not seen before.
+  const highest = (project) => {
+    const query = { created_before: new Date(from).toISOString(), order_by: "created_at", sort: "desc", state: "all", per_page: "1" }
+    const top = call("GET", projectPath(project) + "/issues", { query: query })
+    return top.length ? top[0].iid : 0
+  }
+
   for (const issue of [...changed.values()].reverse()) {
     const chat = issue.project + "#" + issue.iid
-    const known = iids[issue.project]
-    const opened = known !== undefined ? issue.iid > known : Date.parse(issue.created_at) >= from
+    const known = iids[issue.project] !== undefined ? iids[issue.project] : highest(issue.project)
+    const opened = issue.iid > known
     delete iids[issue.project]
-    iids[issue.project] = Math.max(known || 0, issue.iid)
+    iids[issue.project] = Math.max(known, issue.iid)
     if (opened && !quiet) waiting.push({ chat: chat })
     const wait = waiting.find((w) => w.chat === chat)
 
@@ -355,11 +371,12 @@ function poll(before, bot, now, quiet) {
         const c = closedLine.exec(n.body)
         if (c && questions[chat] && questions[chat].run === c[1]) delete questions[chat]
       }
-      // A comment that is only a choice, while a question waits on the issue,
-      // is an answer to it.
+      // A comment that is only a choice, in any case, while a question waits
+      // on the issue, is an answer to it.
       const q = questions[chat]
-      const choice = unnamed(n.body).replace(/[.!]+$/, "").toLowerCase()
-      if (q && n.author.id !== bot.id && q.choices.includes(choice)) {
+      const said = unnamed(n.body).replace(/[.!]+$/, "").toLowerCase()
+      const choice = q && q.choices.find((c) => c.toLowerCase() === said)
+      if (choice !== undefined && n.author.id !== bot.id) {
         if (quiet) continue
         say(Date.parse(n.created_at), "answer", Object.assign({ run: q.run }, person(n.author), { choice: choice }))
         continue

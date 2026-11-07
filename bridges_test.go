@@ -402,7 +402,7 @@ type gitlab struct {
 	commits   []map[string]any       // each commit made, its project added
 	pipelines []map[string]any       // each pipeline started, its project added
 	failing   int                    // how many asks for issues are answered 500
-	asks      int                    // how many times a project's or group's issues were asked for
+	asks      int                    // how many times a project's or group's changed issues were asked for
 	reads     int                    // how many times an issue's notes were read
 	broken    bool                   // an issue's notes cannot be read
 	notes     []string               // the body of each note the bot made, in order
@@ -855,10 +855,14 @@ func (gl *gitlab) serve(w http.ResponseWriter, r *http.Request) {
 }
 
 // list writes the issues a filter takes, as GitLab lists them: changed on or
-// after updated_after, by updated_at or created_at, newest first unless sort
-// is asc, and each list asked for counts as an ask.
+// after updated_after, made on or before created_before, by updated_at or
+// created_at, newest first unless sort is asc. Each list asked for with
+// updated_after counts as an ask.
 func (gl *gitlab) list(w http.ResponseWriter, r *http.Request, take func(*glIssue) bool) {
-	gl.asks++
+	q := r.URL.Query()
+	if q.Has("updated_after") {
+		gl.asks++
+	}
 	if gl.throttle > 0 {
 		w.Header().Set("Retry-After", strconv.Itoa(gl.throttle))
 		gl.throttle = 0
@@ -870,29 +874,31 @@ func (gl *gitlab) list(w http.ResponseWriter, r *http.Request, take func(*glIssu
 		w.WriteHeader(500)
 		return
 	}
-	q := r.URL.Query()
-	var after time.Time
-	if s := q.Get("updated_after"); s != "" {
-		var err error
-		if after, err = time.Parse(time.RFC3339Nano, s); err != nil {
-			w.WriteHeader(400)
-			fmt.Fprint(w, `{"error": "updated_after is invalid"}`)
-			return
+	at := map[string]time.Time{"updated_after": {}, "created_before": time.Now().Add(time.Hour)}
+	for name := range at {
+		if s := q.Get(name); s != "" {
+			t, err := time.Parse(time.RFC3339Nano, s)
+			if err != nil {
+				w.WriteHeader(400)
+				fmt.Fprintf(w, `{"error": "%s is invalid"}`, name)
+				return
+			}
+			at[name] = t
 		}
 	}
 	var chosen []*glIssue
 	for _, is := range gl.issues {
-		if take(is) && !is.Updated.Before(after) && (q.Get("state") == "" || q.Get("state") == "all" || q.Get("state") == is.State) {
+		if take(is) && !is.Updated.Before(at["updated_after"]) && !is.Created.After(at["created_before"]) && (q.Get("state") == "" || q.Get("state") == "all" || q.Get("state") == is.State) {
 			chosen = append(chosen, is)
 		}
 	}
-	at := func(is *glIssue) time.Time {
+	by := func(is *glIssue) time.Time {
 		if q.Get("order_by") == "updated_at" {
 			return is.Updated
 		}
 		return is.Created
 	}
-	slices.SortStableFunc(chosen, func(a, b *glIssue) int { return at(a).Compare(at(b)) })
+	slices.SortStableFunc(chosen, func(a, b *glIssue) int { return by(a).Compare(by(b)) })
 	if q.Get("sort") != "asc" {
 		slices.Reverse(chosen)
 	}

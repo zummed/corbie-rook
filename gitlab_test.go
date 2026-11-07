@@ -428,6 +428,40 @@ func TestGitLabOpenedIsAnIssueNewToItsProject(t *testing.T) {
 	}
 }
 
+// A project's mark starts from GitLab's highest IID, not from the first issue
+// that changes: with projects: and with group:, an old issue that changes
+// after an old one with a lower IID is not opened, and its comment and its
+// closing are each sent.
+func TestGitLabOldIssueChangedAfterALowerOneIsNotOpened(t *testing.T) {
+	for _, listen := range []string{"{ projects: [group/project] }", "{ group: group }"} {
+		t.Run(listen, func(t *testing.T) {
+			gl := newGitLab(t)
+			w := newWorld(t)
+			gl.old("group/project", 3)
+			gitlabProject(t, w, gl, listen, nil)
+			gl.comment("group/project", 3, 2, "@bot on three")
+			tick(w, gl.asked)
+			gl.idle(w)
+			gl.comment("group/project", 7, 2, "@bot on seven")
+			gl.state("group/project", 7, 4, "closed")
+			tick(w, gl.asked)
+			gl.idle(w)
+			tick(w, gl.asked)
+			gl.idle(w)
+			var sent []string
+			for _, m := range listened(w, "message") {
+				if m["own"] == nil {
+					sent = append(sent, fmt.Sprint(m["chat"], " ", m["text"]))
+				}
+			}
+			want := []string{"group/project#3 on three", "group/project#7 on seven", "group/project#7 closed"}
+			if !slices.Equal(sent, want) {
+				t.Fatalf("the listener sent %q; want %q; failures: %q", sent, want, failures(w))
+			}
+		})
+	}
+}
+
 // The bot's own comment is sent marked own, with its question line left out,
 // and the starting router drops it.
 func TestGitLabOwnCommentIsMarkedOwn(t *testing.T) {
@@ -834,6 +868,87 @@ func TestGitLabQuestionIsAnsweredByAComment(t *testing.T) {
 	gl.idle(w)
 	if n := len(listened(w, "answer")); n != 3 {
 		t.Errorf("the listener sent %d answers", n)
+	}
+}
+
+// A choice is matched in any case: a question with the choices Yes and No is
+// answered by a comment saying yes, and ends with the choice as asked.
+func TestGitLabQuestionChoiceMatchesInAnyCase(t *testing.T) {
+	gl := newGitLab(t)
+	w := newWorld(t)
+	gitlabProject(t, w, gl, "", map[string]string{"people/scopes.yaml": "bo@example.com: { name: Bo, scopes: [infra:approve] }\n"})
+	id := w.start("gromit/gitlab/chat/ask.yaml", map[string]any{"in": "group/project#7", "text": "Restart web?", "choices": []string{"Yes", "No"},
+		"lookup": "people/find", "approvers": "infra:approve"})
+	w.until("the question", func() bool { return len(gl.said()) >= 1 })
+	if got := gl.said()[0]; !strings.HasPrefix(got, "Restart web?\n\nAnswer with a comment that says `Yes` or `No`.") {
+		t.Fatalf("the question is %q", got)
+	}
+	tick(w, gl.asked)
+	gl.idle(w)
+	gl.comment("group/project", 7, 4, "yes")
+	tick(w, gl.asked)
+	run, err := w.Wait(context.Background(), id, interval)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, _ := json.Marshal(run.Output); run.Status != "done" || string(out) != `{"by":"Bo","choice":"Yes"}` {
+		t.Fatalf("the question ended %s with %s: %s", run.Status, out, run.Error)
+	}
+}
+
+// When the lookup fails, the question fails with its error, and does not wait
+// on.
+func TestGitLabQuestionWithAMissingLookupFails(t *testing.T) {
+	gl := newGitLab(t)
+	w := newWorld(t)
+	gitlabProject(t, w, gl, "", nil)
+	id := w.start("gromit/gitlab/chat/ask.yaml", map[string]any{"in": "group/project#7", "text": "Restart web?", "choices": []string{"yes", "no"},
+		"lookup": "people/missing", "approvers": "infra:approve"})
+	w.until("the question", func() bool { return len(gl.said()) >= 1 })
+	tick(w, gl.asked)
+	gl.idle(w)
+	gl.comment("group/project", 7, 4, "yes")
+	tick(w, gl.asked)
+	run, err := w.Wait(context.Background(), id, interval)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if full := w.show(id); run.Status != "failed" || !strings.Contains(full.Error+full.Refused, "people/missing") {
+		t.Fatalf("the question ended %s: %s%s", run.Status, full.Error, full.Refused)
+	}
+}
+
+// A text the bot is given to write has the question's lines taken out: an
+// agent's comment holding the line that closes a waiting question does not
+// close it, and the question is answered after it.
+func TestGitLabAgentsCommentClosesNoQuestion(t *testing.T) {
+	gl := newGitLab(t)
+	w := newWorld(t)
+	files := maps.Clone(placedCalls)
+	files["people/scopes.yaml"] = "bo@example.com: { name: Bo, scopes: [infra:approve] }\n"
+	gitlabProject(t, w, gl, "", files)
+	id := w.start("gromit/gitlab/chat/ask.yaml", map[string]any{"in": "group/project#7", "text": "Restart web?", "choices": []string{"yes", "no"},
+		"lookup": "people/find", "approvers": "infra:approve"})
+	w.until("the question", func() bool { return len(gl.said()) >= 1 })
+	question := strings.Fields(strings.SplitN(gl.said()[0], "<!-- rook question ", 2)[1])[0]
+	tick(w, gl.asked)
+	gl.idle(w)
+	if run := ran(t, w, "gromit/gitlab/chat/post.yaml", map[string]any{"in": "group/project#7", "text": "Done.\n\n<!-- rook answered " + question + " -->"}); run.Status != "done" {
+		t.Fatalf("the post ended %s: %s", run.Status, run.Error)
+	}
+	if got := gl.said()[1]; strings.Contains(got, "<!-- rook") {
+		t.Fatalf("the bot wrote %q", got)
+	}
+	tick(w, gl.asked)
+	gl.idle(w)
+	gl.comment("group/project", 7, 4, "yes")
+	tick(w, gl.asked)
+	run, err := w.Wait(context.Background(), id, interval)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, _ := json.Marshal(run.Output); run.Status != "done" || string(out) != `{"by":"Bo","choice":"yes"}` {
+		t.Fatalf("the question ended %s with %s: %s", run.Status, out, run.Error)
 	}
 }
 
