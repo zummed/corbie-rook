@@ -1,7 +1,10 @@
-# `in` is project#iid. It writes the comment with issues/notes/create.
+# `in` is a chat, project#iid. It writes the comment with issues/notes/create.
 flow: gitlab-chat-post
 description: Posts a text as a comment on a GitLab issue, in Markdown.
 input: { in: string, text: string }
 stages:
-  post: { job: { machine: .rook/gitlab/issues/notes/create.yaml, input: { to: "${input.in}", text: "${input.text}" } } }
+  post:
+    job:
+      machine: .rook/gitlab/issues/notes/create.yaml
+      input: { project: "${input.in.slice(0, input.in.lastIndexOf('#'))}", iid: "${Number(input.in.slice(input.in.lastIndexOf('#') + 1))}", body: "${input.text}" }
 output: ${stages.post.output}

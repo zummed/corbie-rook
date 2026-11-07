@@ -1,0 +1,92 @@
+# Rook's question on GitLab, which an approval calls. It writes `text` as a
+# comment on the issue `in`, project#iid, that asks for a comment saying one of
+# `choices`. The listener sends such a comment to its router as an answer, and
+# the router sends it here. An answer counts when the person's scopes, by the
+# lookup at `lookup`, hold `approvers`, and the person's email is not
+# `asker`'s; anyone else is told so in a comment, and the question waits on.
+# A choice matches in any case. When the lookup or that comment fails, the
+# question fails with its error.
+# The first answer that counts closes the question with a comment, and the
+# run ends with { choice, by }. No answer that counts within `within`, by
+# default a week, ends it with { choice: no }.
+statechart: gitlab-chat-ask
+description: Asks a question in a comment on a GitLab issue, and gives the first choice answered by someone allowed to.
+title: "${input.in}: ${input.text.split('\\n')[0]}"
+input:
+  in: string
+  text: string
+  choices: list
+  lookup: string
+  approvers: string
+  asker: "string?"
+  within: "string?"
+allow: ["send:${input.lookup}"]
+initial: asking
+states:
+  asking:
+    job:
+      script: .rook/gitlab/gitlab.js
+      files: [.rook/gitlab/api.js]
+      input: { do: ask, in: "${input.in}", text: "${input.text}", choices: "${input.choices}", question: "${run.id.slice(run.id.indexOf('/') + 1)}", site: "${values.GITLAB_SITE}" }
+      allow: ["net:${values.GITLAB_SITE}", "secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
+      restart: { limit: 2 }
+    on: { done: waiting }
+  waiting:
+    timers: { within: "${input.within || '7d'}" }
+    initial: open
+    on: { within: unanswered }
+    states:
+      open:
+        on: { answer: checking }
+      checking:
+        defer: [answer]
+        job:
+          input: { answer: "${event.data}", lookup: "${input.lookup}", approvers: "${input.approvers}", asker: "${input.asker || ''}", choices: "${input.choices}" }
+          machine:
+            flow: check
+            input: { answer: map, lookup: string, approvers: string, asker: string, choices: list }
+            allow: ["send:${input.lookup}"]
+            stages:
+              who:
+                job:
+                  call: { at: "${input.lookup}" }
+                  input: { service: gitlab, user: "${input.answer.user}", name: "${input.answer.name || ''}", email: "${input.answer.email || ''}" }
+            output:
+              choice: "${input.answer.choice}"
+              by: "${stages.who.output.name}"
+              counts: >-
+                ${input.choices.map((c) => String(c).toLowerCase()).includes(String(input.answer.choice).toLowerCase()) && stages.who.output.scopes.includes(input.approvers)
+                  && !(input.asker && String(stages.who.output.email).toLowerCase() === input.asker.toLowerCase())}
+              told: >-
+                ${input.asker && String(stages.who.output.email).toLowerCase() === input.asker.toLowerCase()
+                  ? stages.who.output.name + ', you asked for this, so someone else must answer.'
+                  : stages.who.output.name + ', only someone with the scope ' + input.approvers + ' may answer this.'}
+        on:
+          done:
+            - { go: answered, when: "${event.data.counts}" }
+            - telling
+      telling:
+        defer: [answer]
+        job:
+          script: .rook/gitlab/gitlab.js
+          files: [.rook/gitlab/api.js, .rook/shared/rich.js]
+          input: { do: note, project: "${input.in.slice(0, input.in.lastIndexOf('#'))}", iid: "${input.in.slice(input.in.lastIndexOf('#') + 1)}", body: "${states.checking.output.told}", site: "${values.GITLAB_SITE}" }
+          allow: ["net:${values.GITLAB_SITE}", "secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
+        on: { done: open }
+  answered:
+    job:
+      script: .rook/gitlab/gitlab.js
+      files: [.rook/gitlab/api.js]
+      input: { do: closed, in: "${input.in}", text: "${states.checking.output.by} answered ${states.checking.output.choice}.", question: "${run.id.slice(run.id.indexOf('/') + 1)}", site: "${values.GITLAB_SITE}" }
+      allow: ["net:${values.GITLAB_SITE}", "secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
+    on: { done: over, failed: over }
+  unanswered:
+    job:
+      script: .rook/gitlab/gitlab.js
+      files: [.rook/gitlab/api.js]
+      input: { do: closed, in: "${input.in}", text: "No one answered in time, so the answer is no.", question: "${run.id.slice(run.id.indexOf('/') + 1)}", site: "${values.GITLAB_SITE}" }
+      allow: ["net:${values.GITLAB_SITE}", "secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
+    on: { done: over, failed: over }
+  over:
+    end: done
+    output: "${states.checking.output && states.checking.output.counts ? { choice: states.checking.output.choice, by: states.checking.output.by } : { choice: 'no' }}"

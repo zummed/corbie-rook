@@ -1,0 +1,19 @@
+# It gives { id, status, ref, url }.
+flow: gitlab-pipeline-create
+description: Starts a CI/CD pipeline of a GitLab project on a branch or tag.
+input:
+  type: object
+  properties:
+    project: { type: string, description: "the project's path, as group/project" }
+    ref: { type: string, description: the branch or tag to run the pipeline on }
+    variables: { type: object, description: "the pipeline's variables, each a name and its text" }
+  required: [project, ref]
+stages:
+  start:
+    job:
+      script: .rook/gitlab/gitlab.js
+      files: [.rook/gitlab/api.js]
+      input: { do: pipeline, project: "${input.project}", ref: "${input.ref}", variables: "${input.variables || {}}", site: "${values.GITLAB_SITE}" }
+      allow: ["net:${values.GITLAB_SITE}", "secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
+      timeout: 1m
+output: ${stages.start.output}
