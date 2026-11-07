@@ -1,0 +1,13 @@
+# `to` is project#iid.
+flow: gitlab-issues-notes-create
+description: Writes a comment on a GitLab issue, each chart as its table.
+input: { to: string, text: string }
+stages:
+  say:
+    job:
+      script: .rook/gitlab/gitlab.js
+      files: [.rook/gitlab/api.js, .rook/shared/rich.js]
+      input: { do: say, to: "${input.to}", text: "${input.text}", site: "${values.GITLAB_SITE}" }
+      allow: ["net:${values.GITLAB_SITE}", "secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
+      restart: { limit: 2 }
+output: ${stages.say.output}

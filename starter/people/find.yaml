@@ -1,0 +1,4 @@
+# The lookup: a person's name, email and scopes, found by the email a service
+# gives. Rook's reads people/scopes.yaml. A lookup placed here in its stead
+# takes { service, user, name, email } and gives { name, email, scopes }.
+include: .rook/people/file.yaml

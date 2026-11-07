@@ -1,0 +1,13 @@
+# `to` is project#iid, and `at` the comment.
+flow: gitlab-issues-notes-list
+description: Reads what was said before a comment on a GitLab issue.
+input: { to: string, at: "any?" }
+stages:
+  read:
+    job:
+      script: .rook/gitlab/gitlab.js
+      files: [.rook/gitlab/api.js, .rook/shared/thread.js, .rook/shared/types.js]
+      input: { do: history, to: "${input.to}", at: "${input.at}", site: "${values.GITLAB_SITE}" }
+      allow: ["net:${values.GITLAB_SITE}", "secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
+      timeout: 20s
+output: ${stages.read.output}

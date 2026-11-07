@@ -1,0 +1,23 @@
+# The router of BOT on Slack. It runs Rook's Slack listener as a child, and
+# sends each direct message and each message that names the bot to the
+# conversation, keyed by the thread, the person and the agent. It sends a press
+# of a question's button to that question, and a stop to the conversation. The
+# tokens are set at /<project>/BOT/slack. Add `input: { overhear: true }` beside
+# `machine:` to hear every message in a channel outside a thread, marked
+# unaddressed, which this router drops.
+statechart: BOT
+description: The router of BOT on Slack.
+lifetime: singleton
+allow: [send:conversation, send:BOT/slack/chat/ask]
+initial: listening
+states:
+  listening:
+    job: { machine: .rook/slack/listen.yaml, restart: { after: always } }
+    on:
+      message:
+        when: "${!event.data.unaddressed && !event.data.change}"
+        send: { to: { at: conversation, key: "${'slack:' + event.data.chat + ':' + event.data.user + ':assistant'}" }, event: message, data: "${event.data}" }
+      stop:
+        send: { to: { at: conversation, key: "${'slack:' + event.data.chat + ':' + event.data.user + ':assistant'}" }, event: stop, data: "${event.data}" }
+      answer:
+        send: { to: { at: BOT/slack/chat/ask, run: "${run.id.slice(0, run.id.indexOf('/') + 1) + event.data.run}" }, event: answer, data: "${event.data}" }

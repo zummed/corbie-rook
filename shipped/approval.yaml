@@ -1,0 +1,37 @@
+# Rook's approval, which a toolkit or a machine names as its ask. It posts the
+# held calls as a question with yes and no, by calling `ask`, a bot's placed
+# chat/ask, in `in`. The question counts a press only from someone whose scopes,
+# by `lookup`, hold `approvers`, and never from `asker`. No press within
+# `within`, by default a week, is no. `request` is what was asked, which the
+# approvers are shown quoted.
+flow: approval
+description: Asks people whether held calls may run, and gives the calls approved.
+title: "Approve ${(Array.isArray(input.jobs) ? input.jobs : []).map((j) => j.name).join(', ')}"
+input:
+  asking: any
+  jobs: any
+  ask: string
+  lookup: string
+  approvers: string
+  in: string
+  within: "string?"
+  asker: "string?"
+  request: "string?"
+allow: ["send:${input.ask}"]
+stages:
+  brief:
+    job: { script: ./approval.js, input: { jobs: "${input.jobs}", request: "${input.request}" } }
+  question:
+    job:
+      call: { at: "${input.ask}" }
+      input:
+        in: "${input.in}"
+        text: "An agent wants to run ${stages.brief.output.names.join(', ')}.\n\n${stages.brief.output.context}"
+        choices: ["yes", "no"]
+        lookup: "${input.lookup}"
+        approvers: "${input.approvers}"
+        asker: "${input.asker || ''}"
+        within: "${input.within || '7d'}"
+output: >-
+  ${{ approved: stages.question.output.choice === 'yes' ? stages.brief.output.names : [],
+      note: stages.question.output.by ? stages.question.output.by + ' said ' + stages.question.output.choice + '.' : 'No one answered in time, so the answer is no.' }}

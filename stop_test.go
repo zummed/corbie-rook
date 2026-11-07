@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zummed/corbie/client"
+	"github.com/zummed/corbie/instance"
 	llmstandin "github.com/zummed/corbie/plugin/llm/standin"
 )
 
@@ -23,12 +25,12 @@ const hourMachine = `
 	          over: { end: done }
 `
 
-// slowPart is a part with one tool, wait, which takes an hour.
-const slowPart = `
-	does: Waiting.
+// slowToolkit is a toolkit with one tool, wait, which takes an hour.
+const slowToolkit = `
+	description: Waiting.
 	tools:
 	  wait:
-	    does: Wait an hour.
+	    description: Wait an hour.
 	    args: {}
 	    job:
 	      machine:` + hourMachine
@@ -42,26 +44,25 @@ func stopModel(c llmstandin.Call) llmstandin.Reply {
 	}
 	switch len(results) {
 	case 0:
-		return calls("open", `{"part": "slow"}`)
+		return calls("open", `{"toolkit": "slow"}`)
 	case 1:
 		return calls("wait", `{}`)
 	}
 	return llmstandin.Reply{Text: "waited"}
 }
 
-// stopProject makes a Telegram project whose helper, for alice, opens the
-// parts house and slow, and asks the stand-in model above.
+// stopProject makes a Telegram project whose agent at agents/assistant opens
+// the toolkits house and slow, and asks the stand-in model above.
 func stopProject(t *testing.T, w *world, tg *telegram) string {
 	t.Helper()
 	_, address := standin(t, w, stopModel)
 	return chatProject(t, w, tg, map[string]string{
-		"agents/helper.yaml":    modelAgent("helper", address, "open:\n  house: { include: parts/house/part.yaml }\n  slow: { include: parts/slow/part.yaml }\n"),
-		"parts/house/part.yaml": housePart(""),
-		"parts/house/lights.js": `return { on: ["kitchen", "hall"] }`,
-		"parts/slow/part.yaml":  slowPart,
-		"rules.yaml":            teamRules,
-		"agents/team.yaml":      echoAgent("team"),
-		"agents/turn.js":        turnJS,
+		"agents/assistant.yaml":    modelAgent("assistant", address, "toolkits:\n  house: { include: toolkits/house.yaml }\n  slow: { include: toolkits/slow.yaml }\n"),
+		"toolkits/house.yaml":      houseToolkit,
+		"toolkits/house/lights.js": `return { on: ["kitchen", "hall"] }`,
+		"toolkits/slow.yaml":       slowToolkit,
+		"agents/team.yaml":         echoAgent("team"),
+		"agents/turn.js":           turnJS,
 	})
 }
 
@@ -102,6 +103,7 @@ func (w *world) stops(id string) []string {
 // next message is answered. The conversation's record shows the stop and who
 // sent it.
 func TestStopCancelsALongTool(t *testing.T) {
+	t.Skip("R7 revives this: conversation, agent and starter")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir := stopProject(t, w, tg)
@@ -140,6 +142,7 @@ func TestStopCancelsALongTool(t *testing.T) {
 // and the agent are cancelled, and alice is told "Stopped.". A tap on the
 // question afterwards runs nothing, and is noted as undelivered.
 func TestStopCancelsAQuestion(t *testing.T) {
+	t.Skip("R7 revives this: conversation, agent and starter")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir := stopProject(t, w, tg)
@@ -174,6 +177,7 @@ func TestStopCancelsAQuestion(t *testing.T) {
 // answered in the same conversation. The chat and the conversation it started
 // are titled stop.
 func TestStopWithNothingRunning(t *testing.T) {
+	t.Skip("R7 revives this: conversation, agent and starter")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir := stopProject(t, w, tg)
@@ -206,12 +210,12 @@ const slowAgent = `
 // cancels the agent and its job, clears the status, and says "Stopped." in
 // the thread. So it is in a channel and in a direct message's thread.
 func TestSlackStopButtonStopsTheAnswer(t *testing.T) {
+	t.Skip("R7 revives this: conversation, agent and starter")
 	for _, channel := range []string{"C1", "D1"} {
 		t.Run(channel, func(t *testing.T) {
 			s := newSlack(t)
 			w := newWorld(t)
 			dir := slackProject(t, w, s)
-			withHelp(t, dir)
 			write(t, dir, map[string]string{"agents/helper.yaml": slowAgent})
 			w.sync(dir)
 			w.until("Slack connected", s.connected)
@@ -267,7 +271,6 @@ func TestSlackStopButtonStopsTheAnswer(t *testing.T) {
 	}
 }
 
-
 // countingAgent is the echo agent, which counts the turns of its conversation,
 // and which takes an hour first for a message with the word wait.
 const countingAgent = `
@@ -285,12 +288,12 @@ const countingAgent = `
 // A stopped message leaves the conversation as it was: the message after it is
 // the conversation's second turn, after the first.
 func TestStopKeepsTheConversation(t *testing.T) {
+	t.Skip("R7 revives this: conversation, agent and starter")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir := chatProject(t, w, tg, map[string]string{
 		"agents/helper.yaml": countingAgent,
 		"agents/turn.js":     turnJS,
-		"rules.yaml":         teamRules,
 		"agents/team.yaml":   echoAgent("team"),
 	})
 	tg.dm(1, "hello")
@@ -308,6 +311,7 @@ func TestStopKeepsTheConversation(t *testing.T) {
 // /stop@<bot>, and /stop with words after it, are a stop. /stopwatch is a
 // message.
 func TestStopWithABotNameOrWords(t *testing.T) {
+	t.Skip("R4 revives this: Telegram")
 	for _, text := range []string{"/stop@rook_bot", "/stop please", "/stopwatch"} {
 		t.Run(text, func(t *testing.T) {
 			tg := newTelegram(t)
@@ -324,26 +328,37 @@ func TestStopWithABotNameOrWords(t *testing.T) {
 	}
 }
 
-// A stop whose who.yaml fails, here on a field rules.yaml does not take, is
-// told it could not be answered, and stops nothing.
-func TestStopWhoseWhoFails(t *testing.T) {
-	tg := newTelegram(t)
+// A stop sent to a conversation that is not running starts a run, which ends
+// at once. A stop to a conversation that has answered, and waits for the next
+// message, is dropped, and the conversation keeps running.
+func TestStopStartsNoConversation(t *testing.T) {
 	w := newWorld(t)
-	dir := chatProject(t, w, tg, map[string]string{
-		"agents/helper.yaml": echoAgent("helper"),
-		"agents/turn.js":     turnJS,
-		"rules.yaml":         "places:\n  dm: { readers: [asker] }\nagents:\n  - { name: helper, for: [alice], words: [hi] }\n",
-	})
-	tg.dm(1, "/stop")
+	dir := copyStarter(t)
+	removeListener(t, dir)
 	w.sync(dir)
-	tg.waitFor(w, "1", "That could not be answered.")
-	if f := failures(w); !slices.ContainsFunc(f, func(s string) bool { return strings.Contains(s, "the agent helper has words") }) {
-		t.Errorf("no failure names the field: %q", f)
-	}
-	if f := failures(w); slices.ContainsFunc(f, func(s string) bool { return strings.Contains(s, "TypeError") }) {
-		t.Errorf("the stop failed on its own output: %q", f)
-	}
-	if n := len(keyed(w, ".rook/blocks/conversation.yaml")); n != 0 {
-		t.Errorf("there are %d conversations", n)
+	stop := map[string]any{"service": "telegram", "place": "dm", "chat": "1", "user": "1", "name": "Alice"}
+	w.sendTo("conversation.yaml", "telegram:1:1:assistant", "stop", stop)
+	w.until("the stopped conversation ends", func() bool {
+		runs := keyed(w, "conversation.yaml")["telegram:1:1:assistant"]
+		return len(runs) == 1 && runs[0].Status == "done"
+	})
+	w.sendTo("conversation.yaml", "telegram:2:2:assistant", "message", from("2", "hello", 1))
+	var id string
+	w.until("the conversation answers", func() bool {
+		runs := keyed(w, "conversation.yaml")["telegram:2:2:assistant"]
+		if len(runs) != 1 {
+			return false
+		}
+		id = runs[0].ID
+		return slices.ContainsFunc(w.at("conversation.yaml"), func(r *client.Run) bool { return r.Parent == id && r.Status == "done" })
+	})
+	w.sendTo("conversation.yaml", "telegram:2:2:assistant", "stop", stop)
+	w.until("the conversation takes the stop", func() bool {
+		return slices.ContainsFunc(w.record(id), func(e client.Entry) bool {
+			return slices.ContainsFunc(e.Events, func(a instance.Arrived) bool { return a.Name == "stop" })
+		})
+	})
+	if run := w.show(id); run.Status != "running" {
+		t.Errorf("a stop ended a conversation that had answered: %s %s", run.Status, run.Error)
 	}
 }

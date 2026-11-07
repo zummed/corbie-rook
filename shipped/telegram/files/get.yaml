@@ -1,0 +1,13 @@
+# 20 MB is all Telegram gives a bot. A larger file is given without its
+# contents.
+flow: telegram-files-get
+description: Downloads the files sent with a Telegram message, each at most 20 MB.
+input: { attachments: list }
+stages:
+  download:
+    job:
+      script: .rook/telegram/telegram.js
+      input: { do: attachments, token: TELEGRAM_TOKEN, attachments: "${input.attachments}", most: 20000000 }
+      allow: [net:api.telegram.org, "secret:TELEGRAM_TOKEN@net:api.telegram.org"]
+      timeout: 5m
+output: ${stages.download.output}

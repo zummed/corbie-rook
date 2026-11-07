@@ -51,7 +51,7 @@ func TestEveryPageTheBriefingNamesIsThere(t *testing.T) {
 
 // The page rook-project shows what corbie rook init printed.
 func TestThePageShowsWhatInitPrints(t *testing.T) {
-	const command = "    corbie rook init my-bot --bridges slack"
+	const command = "    corbie rook init my-bot --bot gromit --services slack"
 	var page string
 	for _, p := range rook.Pages() {
 		if p.Name == "rook-project" {
@@ -70,65 +70,69 @@ func TestThePageShowsWhatInitPrints(t *testing.T) {
 		shown = append(shown, strings.TrimPrefix(line, "      "))
 	}
 	t.Chdir(t.TempDir())
-	out, status := run(t, "", "init", "my-bot", "--bridges", "slack")
+	out, status := run(t, "", "init", "my-bot", "--bot", "gromit", "--services", "slack")
 	if want := strings.TrimRight(strings.Join(shown, "\n"), "\n") + "\n"; status != 0 || out != want {
 		t.Fatalf("init ended %d and printed\n%s\nand the page shows\n%s", status, out, want)
 	}
 }
 
-// init prints the secrets and the values each chosen bridge needs, set at the
-// project's tree.
-func TestInitPrintsTheSecretsAndValuesOfItsBridges(t *testing.T) {
+// init prints the secrets and the values each chosen service needs, set at
+// the service's directory under the bot's.
+func TestInitPrintsTheSecretsAndValuesOfItsServices(t *testing.T) {
 	t.Chdir(t.TempDir())
-	out, status := run(t, "", "init", "my-bot", "--bridges", "gitlab,jira")
+	out, status := run(t, "", "init", "my-bot", "--bot", "gromit", "--services", "gitlab,jira")
 	if status != 0 {
 		t.Fatalf("init ended %d:\n%s", status, out)
 	}
 	for _, want := range []string{
-		"  corbie controller secret set GITLAB_TOKEN --at /my-bot\n",
-		"  corbie controller value set GITLAB_SITE <host> --at /my-bot\n",
-		"  corbie controller secret set JIRA_TOKEN --at /my-bot\n",
-		"  corbie controller value set JIRA_SITE <host> --at /my-bot\n",
-		"  corbie controller value set JIRA_EMAIL <email> --at /my-bot\n",
+		"  corbie controller secret set GITLAB_TOKEN --at /my-bot/gromit/gitlab\n",
+		"  corbie controller value set GITLAB_SITE <host> --at /my-bot/gromit/gitlab\n",
+		"  corbie controller secret set JIRA_TOKEN --at /my-bot/gromit/jira\n",
+		"  corbie controller value set JIRA_SITE <host> --at /my-bot/gromit/jira\n",
+		"  corbie controller value set JIRA_EMAIL <email> --at /my-bot/gromit/jira\n",
 		"  cd my-bot && corbie run submit .\n",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("init does not print %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "--bridges <names>") {
-		t.Errorf("init with bridges prints the hint to choose them:\n%s", out)
+	if strings.Contains(out, "--services <names>") {
+		t.Errorf("init with services prints the hint to choose them:\n%s", out)
 	}
 }
 
-// init with no bridges sets no secret, and says how to choose bridges.
-func TestInitWithNoBridgesSaysHowToChooseThem(t *testing.T) {
+// init with no services sets no secret, and says how to name a bot and its
+// services; a service with no bot is refused.
+func TestInitWithNoServicesSaysHowToChooseThem(t *testing.T) {
 	t.Chdir(t.TempDir())
 	out, status := run(t, "", "init", "my-bot")
 	if status != 0 {
 		t.Fatalf("init ended %d:\n%s", status, out)
 	}
-	if !strings.Contains(out, "  corbie rook init my-bot --bridges <names>\n") {
-		t.Errorf("init does not say how to choose bridges:\n%s", out)
+	if !strings.Contains(out, "  corbie rook init my-bot --bot <name> --services <names>\n") {
+		t.Errorf("init does not say how to choose services:\n%s", out)
 	}
 	if strings.Contains(out, "secret set") || strings.Contains(out, "value set") {
-		t.Errorf("init with no bridges prints a secret or value:\n%s", out)
+		t.Errorf("init with no services prints a secret or value:\n%s", out)
+	}
+	if out, status := run(t, "", "init", "other", "--services", "slack"); status == 0 || !strings.Contains(out, "--bot") {
+		t.Errorf("init with a service and no bot ended %d:\n%s", status, out)
 	}
 }
 
-// Bridges named as people write a list, with a space after a comma or a comma
+// Services named as people write a list, with a space after a comma or a comma
 // at the end, or one named twice, are each taken once.
 func TestInitTakesAListAsPeopleWriteIt(t *testing.T) {
 	for _, list := range []string{"slack, gitlab", "slack,gitlab,", "slack,gitlab,slack"} {
 		t.Chdir(t.TempDir())
-		out, status := run(t, "", "init", "my-bot", "--bridges", list)
+		out, status := run(t, "", "init", "my-bot", "--bot", "gromit", "--services", list)
 		if status != 0 {
-			t.Errorf("--bridges %q ended %d:\n%s", list, status, out)
+			t.Errorf("--services %q ended %d:\n%s", list, status, out)
 			continue
 		}
 		for _, want := range []string{"secret set SLACK_TOKEN", "secret set GITLAB_TOKEN"} {
 			if n := strings.Count(out, want); n != 1 {
-				t.Errorf("--bridges %q prints %s %d times:\n%s", list, want, n, out)
+				t.Errorf("--services %q prints %s %d times:\n%s", list, want, n, out)
 			}
 		}
 	}

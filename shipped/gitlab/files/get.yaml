@@ -1,0 +1,13 @@
+# A larger file is given without its contents.
+flow: gitlab-files-get
+description: Downloads the files sent with a GitLab comment or issue, each at most 32 MiB.
+input: { attachments: list }
+stages:
+  download:
+    job:
+      script: .rook/gitlab/gitlab.js
+      files: [.rook/gitlab/api.js]
+      input: { do: attachments, attachments: "${input.attachments}", most: 33554432, site: "${values.GITLAB_SITE}" }
+      allow: ["net:${values.GITLAB_SITE}", "secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
+      timeout: 5m
+output: ${stages.download.output}

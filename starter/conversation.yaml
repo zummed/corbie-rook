@@ -1,0 +1,58 @@
+# The conversation: one run per thread, person and agent, which a router starts
+# with the first message it sends to a key. Each message is answered in turn:
+# the lookup finds the person, the agent at agents/assistant answers with the
+# toolkits the person's scopes allow, and the reply is posted where the message
+# came from. A stop cancels the answer. A stop that starts a run, since no
+# conversation was running, ends it at once. A run with no message for a day
+# ends.
+statechart: conversation
+description: Answers one person in one thread with the agent at agents/assistant.
+lifetime: keyed
+receive: [BOT/*/BOT]
+title: "${input.service} ${input.place}: ${String(input.text || '').split('\\n')[0]}"
+initial: waiting
+states:
+  waiting:
+    timers: { quiet: 1d }
+    on:
+      message: answering
+      quiet: over
+      stop: { when: "${!(states.answering || {}).output}", go: over }
+  answering:
+    defer: [message]
+    job:
+      input: { message: "${event.data}", conversation: "${(states.answering.output || {}).conversation}" }
+      machine:
+        flow: turn
+        title: "${input.message.text}"
+        input: { message: map, conversation: "any?" }
+        allow: [send:people/find, send:agents/assistant, "send:BOT/*/chat/post", send:BOT/slack/assistant/status, send:BOT/telegram/chat/status]
+        stages:
+          asker:
+            job:
+              call: { at: people/find }
+              input: { service: "${input.message.service}", user: "${input.message.user}", name: "${input.message.name || ''}", email: "${input.message.email || ''}" }
+          slack_status:
+            when: "${input.message.service === 'slack' && input.message.chat.includes('/')}"
+            job: { call: { at: BOT/slack/assistant/status }, input: { in: "${input.message.chat}", text: Working on it. } }
+          telegram_status:
+            when: "${input.message.service === 'telegram'}"
+            job: { call: { at: BOT/telegram/chat/status }, input: { in: "${input.message.chat}", text: Working on it. } }
+          answer:
+            job:
+              call: { at: agents/assistant }
+              input:
+                messages: ["${input.message}"]
+                medium: "${input.message.service}"
+                asker: "${stages.asker.output}"
+                conversation: "${input.conversation}"
+          post:
+            when: "${(stages.answer.output || {}).reply}"
+            job: { call: { at: "${'BOT/' + input.message.service + '/chat/post'}" }, input: { in: "${input.message.chat}", text: "${stages.answer.output.reply}" } }
+          sorry:
+            when: "${stages.answer.failed}"
+            job: { call: { at: "${'BOT/' + input.message.service + '/chat/post'}" }, input: { in: "${input.message.chat}", text: That could not be answered. } }
+        output:
+          conversation: "${stages.answer.failed ? null : (stages.answer.output || {}).conversation}"
+    on: { done: waiting, failed: waiting, stop: waiting }
+  over: { end: done }

@@ -1,0 +1,30 @@
+# GitLab's listener, run as a child of a router: it asks each project what
+# happened, every thirty seconds, since GitLab cannot be asked to wait. It sends
+# its parent message for an issue opened or a comment that names the bot, and
+# with overhear for every other one, marked unaddressed. An opened issue is sent
+# once nobody has changed it for settle. Its first ask marks where each project
+# stands, and hears nothing. The host is the value GITLAB_SITE, and the token
+# the secret GITLAB_TOKEN.
+statechart: gitlab-listen
+description: Sends its parent each GitLab issue and comment meant for the bot.
+title: GitLab listener
+input:
+  projects: list
+  overhear: "boolean?"
+  settle: "string?"
+initial: hearing
+states:
+  hearing:
+    job:
+      script: ./gitlab.js
+      files: [./api.js, .rook/shared/types.js]
+      input: { do: hear, site: "${values.GITLAB_SITE}", projects: "${input.projects}", overhear: "${input.overhear || false}", settle: "${input.settle || '0s'}", cursor: "${states.hearing.output ? states.hearing.output.cursor : null}" }
+      allow: ["net:${values.GITLAB_SITE}", "secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
+      timeout: 2m
+    on:
+      message: { send: { to: parent, event: message, data: "${event.data}" } }
+      done: resting
+      failed: resting
+  resting:
+    timers: { again: 30s }
+    on: { again: hearing }

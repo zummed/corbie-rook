@@ -1,0 +1,13 @@
+# `to` is the person's ID. Each button holds `question` and its choice. It
+# gives `sent`, the messages it posted.
+flow: telegram-chat-ask
+description: Asks a person on Telegram, with a button for each choice.
+input: { to: string, text: string, choices: list, question: string }
+stages:
+  question:
+    job:
+      script: .rook/telegram/telegram.js
+      input: { do: ask, token: TELEGRAM_TOKEN, to: "${input.to}", text: "${input.text}", choices: "${input.choices}", question: "${input.question}" }
+      allow: [net:api.telegram.org, "secret:TELEGRAM_TOKEN@net:api.telegram.org"]
+      restart: { limit: 2 }          # Telegram sometimes drops a connection; a resend can repeat a message, never lose one
+output: ${stages.question.output}

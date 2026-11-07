@@ -50,7 +50,7 @@ type world struct {
 	controller *controller.Controller
 	mem        *store.Memory
 	me         *identity.Identity // the client's identity
-	ahead      atomic.Int64 // how far the clock is ahead of the computer's
+	ahead      atomic.Int64       // how far the clock is ahead of the computer's
 }
 
 func newWorld(t *testing.T) *world {

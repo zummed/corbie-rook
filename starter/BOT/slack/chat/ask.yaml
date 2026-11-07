@@ -1,0 +1,4 @@
+# Rook's question, which an approval calls. It takes a press only when the
+# router sends it.
+include: .rook/slack/chat/ask.yaml
+receive: [BOT/slack/BOT, agents/*]

@@ -1,0 +1,30 @@
+# Jira's listener, run as a child of a router: it asks each project what
+# changed, every thirty seconds. It sends its parent message for an issue opened
+# or a comment that names the bot, and with overhear for every other one, marked
+# unaddressed. An opened issue is sent once nobody has changed it for settle.
+# Its first ask marks the time, and hears nothing. It signs in at the value
+# JIRA_SITE as the value JIRA_EMAIL, with the API token that is the secret
+# JIRA_TOKEN.
+statechart: jira-listen
+description: Sends its parent each Jira issue and comment meant for the bot.
+title: Jira listener
+input:
+  projects: list
+  overhear: "boolean?"
+  settle: "string?"
+initial: hearing
+states:
+  hearing:
+    job:
+      script: ./jira.js
+      files: [./api.js]
+      input: { do: hear, site: "${values.JIRA_SITE}", email: "${values.JIRA_EMAIL}", projects: "${input.projects}", overhear: "${input.overhear || false}", settle: "${input.settle || '0s'}", cursor: "${states.hearing.output ? states.hearing.output.cursor : null}" }
+      allow: ["net:${values.JIRA_SITE}", "secret:JIRA_TOKEN@net:${values.JIRA_SITE}"]
+      timeout: 2m
+    on:
+      message: { send: { to: parent, event: message, data: "${event.data}" } }
+      done: resting
+      failed: resting
+  resting:
+    timers: { again: 30s }
+    on: { again: hearing }

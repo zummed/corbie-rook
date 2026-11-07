@@ -1,0 +1,29 @@
+# Telegram's listener, run as a child of a router: it asks for each new update.
+# It sends its parent message for each direct message, stop for /stop, and
+# answer for a tap on a question's button. A button holds the question's run ID
+# without its client's name, since Telegram keeps 64 bytes of it.
+statechart: telegram-listen
+description: Sends its parent each Telegram message, button press and stop meant for the bot.
+title: Telegram listener
+input: { type: object, additionalProperties: false }   # it takes no input, such as overhear
+initial: hearing
+states:
+  hearing:
+    job:
+      script: ./telegram.js
+      input:
+        do: hear
+        token: TELEGRAM_TOKEN
+        cursor: "${states.hearing.output ? states.hearing.output.cursor : null}"
+        failing: "${states.hearing.output ? states.hearing.output.failing : null}"
+      allow: [net:api.telegram.org, "secret:TELEGRAM_TOKEN@net:api.telegram.org"]
+      timeout: 2m
+    on:
+      message: { send: { to: parent, event: message, data: "${event.data}" } }
+      stop: { send: { to: parent, event: stop, data: "${event.data}" } }
+      answer: { send: { to: parent, event: answer, data: "${event.data}" } }
+      done: hearing
+      failed: resting
+  resting:
+    timers: { again: 1m }
+    on: { again: hearing }

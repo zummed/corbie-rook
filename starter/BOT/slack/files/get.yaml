@@ -1,0 +1,2 @@
+# Rook's Slack download, which fetches the files a message names.
+include: .rook/slack/files/get.yaml
