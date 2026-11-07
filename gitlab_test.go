@@ -101,27 +101,6 @@ func ran(t *testing.T, w *world, path string, input any) *client.Run {
 	return run
 }
 
-// gitlabHistoryAgent stands in for the agent at agents/assistant: it replies with
-// the history its first message carries, read from its blob, then the
-// message, and says when the history is not complete.
-var gitlabHistoryAgent = map[string]string{
-	"agents/assistant.yaml": `
-		statechart: assistant
-		input: { messages: list, medium: string, asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
-		initial: read
-		states:
-		  read:
-		    job: { script: ./history.js, input: { m: "${input.messages[0]}" } }
-		    on: { done: e }
-		  e: { end: done, output: "${states.read.output}" }
-	`,
-	"agents/history.js": `
-		const m = input.m
-		const h = blobs.read(m.history, { as: "json" })
-		return { reply: "[" + h.text + "] " + m.text + (m.complete ? "" : " (incomplete)") }
-	`,
-}
-
 // A comment naming the bot is answered on its issue, without the name, the
 // person's own or a stranger's. A comment that does not name it, a system
 // note, the bot's own comment, and what was said before the listener started
@@ -306,13 +285,13 @@ func TestGitLabMessageCarriesItsHistory(t *testing.T) {
 	gl.comment("group/project", 7, 1, "my earlier reply")
 	gl.comment("group/project", 7, 2, "an internal note", map[string]any{"internal": true})
 	gl.comment("group/project", 7, 2, "a confidential note", map[string]any{"confidential": true})
-	gitlabProject(t, w, gl, "", gitlabHistoryAgent)
+	gitlabProject(t, w, gl, "", historyAgent)
 	gl.comment("group/project", 7, 2, "@bot go on")
 	gl.comment("group/project", 7, 2, "written later")
 	tick(w, gl.asked)
 	w.until("the answer", func() bool { return len(gl.said()) >= 1 })
 	got := gl.said()[0]
-	if want := "[al: Broken build\n\nIt fails.\n\nal: earlier words\n\nyou: my earlier reply] go on"; got != want {
+	if want := "complete [al: Broken build\n\nIt fails. | al: earlier words | you: my earlier reply] go on"; got != want {
 		t.Fatalf("the bot said %q; want %q", got, want)
 	}
 }
@@ -325,12 +304,12 @@ func TestGitLabLongIssueIsNotComplete(t *testing.T) {
 	for n := range 25 {
 		gl.comment("group/project", 7, 2, fmt.Sprint("note ", n))
 	}
-	gitlabProject(t, w, gl, "", gitlabHistoryAgent)
+	gitlabProject(t, w, gl, "", historyAgent)
 	gl.comment("group/project", 7, 2, "@bot so?")
 	tick(w, gl.asked)
 	w.until("the answer", func() bool { return len(gl.said()) >= 1 })
 	got := gl.said()[0]
-	if !strings.HasSuffix(got, "note 24] so? (incomplete)") || strings.Contains(got, "note 4\n") || strings.Contains(got, "Broken build") {
+	if !strings.HasPrefix(got, "partial [al: note 5 |") || !strings.HasSuffix(got, "note 24] so?") || strings.Contains(got, "Broken build") {
 		t.Fatalf("the bot said %q", got)
 	}
 }
@@ -341,7 +320,7 @@ func TestGitLabLongIssueIsNotComplete(t *testing.T) {
 func TestGitLabHearsAnIssueOnceItSettles(t *testing.T) {
 	gl := newGitLab(t)
 	w := newWorld(t)
-	gitlabProject(t, w, gl, "{ projects: [group/project], settle: 2s }", gitlabHistoryAgent)
+	gitlabProject(t, w, gl, "{ projects: [group/project], settle: 2s }", historyAgent)
 	gl.change("group/project", 8, func(is *glIssue) { is.Description = "It fails. @bot help" })
 	tick(w, gl.asked)
 	gl.comment("group/project", 8, 2, "@bot also the tests")
@@ -355,7 +334,7 @@ func TestGitLabHearsAnIssueOnceItSettles(t *testing.T) {
 	tick(w, gl.asked)
 	w.until("the answer", func() bool { return len(gl.said()) >= 1 })
 	quiet()
-	if got := gl.said(); len(got) != 1 || got[0] != "[al: @bot also the tests] Broken build\n\nIt fails on main. help" {
+	if got := gl.said(); len(got) != 1 || got[0] != "complete [al: @bot also the tests] Broken build\n\nIt fails on main. help" {
 		t.Fatalf("the bot said %q", got)
 	}
 }
@@ -366,7 +345,7 @@ func TestGitLabHearsAnIssueOnceItSettles(t *testing.T) {
 func TestGitLabHearsACommentMadeWhileItsIssueWaits(t *testing.T) {
 	gl := newGitLab(t)
 	w := newWorld(t)
-	gitlabProject(t, w, gl, "{ projects: [group/project], settle: 2s }", gitlabHistoryAgent)
+	gitlabProject(t, w, gl, "{ projects: [group/project], settle: 2s }", historyAgent)
 	gl.issue("group/project", 8)
 	tick(w, gl.asked)
 	gl.comment("group/project", 8, 2, "@bot can you look?")
@@ -379,7 +358,7 @@ func TestGitLabHearsACommentMadeWhileItsIssueWaits(t *testing.T) {
 	tick(w, gl.asked)
 	w.until("the answer", func() bool { return len(gl.said()) >= 1 })
 	quiet()
-	if got := gl.said(); len(got) != 1 || got[0] != "[al: Broken build\n\nIt fails.] can you look?" {
+	if got := gl.said(); len(got) != 1 || got[0] != "complete [al: Broken build\n\nIt fails.] can you look?" {
 		t.Fatalf("the bot said %q", got)
 	}
 }
@@ -852,7 +831,7 @@ func TestGitLabQuestionIsAnsweredByAComment(t *testing.T) {
 		t.Fatalf("the question ended %s with %s: %s", run.Status, out, run.Error)
 	}
 	said := gl.said()
-	if len(said) != 4 || said[1] != "Al, you asked for this, so someone else must answer." || said[2] != "Stranger, only someone with the scope infra:approve may answer this." ||
+	if len(said) != 4 || said[1] != "Al, you asked for this, so someone else must answer it." || said[2] != "Stranger, only someone with the scope infra:approve can answer this." ||
 		!strings.HasPrefix(said[3], "Bo answered yes.\n\n<!-- rook answered ") {
 		t.Fatalf("the bot said %q", said)
 	}
@@ -896,9 +875,9 @@ func TestGitLabQuestionChoiceMatchesInAnyCase(t *testing.T) {
 	}
 }
 
-// When the lookup fails, the question fails with its error, and does not wait
-// on.
-func TestGitLabQuestionWithAMissingLookupFails(t *testing.T) {
+// When the lookup fails, the answer does not count, the person is told so in a
+// comment, and the question waits on.
+func TestGitLabQuestionWithAMissingLookupWaitsOn(t *testing.T) {
 	gl := newGitLab(t)
 	w := newWorld(t)
 	gitlabProject(t, w, gl, "", nil)
@@ -909,12 +888,12 @@ func TestGitLabQuestionWithAMissingLookupFails(t *testing.T) {
 	gl.idle(w)
 	gl.comment("group/project", 7, 4, "yes")
 	tick(w, gl.asked)
-	run, err := w.Wait(context.Background(), id, interval)
-	if err != nil {
-		t.Fatal(err)
+	w.until("the answer told", func() bool { return len(gl.said()) >= 2 })
+	if got := gl.said()[1]; !strings.HasSuffix(got, ", your answer could not be checked, so it does not count.") {
+		t.Fatalf("the bot said %q", got)
 	}
-	if full := w.show(id); run.Status != "failed" || !strings.Contains(full.Error+full.Refused, "people/missing") {
-		t.Fatalf("the question ended %s: %s%s", run.Status, full.Error, full.Refused)
+	if run := w.show(id); run.Status != "running" {
+		t.Fatalf("the question ended %s: %s", run.Status, run.Error)
 	}
 }
 

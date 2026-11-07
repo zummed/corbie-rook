@@ -1,15 +1,15 @@
 // GitLab's script. Each machine runs it with its own input.do:
 //
-//   hear          listen.yaml
-//   ask, closed   chat/ask.yaml: the question, and the comment that closes it
-//   note          issues/notes/create.yaml, and chat/ask.yaml's other comments
-//   notes         issues/notes/list.yaml
-//   issue         issues/read.yaml
-//   upload        uploads/create.yaml
-//   file          repository/files/read.yaml
-//   commit        repository/commits/create.yaml
-//   pipeline      pipeline/create.yaml
-//   attachments   files/get.yaml
+//   hear              listen.yaml
+//   ask, tell, close  chat/ask.yaml: the question, a comment on an answer that does not count, the closing comment
+//   note              issues/notes/create.yaml
+//   notes             issues/notes/list.yaml
+//   issue             issues/read.yaml
+//   upload            uploads/create.yaml
+//   file              repository/files/read.yaml
+//   commit            repository/commits/create.yaml
+//   pipeline          pipeline/create.yaml
+//   attachments       files/get.yaml
 //
 // It speaks the REST API of the GitLab at input.site through api.js. A chat is
 // an issue, written <project's path>#<issue's IID>.
@@ -69,13 +69,25 @@ if (input.do === "ask") {
   const choices = input.choices.map(String)
   const line = "<!-- rook question " + input.question + " " + choices.map(encodeURIComponent).join(" ") + " -->"
   const body = unmarked(input.text) + "\n\nAnswer with a comment that says " + choices.map((c) => "`" + c + "`").join(" or ") + ".\n\n" + line
-  return { id: call("POST", issuePath(project, iid) + "/notes", { json: { body: body } }).id }
+  call("POST", issuePath(project, iid) + "/notes", { json: { body: body } })
+  return { sent: { in: input.in, question: input.question } }
 }
 
-if (input.do === "closed") {
-  const { project, iid } = chatOf(input.in)
-  const body = unmarked(input.text) + "\n\n<!-- rook answered " + input.question + " -->"
-  return { id: call("POST", issuePath(project, iid) + "/notes", { json: { body: body } }).id }
+if (input.do === "tell") {
+  // A comment on the question's issue telling input.by why their answer does
+  // not count.
+  const { project, iid } = chatOf(input.sent.in)
+  const text = String(input.text)
+  call("POST", issuePath(project, iid) + "/notes", { json: { body: unmarked(input.by + ", " + text[0].toLowerCase() + text.slice(1)) } })
+  return {}
+}
+
+if (input.do === "close") {
+  // A comment on the question's issue that closes the question.
+  const { project, iid } = chatOf(input.sent.in)
+  const body = unmarked(input.text) + "\n\n<!-- rook answered " + input.sent.question + " -->"
+  call("POST", issuePath(project, iid) + "/notes", { json: { body: body } })
+  return {}
 }
 
 if (input.do === "note") {
@@ -279,9 +291,10 @@ function poll(before, bot, now, quiet) {
     return readers.get(chat)
   }
 
-  // thread gives the history of a message, as a blob, and whether it is
-  // complete: the issue, for a comment, and the public comments before it. The
-  // bot's own are said by "you".
+  // thread gives the history of a message and whether it is complete: the
+  // issue, for a comment, and the public comments before it, as a blob of a
+  // list of { line, attachments }, oldest first, its latest 20 entries and 8000
+  // characters at most. The bot's own are said by "you".
   const thread = (issue, note) => {
     const r = notesOf(issue.project, issue.iid)
     const earlier = (n) => !note || Date.parse(n.created_at) < Date.parse(note.created_at) || (n.created_at === note.created_at && n.id < note.id)
@@ -290,8 +303,13 @@ function poll(before, bot, now, quiet) {
     const entry = (author, text) => ({ line: name(author || {}) + ": " + text, attachments: attachments(text, issue.project) })
     const entries = note ? [entry(issue.author, issue.title + "\n\n" + (issue.description || ""))] : []
     for (const n of r.list.filter((n) => isPublic(n) && earlier(n)).reverse()) entries.push(entry(n.author, n.body))
-    const h = require("../shared/thread.js").history(entries) || { text: "", attachments: [], complete: true }
-    return { history: blobs.make({ text: h.text, attachments: h.attachments }), complete: r.end && h.complete }
+    let kept = 0
+    let size = 0
+    while (kept < Math.min(entries.length, 20) && size + entries[entries.length - 1 - kept].line.length <= 8000) {
+      size += entries[entries.length - 1 - kept].line.length
+      kept++
+    }
+    return { history: blobs.make(entries.slice(entries.length - kept)), complete: r.end && kept === entries.length }
   }
 
   // say keeps a message or an answer, to be emitted in the order things

@@ -24,7 +24,7 @@ states:
   hearing:
     job:
       script: ./gitlab.js
-      files: [./api.js, .rook/shared/types.js, .rook/shared/thread.js]
+      files: [./api.js, .rook/shared/types.js]
       input:
         do: hear
         site: "${values.GITLAB_SITE}"
