@@ -346,7 +346,7 @@ func TestProjectReads(t *testing.T) {
 	}
 	want := map[string][]string{
 		"singleton": {"/project/gromit/gitlab/gromit", "/project/gromit/jira/gromit", "/project/gromit/slack/gromit", "/project/gromit/telegram/gromit"},
-		"keyed":     {"/project/conversation"},
+		"keyed":     {"/project/conversation", "/project/later", "/project/placed/later"},
 	}
 	for life, locations := range want {
 		slices.Sort(lifetimes[life])
@@ -395,7 +395,7 @@ func TestInitWritesTheTree(t *testing.T) {
 		".corbieignore", ".mcp.json", "AGENTS.md", "CLAUDE.md", "conversation.yaml",
 		"gromit/gitlab/chat/ask.yaml", "gromit/gitlab/chat/post.yaml", "gromit/gitlab/files/get.yaml", "gromit/gitlab/gromit.yaml",
 		"gromit/slack/assistant/status.yaml", "gromit/slack/chat/ask.yaml", "gromit/slack/chat/post.yaml", "gromit/slack/files/get.yaml", "gromit/slack/gromit.yaml",
-		"people/find.yaml", "people/scopes.yaml",
+		"later.yaml", "people/find.yaml", "people/scopes.yaml",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("init wrote %q", got)
@@ -455,7 +455,7 @@ func TestInitAgainKeepsThePersonsFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, name := range []string{"AGENTS.md", "gromit/slack/chat/post.yaml"} {
+	for _, name := range []string{"AGENTS.md", "later.yaml", "gromit/slack/chat/post.yaml"} {
 		if err := os.Remove(filepath.Join(dir, name)); err != nil {
 			t.Fatal(err)
 		}
@@ -470,7 +470,7 @@ func TestInitAgainKeepsThePersonsFiles(t *testing.T) {
 			t.Errorf("%s is now %q", name, got)
 		}
 	}
-	for _, name := range []string{"AGENTS.md", "gromit/slack/chat/post.yaml"} {
+	for _, name := range []string{"AGENTS.md", "later.yaml", "gromit/slack/chat/post.yaml"} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			t.Errorf("%s, which init writes when it is not there, was not written", name)
 		}
