@@ -346,7 +346,7 @@ asker, within }`, and it gives `{ choice, by }`.
 4. The first press that counts ends it with `{ choice, by }`, and shows who answered in place of the buttons. With none within `within`, by default 7d, it ends with `{ choice: no }`.
 
   Slack       tells a refused presser in a message only they see, in the question's thread
-  Telegram    tells a refused presser in an alert, or in their own chat with the bot once Telegram no longer takes one
+  Telegram    tells a refused presser in an alert, or in their own chat with the bot; cuts a question over 4096 characters in its middle
   GitLab      asks in a comment on the issue; a comment that is only a choice is the answer
   Jira        shows a line for each choice, <choice> <run>; a comment on the question's issue that holds only such a line is the answer
 
@@ -359,7 +359,8 @@ so no caller gives them, as the file with deploys added below shows.
 Rook's approval, `.rook/approval.yaml`, is an ask, which a toolkit or a
 machine names under `ask:`. It calls the question with yes and no, naming
 the asker by email and each held call with its arguments, and quoting what was
-asked and what the agent said. It gives `{ approved, note }`.
+asked and what the agent said. An argument of one line over 300 characters is
+shown cut short, with its length. It gives `{ approved, note }`.
 
   ask         the question's location, such as gromit/slack/chat/ask
   approvers   the scope a press needs to count

@@ -183,6 +183,11 @@ func (tg *telegram) serve(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(&ask)
 	tg.mu.Lock()
 	defer tg.mu.Unlock()
+	// Telegram refuses a message whose text is over 4096 characters.
+	if text, _ := ask["text"].(string); (method == "sendMessage" || method == "editMessageText") && len([]rune(text)) > 4096 {
+		fmt.Fprint(w, `{"ok": false, "error_code": 400, "description": "Bad Request: message is too long"}`)
+		return
+	}
 	switch method {
 	case "getUpdates":
 		// It waits for an update at most a third of a second, so that the

@@ -228,11 +228,22 @@ if (input.do === "send") {
   return { sent: input.in + ":" + m.message_id }
 }
 
+// fit gives text as one message Telegram takes, which is at most 4096
+// characters. A longer one loses part of its middle, and says how much, and
+// keeps its end, which gives what was asked or how a question was answered.
+function fit(text) {
+  text = String(text)
+  if (text.length <= 4096) return text
+  const end = 400
+  const head = 4096 - end - 80
+  return text.slice(0, head) + "\n\n[" + (text.length - head - end) + " characters left out: Telegram takes at most 4096]\n\n" + text.slice(-end)
+}
+
 if (input.do === "ask") {
   // A question with a button for each choice. A button holds the question
   // and the choice, which a tap names; Telegram takes at most 64 bytes.
   const buttons = input.choices.map((c) => ({ text: c[0].toUpperCase() + c.slice(1), callback_data: input.question + " " + c }))
-  const m = call("sendMessage", { chat_id: input.in, text: input.text, reply_markup: { inline_keyboard: [buttons] } })
+  const m = call("sendMessage", { chat_id: input.in, text: fit(input.text), reply_markup: { inline_keyboard: [buttons] } })
   return { sent: [{ chat: input.in, id: m.message_id }] }
 }
 
@@ -258,7 +269,7 @@ if (input.do === "close") {
   // Each message a question posted shows input.text, with no buttons. The tap
   // that counted, input.answer.tap, is answered with nothing; Telegram
   // refuses an old tap, which is logged.
-  for (const m of input.sent) call("editMessageText", { chat_id: m.chat, message_id: m.id, text: input.text })
+  for (const m of input.sent) call("editMessageText", { chat_id: m.chat, message_id: m.id, text: fit(input.text) })
   if (input.answer && input.answer.tap) {
     try {
       call("answerCallbackQuery", { callback_query_id: input.answer.tap })
