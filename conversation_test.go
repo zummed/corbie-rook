@@ -6,11 +6,13 @@ package rook_test
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	rook "github.com/zummed/corbie-rook"
@@ -190,6 +192,70 @@ func TestFailedTurnIsToldAndStartsAfresh(t *testing.T) {
 	}
 	if want := map[string]any{"one": nil, "two": 1.0, "three": nil}; !reflect.DeepEqual(given, want) {
 		t.Errorf("the turns were given the conversations %v", given)
+	}
+}
+
+// When Slack refuses the reply's post, Slack's status is still cleared, and
+// the next turn starts the conversation afresh rather than with the one
+// before the failed reply.
+func TestFailedReplyClearsTheStatusAndStartsAfresh(t *testing.T) {
+	s := newSlack(t)
+	var down atomic.Bool
+	override(s.Server, func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path != "/api/chat.postMessage" || !down.Load() {
+			return false
+		}
+		fmt.Fprint(w, `{"ok": false, "error": "channel_not_found"}`)
+		return true
+	})
+	w := newWorld(t)
+	dir := slackProject(t, w, s)
+	write(t, dir, map[string]string{"agents/assistant.yaml": `
+		statechart: assistant
+		input: { messages: list, medium: string, format: "any?", asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
+		initial: e
+		states:
+		  e: { end: done, output: { reply: "${'turn ' + ((input.conversation || 0) + 1)}", conversation: "${(input.conversation || 0) + 1}" } }
+	`})
+	w.sync(dir)
+	w.until("Slack connected", s.connected)
+	statuses := func() []string {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		var out []string
+		for _, st := range s.status {
+			out = append(out, fmt.Sprint(st["status"]))
+		}
+		return out
+	}
+	say := func(id, ts string) {
+		s.says(id, map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "thread_ts": "4.0", "ts": ts, "text": "hello " + id})
+	}
+	say("a", "5.0")
+	w.until("the first reply", func() bool { return len(s.posted()) == 1 })
+	down.Store(true)
+	say("b", "6.0")
+	w.until("the second reply failed", func() bool {
+		return slices.ContainsFunc(failedRuns(t, w), func(f string) bool { return strings.HasPrefix(f, "slack-chat-post:") }) && len(statuses()) == 4
+	})
+	down.Store(false)
+	say("c", "7.0")
+	w.until("the third reply", func() bool { return len(s.posted()) == 2 })
+	quiet()
+	var posted []string
+	for _, p := range s.posted() {
+		posted = append(posted, fmt.Sprint(p["markdown_text"]))
+	}
+	if want := []string{"turn 1", "turn 1"}; !slices.Equal(posted, want) {
+		t.Errorf("the bot posted %q", posted)
+	}
+	if got, want := statuses(), []string{"processing", "active", "processing", "active", "processing", "active"}; !slices.Equal(got, want) {
+		t.Errorf("the statuses are %q", got)
+	}
+	for _, f := range failedRuns(t, w) {
+		if !strings.HasPrefix(f, "slack-chat-post:") {
+			t.Errorf("a run failed: %s", f)
+		}
 	}
 }
 

@@ -86,7 +86,7 @@ and every other tree and client is refused.
 A sender needs `send:` for the location in its `allow:`.
 
   gromit/<service>/gromit.yaml     send:conversation, send:gromit/<service>/chat/ask
-  conversation.yaml                in its turn, send:people/find, send:agents/assistant, and the bot's files/get and status; in its reply, send:gromit/*/chat/post
+  conversation.yaml                in its turn, send:people/find, send:agents/assistant, and the bot's files/get and status; in its reply, send:gromit/*/chat/post and send:gromit/slack/assistant/status
   .rook/approval.yaml              send: for the question its ask names
   .rook/shared/press.yaml          send: for the question's lookup
   a toolkit's tool                 a tool written call: holds send: for its location; a job writes its own allow:
@@ -158,7 +158,7 @@ goes.
           answer:
             send: { to: { at: gromit/slack/chat/ask, run: "${run.id.slice(0, run.id.indexOf('/') + 1) + event.data.run}" }, event: answer, data: "${event.data}" }
 
-- A rule can only send, and a send reaches only a running statechart. A post or a lookup is a call, so the conversation makes it.
+- A rule can only send, and a send goes only to a statechart: a singleton's run, or a keyed run, which it starts. A post or a lookup is a call, so the conversation makes it.
 - An answer goes only to a run at the bot's `chat/ask`, whatever the button holds.
 - `restart: { after: always }` starts the listener again when it ends. A listener whose read fails waits, then reads again.
 - A listener reads a value when it starts. After changing one, run `corbie run cancel /my-bot/gromit/<service>/gromit`, then `corbie run submit .`.
@@ -241,15 +241,17 @@ each turn is a flow it runs as a child, whose stages are written in the file.
 3. A status stage shows `Working...` under a Slack thread, or "typing" on Telegram.
 4. `files` downloads every message's files with the bot's `files/get`, when there are any.
 5. `answer` calls `agents/assistant`.
-6. A second child run posts the reply with the bot's `chat/post`, and clears Slack's status.
+6. A second child run clears Slack's status, and posts the reply with the bot's `chat/post`.
 
 - Messages that come during a turn are kept, and the next turn answers all of them, oldest first. The run keeps at most 100, and drops the 101st.
+- A turn's thread is the history of its first message. What others wrote between that turn's messages is not shown.
 - Each message added costs a job, and each kept message costs one more as the next turn starts.
 - Each person's turns are their own, checked against their own scopes. Two people in one thread have two runs, which may answer at once, and see each other's messages only in the history.
 - The agent's file is read for each turn, so a changed agent answers the next turn. A changed `conversation.yaml` lets the runs under way finish with the machines they started with.
 - A run with no message for a day ends, and the next message starts a new one.
-- A status that fails does not fail the turn.
-- When a turn fails, for any reason, the conversation posts `That could not be answered.`, or `This bot has no agent yet.` when there is no `agents/assistant.yaml`. The next turn starts a new conversation with the agent, and the record shows why.
+- A status that fails does not fail the turn, and a post that fails clears Slack's status all the same.
+- When a turn fails, for any reason, the conversation posts a fixed text, `That could not be answered.`, or `This bot has no agent yet.` when there is no `agents/assistant.yaml`. The error is in the turn's record.
+- After a failed turn, or a reply whose post failed, the next turn starts a new conversation with the agent.
 
 A filter for messages the router sends marked `unaddressed`, and a redactor
 for what is posted outside a direct message, are stages the project adds, as
@@ -289,7 +291,7 @@ type agent includes `.rook/agent.yaml`, which gives it this input, the prompt
 and `receive: [conversation]`, and names no model.
 
   messages        this turn's messages, oldest first, each as the listener sent it
-  thread          the thread before them, as text
+  thread          the thread before the first of them, as text
   attachments     the messages' files, each with file, its contents as a blob
   medium          the service the reply is shown on
   format          how to write for that service, which the system text holds as ${input.format}

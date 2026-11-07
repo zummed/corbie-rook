@@ -6,7 +6,7 @@
 # own `receive:` replaces this one.
 #
 #   messages      this turn's messages, oldest first, each as a listener sends it
-#   thread        the thread before them, as text
+#   thread        the thread before the first of them, as text
 #   attachments   the files sent with the messages, as blobs
 #   medium        the service the reply is shown on: slack, telegram, gitlab or jira
 #   format        how to write for that service, which the agent's system text holds as ${input.format}

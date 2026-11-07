@@ -7,20 +7,22 @@
 #    email and scopes, the status shows, the files are downloaded, and the
 #    agent at agents/assistant answers with the toolkits those scopes allow,
 #    told how to write for the service.
-# 3. The reply is posted where the messages came from, and Slack's status is
-#    cleared. A failed turn posts "That could not be answered.", or "This bot
-#    has no agent yet." when agents/assistant.yaml is missing, and the next
-#    turn starts a new conversation with the agent.
+# 3. Slack's status is cleared, and the reply is posted where the messages
+#    came from. A failed turn posts "That could not be answered.", or "This
+#    bot has no agent yet." when agents/assistant.yaml is missing, and the
+#    next turn starts a new conversation with the agent. So does a reply whose
+#    post fails.
 # 4. A stop cancels the turn, the agent's run and its tools with it, and posts
 #    "Stopped.". A stop that comes while a message is added is kept, and
 #    cancels the turn as it starts. A stop with no turn coming is dropped.
 #
-# A status that fails does not fail the turn or its reply: the turn's and the
-# reply's output read the failure.
+# A status or a post that fails does not fail the turn or its reply: the
+# turn's and the reply's output read the failure, and the record holds its
+# error.
 #
 # A run with no message for a day ends. Each message added costs a job, and
 # each kept message offered while the turn starts costs one more. The run
-# keeps at most 100 messages that come during a turn, and drops one more.
+# keeps at most 100 messages that come during a turn; a 101st is dropped.
 statechart: conversation
 description: Answers one person in one thread with the agent at agents/assistant.
 lifetime: keyed
@@ -145,6 +147,9 @@ states:
         input: { service: string, in: string, answers: string, text: string, conversation: "any?" }
         allow: ["send:BOT/*/chat/post", send:BOT/slack/assistant/status]
         stages:
+          slack_status:
+            when: "${input.service === 'slack' && input.in.includes('/')}"
+            job: { call: { at: BOT/slack/assistant/status }, input: { in: "${input.in}", text: "" } }
           slack:
             when: "${input.service === 'slack' && input.text}"
             job: { call: { at: BOT/slack/chat/post }, input: { in: "${input.in}", text: "${input.text}" } }
@@ -157,10 +162,10 @@ states:
           jira:
             when: "${input.service === 'jira' && input.text}"
             job: { call: { at: BOT/jira/chat/post }, input: { in: "${input.in}", text: "${input.text}" } }
-          slack_status:
-            when: "${input.service === 'slack' && input.in.includes('/')}"
-            job: { call: { at: BOT/slack/assistant/status }, input: { in: "${input.in}", text: "" } }
-        output: { conversation: "${input.conversation}", status_failed: "${!!stages.slack_status.failed}" }
+        output:
+          conversation: "${stages.slack.failed || stages.telegram.failed || stages.gitlab.failed || stages.jira.failed ? null : input.conversation}"
+          post_failed: "${!!(stages.slack.failed || stages.telegram.failed || stages.gitlab.failed || stages.jira.failed)}"
+          status_failed: "${!!stages.slack_status.failed}"
     on: { done: adding, failed: adding }
   broken: { end: failed }
   over: { end: done }
