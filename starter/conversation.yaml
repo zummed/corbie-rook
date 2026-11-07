@@ -12,7 +12,11 @@
 #    has no agent yet." when agents/assistant.yaml is missing, and the next
 #    turn starts a new conversation with the agent.
 # 4. A stop cancels the turn, the agent's run and its tools with it, and posts
-#    "Stopped.". A stop with no agent working is dropped.
+#    "Stopped.". A stop that comes while a message is added is kept, and
+#    cancels the turn as it starts. A stop with no turn coming is dropped.
+#
+# A status that fails does not fail the turn or its reply: the turn's and the
+# reply's output read the failure.
 #
 # A run with no message for a day ends. Each message added costs a job, and
 # each kept message offered while the turn starts costs one more. The run
@@ -32,7 +36,7 @@ states:
       # A stop that started the run, since no conversation was running, ends it.
       stop: { when: "${!states.adding.output}", go: over }
   adding:
-    defer: [message]
+    defer: [message, stop]
     job:
       script: .rook/shared/fold.js
       input:
@@ -43,6 +47,7 @@ states:
   # The messages kept while a state deferred them are offered here, each back
   # to adding, before this job's end.
   gathering:
+    defer: [stop]
     job: { script: .rook/shared/gathered.js, restart: { after: failure, limit: 3 } }
     on:
       message: adding
@@ -114,7 +119,10 @@ states:
           #     when: "${input.messages[0].place !== 'dm'}"
           #     job: { call: { at: redact }, input: { text: "${stages.answer.output.reply || ''}" } }
           # with the output's reply "${stages.redact.skipped ? stages.answer.output.reply : stages.redact.output}".
-        output: { reply: "${(stages.answer.output || {}).reply}", conversation: "${(stages.answer.output || {}).conversation}" }
+        output:
+          reply: "${(stages.answer.output || {}).reply}"
+          conversation: "${(stages.answer.output || {}).conversation}"
+          status_failed: "${!!(stages.slack_status.failed || stages.telegram_status.failed)}"
     on: { done: replying, failed: replying, stop: replying }
   replying:
     defer: [message]
@@ -152,7 +160,7 @@ states:
           slack_status:
             when: "${input.service === 'slack' && input.in.includes('/')}"
             job: { call: { at: BOT/slack/assistant/status }, input: { in: "${input.in}", text: "" } }
-        output: { conversation: "${input.conversation}" }
+        output: { conversation: "${input.conversation}", status_failed: "${!!stages.slack_status.failed}" }
     on: { done: adding, failed: adding }
   broken: { end: failed }
   over: { end: done }

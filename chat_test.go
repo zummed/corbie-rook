@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -746,6 +747,33 @@ func TestTypingIsShownWhileAnswering(t *testing.T) {
 	tg.mu.Unlock()
 	if !slices.Equal(typing, []string{"1"}) || !slices.Equal(tg.said(), []string{"check"}) {
 		t.Errorf("typing was shown in %v, and the bot said %q", typing, tg.said())
+	}
+}
+
+// When Telegram answers "typing" with a 500, the message is still answered:
+// the status is not part of the answer.
+func TestFailedTypingStillAnswers(t *testing.T) {
+	tg := newTelegram(t)
+	override(tg.Server, func(w http.ResponseWriter, r *http.Request) bool {
+		if !strings.HasSuffix(r.URL.Path, "/sendChatAction") {
+			return false
+		}
+		w.WriteHeader(500)
+		fmt.Fprint(w, "upstream error")
+		return true
+	})
+	w := newWorld(t)
+	dir := chatProject(t, w, tg, nil)
+	tg.dm(1, "check")
+	w.sync(dir)
+	tg.waitFor(w, "1", "check")
+	if got := tg.texts("1"); !slices.Equal(got, []string{"check"}) {
+		t.Errorf("the bot said %q", got)
+	}
+	for _, f := range failedRuns(t, w) {
+		if !strings.HasPrefix(f, "telegram-chat-status:") {
+			t.Errorf("a run failed: %s", f)
+		}
 	}
 }
 

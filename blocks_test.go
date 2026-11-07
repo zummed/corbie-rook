@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -116,6 +117,36 @@ func TestSlackShowsAStatusWhileAnswering(t *testing.T) {
 				t.Errorf("the bot posted %q", posted)
 			}
 		})
+	}
+}
+
+// When Slack answers each status with a 500, the message is still answered
+// and the reply posted: the status is not part of the answer.
+func TestSlackFailedStatusStillAnswers(t *testing.T) {
+	s := newSlack(t)
+	override(s.Server, func(w http.ResponseWriter, r *http.Request) bool {
+		if r.URL.Path != "/api/agents.sessions.setStatus" {
+			return false
+		}
+		w.WriteHeader(500)
+		fmt.Fprint(w, "upstream error")
+		return true
+	})
+	w := newWorld(t)
+	dir := slackProject(t, w, s)
+	replying(t, dir, "Done.")
+	w.sync(dir)
+	w.until("Slack connected", s.connected)
+	s.says("a", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "thread_ts": "4.0", "ts": "5.0", "text": "hello"})
+	w.until("the reply posted", func() bool { return len(s.posted()) == 1 })
+	quiet()
+	if post := s.posted(); len(post) != 1 || post[0]["markdown_text"] != "Done." || post[0]["thread_ts"] != "4.0" {
+		t.Errorf("the bot posted %v", post)
+	}
+	for _, f := range failedRuns(t, w) {
+		if !strings.HasPrefix(f, "slack-assistant-status:") {
+			t.Errorf("a run failed: %s", f)
+		}
 	}
 }
 

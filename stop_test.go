@@ -345,3 +345,32 @@ func TestStopStartsNoConversation(t *testing.T) {
 		t.Errorf("a stop ended a conversation that had answered: %s %s", run.Status, run.Error)
 	}
 }
+
+// A message and /stop that Telegram gives in one poll: the stop comes while
+// the conversation adds the message, and cancels the turn as it starts. Alice
+// is told "Stopped." and nothing else, no agent's run is left running, and her
+// next message is answered.
+func TestStopRightAfterAMessage(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorld(t)
+	dir := stopProject(t, w, tg)
+	tg.dm(1, "wait an hour")
+	tg.dm(1, "/stop")
+	w.sync(dir)
+	tg.waitFor(w, "1", "Stopped.")
+	cancelled(w, one(t, w, "turn"))
+	for _, run := range stubs(t, w, "assistant") {
+		cancelled(w, run.ID)
+	}
+	for _, run := range stubs(t, w, "hour") {
+		cancelled(w, run.ID)
+	}
+	tg.dm(1, "hello")
+	tg.waitFor(w, "1", "ok: hello")
+	if got := tg.texts("1"); !slices.Equal(got, []string{"Stopped.", "ok: hello"}) {
+		t.Errorf("alice was told %q", got)
+	}
+	if f := failedRuns(t, w); len(f) > 0 {
+		t.Errorf("runs failed: %v", f)
+	}
+}
