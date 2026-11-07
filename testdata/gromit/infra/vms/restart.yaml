@@ -1,0 +1,14 @@
+# The key is set at /<project>/infra and bound to the hypervisor's host, so
+# this run, at infra/vms/restart, sends it there and nowhere else, and the
+# agent's run, at agents/support, cannot read it.
+flow: restart
+description: Restart one virtual machine by its name.
+input:
+  type: object
+  properties:
+    name: { type: string, description: "the virtual machine's name, as orders-2" }
+  required: [name]
+allow: ["net:${values.HYPERVISOR}", "secret:HYPERVISOR_KEY@net:${values.HYPERVISOR}"]
+stages:
+  restart: { job: { script: ./restart.js, input: { name: "${input.name}", host: "${values.HYPERVISOR}" } } }
+output: ${stages.restart.output}

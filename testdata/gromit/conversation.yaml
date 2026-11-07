@@ -1,0 +1,171 @@
+# The conversation: one run for each thread and person, which a router starts
+# with the first message it sends to a key `<service>:<chat>:<user>:support`.
+#
+# 1. A message is added to a list, and messages that come while the bot
+#    answers are added to the list too.
+# 2. The turn answers the whole list: the lookup gives the person's name,
+#    email and scopes, the status shows, the files are downloaded, and the
+#    agent at agents/support answers with the toolkits those scopes allow,
+#    told how to write for the service.
+# 3. Slack's status is cleared, and the reply is posted where the messages
+#    came from. A failed turn posts "That could not be answered.", or "This
+#    bot has no agent yet." when agents/support.yaml is missing, and the
+#    next turn starts a new conversation with the agent. So does a reply whose
+#    post fails.
+# 4. A stop cancels the turn, the agent's run and its tools with it, and posts
+#    "Stopped.". A stop that comes while a message is added is kept, and
+#    cancels the turn as it starts. A stop with no turn coming is dropped.
+#
+# A status or a post that fails does not fail the turn or its reply: the
+# turn's and the reply's output read the failure, and the record holds its
+# error.
+#
+# A run with no message for a day ends. Each message added costs a job, and
+# each kept message offered while the turn starts costs one more. The run
+# keeps at most 100 messages that come during a turn; a 101st is dropped.
+statechart: conversation
+description: Answers one person in one thread with the agent at agents/support.
+lifetime: keyed
+receive: [gromit/*/gromit]
+title: "${input.service} ${input.place}: ${String(input.text || '').split('\\n')[0]}"
+initial: idle
+states:
+  idle:
+    timers: { quiet: 1d }
+    on:
+      message: adding
+      quiet: over
+      # A stop that started the run, since no conversation was running, ends it.
+      stop: { when: "${!states.adding.output}", go: over }
+  adding:
+    defer: [message, stop]
+    job:
+      script: .rook/shared/fold.js
+      input:
+        list: "${event.name === 'message' ? states.adding.output || [] : []}"
+        add: "${event.name === 'message' ? [event.data] : []}"
+      restart: { after: failure, limit: 3 }
+    on: { done: gathering, failed: broken }
+  # The messages kept while a state deferred them are offered here, each back
+  # to adding, before this job's end.
+  gathering:
+    defer: [stop]
+    job: { script: .rook/shared/gathered.js, restart: { after: failure, limit: 3 } }
+    on:
+      message: adding
+      done:
+        - { go: answering, when: "${states.adding.output.length > 0}" }
+        - idle
+      failed: broken
+  answering:
+    defer: [message]
+    job:
+      input: { messages: "${states.adding.output}", conversation: "${(states.replying.output || {}).conversation}" }
+      machine:
+        flow: turn
+        title: "${input.messages.map((m) => m.text).join(' / ')}"
+        input: { messages: list, conversation: "any?" }
+        allow:
+          - send:people/find
+          - send:agents/support
+          - send:gromit/slack/files/get
+          - send:gromit/telegram/files/get
+          - send:gromit/gitlab/files/get
+          - send:gromit/jira/attachment/get
+          - send:gromit/slack/assistant/status
+          - send:gromit/telegram/chat/status
+        stages:
+          asker:
+            job:
+              call: { at: people/find }
+              input: { service: "${input.messages[0].service}", user: "${input.messages[0].user}", name: "${input.messages[0].name || ''}", email: "${input.messages[0].email || ''}" }
+          thread:
+            job:
+              script: .rook/shared/history.js
+              files: [.rook/shared/thread.js]
+              input: { history: "${input.messages[0].history || null}" }
+          format:
+            job: { script: .rook/shared/format.js, input: { service: "${input.messages[0].service}" } }
+          slack_status:
+            when: "${input.messages[0].service === 'slack' && input.messages[0].chat.includes('/')}"
+            job: { call: { at: gromit/slack/assistant/status }, input: { in: "${input.messages[0].chat}", text: Working on it. } }
+          telegram_status:
+            when: "${input.messages[0].service === 'telegram'}"
+            job: { call: { at: gromit/telegram/chat/status }, input: { in: "${input.messages[0].chat}", text: Working on it. } }
+          files:
+            when: "${input.messages.some((m) => (m.attachments || []).length > 0)}"
+            job:
+              call: { at: "${'gromit/' + input.messages[0].service + (input.messages[0].service === 'jira' ? '/attachment/get' : '/files/get')}" }
+              input: { attachments: "${input.messages.flatMap((m) => m.attachments || [])}" }
+          # A filter, for messages the router sends marked unaddressed, is a
+          # stage here such as
+          #   filter:
+          #     when: "${input.messages.every((m) => m.unaddressed)}"
+          #     job: { call: { at: filters/words }, input: { text: "${input.messages.at(-1).text}", words: [build] } }
+          # with the answer's when: "${(stages.files.skipped || stages.files.output) && (stages.filter.skipped || stages.filter.output.reply.answer)}".
+          answer:
+            when: "${stages.files.skipped || stages.files.output}"
+            job:
+              call: { at: agents/support }
+              input:
+                messages: "${input.messages}"
+                thread: "${stages.thread.output}"
+                attachments: "${stages.files.output || []}"
+                medium: "${input.messages[0].service}"
+                format: "${stages.format.output}"
+                asker: "${stages.asker.output}"
+                conversation: "${input.conversation}"
+          # A redactor, which cleans the reply of what may not be posted outside
+          # a direct message, is a stage here such as
+          #   redact:
+          #     when: "${input.messages[0].place !== 'dm'}"
+          #     job: { call: { at: redact }, input: { text: "${stages.answer.output.reply || ''}" } }
+          # with the output's reply "${stages.redact.skipped ? stages.answer.output.reply : stages.redact.output}".
+        output:
+          reply: "${(stages.answer.output || {}).reply}"
+          conversation: "${(stages.answer.output || {}).conversation}"
+          status_failed: "${!!(stages.slack_status.failed || stages.telegram_status.failed)}"
+    on: { done: replying, failed: replying, stop: replying }
+  replying:
+    defer: [message]
+    job:
+      input:
+        service: "${states.adding.output[0].service}"
+        in: "${states.adding.output[0].chat}"
+        answers: "${(event.name === 'stop' ? event.data.answers : states.adding.output.at(-1).answers) || ''}"
+        text: >-
+          ${event.name === 'done' ? event.data.reply || '' :
+            event.name === 'stop' ? 'Stopped.' :
+            String(event.data.error).includes('nothing is recorded at ' + run.tree + '/agents/support:') ? 'This bot has no agent yet.' :
+            'That could not be answered.'}
+        conversation: >-
+          ${event.name === 'done' ? event.data.conversation :
+            event.name === 'stop' ? (states.replying.output || {}).conversation : null}
+      machine:
+        flow: reply
+        title: "${input.text.split('\\n')[0] || 'no reply'}"
+        input: { service: string, in: string, answers: string, text: string, conversation: "any?" }
+        allow: ["send:gromit/*/chat/post", send:gromit/slack/assistant/status]
+        stages:
+          slack_status:
+            when: "${input.service === 'slack' && input.in.includes('/')}"
+            job: { call: { at: gromit/slack/assistant/status }, input: { in: "${input.in}", text: "" } }
+          slack:
+            when: "${input.service === 'slack' && input.text}"
+            job: { call: { at: gromit/slack/chat/post }, input: { in: "${input.in}", text: "${input.text}" } }
+          telegram:
+            when: "${input.service === 'telegram' && input.text}"
+            job: { call: { at: gromit/telegram/chat/post }, input: { in: "${input.in}", text: "${input.text}", answers: "${input.answers}" } }
+          gitlab:
+            when: "${input.service === 'gitlab' && input.text}"
+            job: { call: { at: gromit/gitlab/chat/post }, input: { in: "${input.in}", text: "${input.text}" } }
+          jira:
+            when: "${input.service === 'jira' && input.text}"
+            job: { call: { at: gromit/jira/chat/post }, input: { in: "${input.in}", text: "${input.text}" } }
+        output:
+          conversation: "${stages.slack.failed || stages.telegram.failed || stages.gitlab.failed || stages.jira.failed ? null : input.conversation}"
+          post_failed: "${!!(stages.slack.failed || stages.telegram.failed || stages.gitlab.failed || stages.jira.failed)}"
+          status_failed: "${!!stages.slack_status.failed}"
+    on: { done: adding, failed: adding }
+  broken: { end: failed }
+  over: { end: done }

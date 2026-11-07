@@ -1122,23 +1122,26 @@ func (j *jira) asked() int {
 // A slack stands in for Slack's Web API and Socket Mode.
 type slack struct {
 	*httptest.Server
-	t       *testing.T
-	mu      sync.Mutex
-	socket  *websocket.Conn
-	posts   []map[string]any
-	acks    []string
-	thread  []map[string]any          // what the conversation holds, oldest first
-	reads   []string                  // the methods that read it
-	status  []map[string]any          // each status set, in order
-	updates []map[string]any          // each message changed, in order
-	refuse  bool                      // a message with blocks is refused
-	files   map[string]string         // what each path under /files/ downloads
-	shared  []upload                  // each file the bot sent, in order
-	noWrite bool                      // the token lacks the scope files:write
-	sending map[string]*slackFile     // each file asked for, by its ID
-	users   map[string]map[string]any // what users.info gives, by member ID
-	lookups []string                  // the member ID of each users.info, in order
-	private []map[string]any          // each chat.postEphemeral, in order
+	t        *testing.T
+	mu       sync.Mutex
+	socket   *websocket.Conn
+	posts    []map[string]any
+	acks     []string
+	thread   []map[string]any          // what the conversation holds, oldest first
+	reads    []string                  // the methods that read it
+	status   []map[string]any          // each status set, in order
+	updates  []map[string]any          // each message changed, in order
+	refuse   bool                      // a message with blocks is refused
+	files    map[string]string         // what each path under /files/ downloads
+	shared   []upload                  // each file the bot sent, in order
+	noWrite  bool                      // the token lacks the scope files:write
+	sending  map[string]*slackFile     // each file asked for, by its ID
+	users    map[string]map[string]any // what users.info gives, by member ID
+	lookups  []string                  // the member ID of each users.info, in order
+	private  []map[string]any          // each chat.postEphemeral, in order
+	channels map[string]string         // a channel's name by its ID, besides C5, approvals; any other is help
+	held     map[string]chan struct{}  // a channel whose chat.postMessage waits until its channel is closed
+	holding  int                       // how many posts waited on held
 }
 
 // A slackFile is a file files.getUploadURLExternal was asked for: the name and
@@ -1252,11 +1255,18 @@ func (s *slack) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(map[string]any{"ok": true, "messages": messages, "response_metadata": meta})
 	case "/api/conversations.info":
-		if strings.HasPrefix(r.URL.Query().Get("channel"), "D") {
+		id := r.URL.Query().Get("channel")
+		if strings.HasPrefix(id, "D") {
 			fmt.Fprint(w, `{"ok": true, "channel": {"is_im": true}}`)
 			return
 		}
-		fmt.Fprint(w, `{"ok": true, "channel": {"name": "help"}}`)
+		s.mu.Lock()
+		name, ok := s.channels[id]
+		s.mu.Unlock()
+		if !ok {
+			name = "help"
+		}
+		json.NewEncoder(w).Encode(map[string]any{"ok": true, "channel": map[string]any{"name": name}})
 	case "/api/conversations.open":
 		fmt.Fprint(w, `{"ok": true, "channel": {"id": "D9"}}`)
 	case "/api/chat.update":
@@ -1267,10 +1277,25 @@ func (s *slack) serve(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 		fmt.Fprint(w, `{"ok": true}`)
 	case "/api/conversations.list":
-		fmt.Fprint(w, `{"ok": true, "channels": [{"id": "C5", "name": "approvals"}], "response_metadata": {"next_cursor": ""}}`)
+		channels := []map[string]any{{"id": "C5", "name": "approvals"}}
+		s.mu.Lock()
+		for _, id := range slices.Sorted(maps.Keys(s.channels)) {
+			channels = append(channels, map[string]any{"id": id, "name": s.channels[id]})
+		}
+		s.mu.Unlock()
+		json.NewEncoder(w).Encode(map[string]any{"ok": true, "channels": channels, "response_metadata": map[string]any{"next_cursor": ""}})
 	case "/api/chat.postMessage":
 		var post map[string]any
 		json.NewDecoder(r.Body).Decode(&post)
+		s.mu.Lock()
+		held := s.held[fmt.Sprint(post["channel"])]
+		if held != nil {
+			s.holding++
+		}
+		s.mu.Unlock()
+		if held != nil {
+			<-held
+		}
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		if s.refuse && post["blocks"] != nil {

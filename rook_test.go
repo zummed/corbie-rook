@@ -58,12 +58,15 @@ const helperStub = `
 // exampleProject makes a project with a bot on the services given, as rook.Init
 // does, and puts testdata's files in it: the agents helper and team, the
 // toolkit messages, two people's scopes and a .corbieignore that lists
-// toolkits/.
+// toolkits/. testdata/gromit, a project of its own, is left out.
 func exampleProject(dir string, services []string) error {
 	if err := rook.Init(dir, bot, services); err != nil {
 		return err
 	}
 	return filepath.WalkDir("testdata", func(name string, d fs.DirEntry, err error) error {
+		if err == nil && d.IsDir() && name == "testdata/gromit" {
+			return fs.SkipDir
+		}
 		if err != nil || d.IsDir() {
 			return err
 		}
