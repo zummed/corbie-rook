@@ -905,6 +905,9 @@ func TestPageToolkitAndAgent(t *testing.T) {
 	if len(model.Calls) != 3 {
 		t.Fatalf("the model was called %d times", len(model.Calls))
 	}
+	if s := model.Calls[0].System; !strings.Contains(s, "plain text: write no Markdown, and no tables") {
+		t.Errorf("the system text does not hold Telegram's format: %s", s)
+	}
 	if opened := fmt.Sprint(model.Calls[1].Messages); !strings.Contains(opened, "The orders app is built from the repository group/orders.") {
 		t.Errorf("open did not give the instructions: %s", opened)
 	}
