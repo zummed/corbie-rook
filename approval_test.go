@@ -139,10 +139,8 @@ func TestHeldCallWaitsForItsApprovers(t *testing.T) {
 		t.Fatalf("the question was posted as %v", asked)
 	}
 	text := asked[0]["text"].(string)
-	for _, want := range []string{"assistant wants to run tell.\n\nAsked by bob@example.com.\n\nRequest, the latest message last:\n> tell carol hello", "Tool: tell (Write a text", `"chat": "3"`} {
-		if !strings.Contains(text, want) {
-			t.Errorf("the question %q lacks %q", text, want)
-		}
+	if !strings.HasPrefix(text, "assistant wants to run tell.\n") || !strings.HasSuffix(text, "chat: 3 · text: hello\n\nAsked by bob@example.com.\n> tell carol hello") {
+		t.Errorf("the question is %q", text)
 	}
 	w.press(question.ID, "2", "yes")
 	w.press(question.ID, "3", "yes")
@@ -434,7 +432,7 @@ func TestStatechartAsksForApproval(t *testing.T) {
 	message := map[string]any{"service": "telegram", "chat": "2", "user": "2", "email": "bob@example.com", "text": "deploy orders"}
 	w.sendTo("deploys.yaml", "c1", "message", message)
 	question := w.question(map[string]bool{})
-	if text := w.did(question.ID, "ask")[0]["text"].(string); !strings.HasPrefix(text, "deploys wants to run deploying.\n\nAsked by bob@example.com.") || !strings.Contains(text, "> deploy orders") || !strings.Contains(text, `"project": "group/orders"`) {
+	if text := w.did(question.ID, "ask")[0]["text"].(string); text != "deploys wants to run deploying.\nproject: group/orders · ref: main\n\nAsked by bob@example.com.\n> deploy orders" {
 		t.Errorf("the question is %q", text)
 	}
 	if runs := stubs(t, w, "pipeline"); len(runs) != 0 {
@@ -452,20 +450,27 @@ func TestStatechartAsksForApproval(t *testing.T) {
 	}
 }
 
-// An approval whose ask gives no asker says so in its question, so the
-// approvers know nobody is refused as the asker.
-func TestApprovalWithNoAskerSaysSo(t *testing.T) {
+// An approval's question names the machine and the jobs, then gives each
+// job's arguments on one line, a nested key joined by dots, and what was
+// asked, quoted. With several jobs each is named, and an argument of several
+// lines is quoted on lines of its own.
+func TestApprovalQuestionIsShort(t *testing.T) {
 	w := newWorld(t)
 	dir := approvalProject(t, w, noModel)
 	write(t, dir, map[string]string{"agents/approve.yaml": "include: .rook/approval.yaml"})
 	w.sync(dir)
 	w.start("agents/approve.yaml", map[string]any{
-		"asking": map[string]any{"machine": "deploys"}, "jobs": []any{map[string]any{"name": "restart", "input": map[string]any{"vm": "web-1"}}},
+		"asking": map[string]any{"machine": "deploys"},
+		"jobs": []any{
+			map[string]any{"name": "restart", "input": map[string]any{"vm": "web-1", "opts": map[string]any{"force": true}}},
+			map[string]any{"name": "apply", "input": map[string]any{"diff": "-a\n+b"}},
+		},
 		"ask": bot + "/telegram/chat/ask", "approvers": "messages:approve", "in": "1", "request": "restart web-1",
 	})
 	question := w.question(map[string]bool{})
-	if text := w.did(question.ID, "ask")[0]["text"].(string); !strings.HasPrefix(text, "deploys wants to run restart.\n\nThe asker's email is not given.\n\nRequest, the latest message last:\n> restart web-1") {
-		t.Errorf("the question is %q", text)
+	want := "deploys wants to run restart, apply.\nrestart:\nopts.force: true · vm: web-1\n\napply:\ndiff:\n> -a\n> +b\n\n> restart web-1"
+	if text := w.did(question.ID, "ask")[0]["text"].(string); text != want {
+		t.Errorf("the question is %q, not %q", text, want)
 	}
 }
 
