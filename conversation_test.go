@@ -55,7 +55,7 @@ func key(chat, user string) string { return "telegram:" + chat + ":" + user + ":
 func agentRuns(w *world, chat, user string) []*client.Run {
 	var out []*client.Run
 	for _, run := range w.at("agents/assistant.yaml") {
-		if in, ok := w.show(run.ID).Input.(map[string]any); ok {
+		if in, ok := w.show(run.ID).Input.(map[string]any); ok && run.Parent == "" {
 			if m := in["messages"].([]any)[0].(map[string]any); m["chat"] == chat && m["user"] == user {
 				out = append(out, run)
 			}
