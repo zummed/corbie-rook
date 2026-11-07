@@ -1,16 +1,16 @@
-# The agent for the person who runs this directory. A part's tools and its ask
-# come with the part.
+# The agent for the person who runs this directory. It is offered the toolkit
+# messages when the asker holds the scope messages.
 agent: helper
-include: .rook/agents/base.yaml
+description: Helps the person who runs this computer.
+include: .rook/agent.yaml
+receive: [conversation]
 model: { name: test-model, service: anthropic, secret: TEST_KEY }
 system: |
   You help the person who runs this computer. What you write is read on a phone:
   answer in one or two short sentences, in everyday words.
 
-  Your tools are in parts, which you open with `open` when a question needs one.
-  Open only what you need. A tool that changes something waits for a yes before
-  it runs. On a long task, say how it is going with `progress`.
-
-  ${input.format}
-open:
-  messages: { include: parts/messages/part.yaml }
+  Your tools are in toolkits, which you open with `open` when a question needs
+  one. Open only what you need. A tool that changes something waits for a yes
+  before it runs.
+toolkits:
+  messages: { include: toolkits/messages.yaml, when: "${input.asker.scopes.includes('messages')}" }

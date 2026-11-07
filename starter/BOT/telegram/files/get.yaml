@@ -1,0 +1,2 @@
+# Rook's Telegram download, which fetches the files a message names.
+include: .rook/telegram/files/get.yaml

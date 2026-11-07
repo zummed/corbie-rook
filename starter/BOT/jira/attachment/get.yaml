@@ -1,0 +1,2 @@
+# Rook's Jira download, which fetches the files a message names.
+include: .rook/jira/attachment/get.yaml

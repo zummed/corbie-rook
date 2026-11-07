@@ -7,18 +7,18 @@ what each agent can do.
 Start a project
 ---------------
 
-1. Make the project, naming its bridges.
+1. Make the project, naming its bot and the services it is on.
 2. For Slack, make the app first, as The Slack app below says.
 3. Add the first agent, as Add an agent below says, and set each secret and value `init` names.
 4. Start Corbie, and submit the project.
 
     corbie init --ceiling all
-    corbie rook init my-bot --bridges slack
+    corbie rook init my-bot --bot gromit --services slack
       Make the Slack app first, as corbie rook manual rook-project says under The Slack app.
-      my-bot is ready, and answers nobody until it has an agent. Add one as corbie rook manual rook-project says under Add an agent, or ask a model in my-bot to. Then:
+      my-bot is ready, and answers nobody until agents/assistant.yaml is there. Add it as corbie rook manual rook-project says under Add an agent, or ask a model in my-bot to. Then:
 
-        corbie controller secret set SLACK_TOKEN --at /my-bot
-        corbie controller secret set SLACK_APP_TOKEN --at /my-bot
+        corbie controller secret set SLACK_TOKEN --at /my-bot/gromit/slack
+        corbie controller secret set SLACK_APP_TOKEN --at /my-bot/gromit/slack
         cd my-bot && corbie run submit .
 
     cd my-bot

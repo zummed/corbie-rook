@@ -8,4 +8,4 @@ This is a Rook project. Read `.rook/AGENTS.md` before changing it:
 ## Notes
 
 What a model or a person changing this project needs to know about it goes
-here: what the bot is for, its parts, and anything not in Rook's manual.
+here: what the bot is for, its toolkits, and anything not in Rook's manual.

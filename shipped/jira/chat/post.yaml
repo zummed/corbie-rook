@@ -1,0 +1,8 @@
+# `in` is the issue's key, such as OPS-12. It writes the comment with
+# issue/comment/create.
+flow: jira-chat-post
+description: Posts a text as a comment on a Jira issue.
+input: { in: string, text: string }
+stages:
+  post: { job: { machine: .rook/jira/issue/comment/create.yaml, input: { to: "${input.in}", text: "${input.text}" } } }
+output: ${stages.post.output}

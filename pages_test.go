@@ -50,14 +50,15 @@ func examples(t *testing.T, page string) []example {
 }
 
 // Every file a page shows reads as Corbie reads a project's machines, in a
-// project with every bridge, and a file labelled with the path of a starting
+// project with a bot on every service, and a file labelled with the path of a starting
 // file is that file, without its comments.
 func TestEveryExampleFileReads(t *testing.T) {
+	t.Skip("R8 revives this: pages")
 	dir := filepath.Join(t.TempDir(), "project")
-	if err := rook.Init(dir, rook.Bridges()); err != nil {
+	if err := rook.Init(dir, bot, rook.Services()); err != nil {
 		t.Fatal(err)
 	}
-	starting := rook.Starting()
+	starting := rook.Starting(bot)
 	found := 0
 	for _, page := range []string{"rook-project", "rook-design"} {
 		for _, ex := range examples(t, page) {

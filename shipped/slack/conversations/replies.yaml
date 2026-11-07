@@ -1,0 +1,13 @@
+# `to` is a conversation, or conversation/thread, and `at` the message.
+flow: slack-conversations-replies
+description: Reads what was said before a message in a Slack thread or direct message.
+input: { to: string, at: "any?" }
+stages:
+  read:
+    job:
+      script: .rook/slack/slack.js
+      files: [.rook/shared/thread.js]
+      input: { do: history, to: "${input.to}", at: "${input.at}" }
+      allow: [net:slack.com, "secret:SLACK_TOKEN@net:slack.com"]
+      timeout: 20s
+output: ${stages.read.output}

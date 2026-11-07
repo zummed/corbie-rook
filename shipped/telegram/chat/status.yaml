@@ -1,0 +1,12 @@
+# `in` is the chat. An empty text shows nothing. A late status is worse than
+# none, so it is not tried again.
+flow: telegram-chat-status
+description: Shows that the bot is typing in a Telegram chat.
+input: { in: string, text: string }
+stages:
+  status:
+    job:
+      script: .rook/telegram/telegram.js
+      input: { do: status, token: TELEGRAM_TOKEN, to: "${input.in}", text: "${input.text}" }
+      allow: [net:api.telegram.org, "secret:TELEGRAM_TOKEN@net:api.telegram.org"]
+      timeout: 20s

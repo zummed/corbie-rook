@@ -1,0 +1,14 @@
+# `in` is a channel's #name or a conversation; with none, a direct message goes
+# to `to`, a person's ID. Each button holds `question` and its choice. It gives
+# `sent`, the messages it posted.
+flow: slack-chat-ask
+description: Asks a question on Slack, with a button for each choice.
+input: { to: "string?", in: "string?", text: string, choices: list, fields: "list?", question: string }
+stages:
+  question:
+    job:
+      script: .rook/slack/slack.js
+      input: { do: ask, to: "${input.to || ''}", in: "${input.in || ''}", text: "${input.text}", choices: "${input.choices}", fields: "${input.fields || []}", question: "${input.question}" }
+      allow: [net:slack.com, "secret:SLACK_TOKEN@net:slack.com"]
+      restart: { limit: 2 }
+output: ${stages.question.output}

@@ -1,0 +1,13 @@
+# `to` is the issue's key, such as OPS-12, and `at` the comment.
+flow: jira-issue-comment-list
+description: Reads what was said before a comment on a Jira issue.
+input: { to: string, at: "any?" }
+stages:
+  read:
+    job:
+      script: .rook/jira/jira.js
+      files: [.rook/jira/api.js, .rook/shared/thread.js]
+      input: { do: history, to: "${input.to}", at: "${input.at}", site: "${values.JIRA_SITE}", email: "${values.JIRA_EMAIL}" }
+      allow: ["net:${values.JIRA_SITE}", "secret:JIRA_TOKEN@net:${values.JIRA_SITE}"]
+      timeout: 20s
+output: ${stages.read.output}

@@ -1,0 +1,12 @@
+# A larger file is given without its contents.
+flow: slack-files-get
+description: Downloads the files sent with a Slack message, each at most 32 MiB.
+input: { attachments: list }
+stages:
+  download:
+    job:
+      script: .rook/slack/slack.js
+      input: { do: attachments, attachments: "${input.attachments}", most: 33554432 }
+      allow: [net:files.slack.com, "secret:SLACK_TOKEN@net:files.slack.com"]
+      timeout: 5m
+output: ${stages.download.output}

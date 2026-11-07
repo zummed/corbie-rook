@@ -1,0 +1,28 @@
+# Slack's listener, run as a child of a router: it listens over Socket Mode, so
+# nothing need reach this computer. It sends its parent message for a direct
+# message and a message naming the bot, and with overhear, for a channel's
+# message outside a thread and a reply in a thread the bot has said something
+# in. A press of Slack's stop button under a thread is sent as stop, and a press
+# of a question's button as answer. A job ends after four minutes, and the next
+# connects again. An event Slack sends again is sent once.
+statechart: slack-listen
+description: Sends its parent each Slack message, button press and stop meant for the bot.
+title: Slack listener
+input: { overhear: "boolean?" }
+initial: hearing
+states:
+  hearing:
+    job:
+      script: ./slack.js
+      input: { do: hear, overhear: "${input.overhear || false}", cursor: "${states.hearing.output ? states.hearing.output.cursor : null}" }
+      allow: [net:slack.com, net:wss-primary.slack.com, net:wss-backup.slack.com, "secret:SLACK_TOKEN@net:slack.com", "secret:SLACK_APP_TOKEN@net:slack.com"]
+      timeout: 5m
+    on:
+      message: { send: { to: parent, event: message, data: "${event.data}" } }
+      stop: { send: { to: parent, event: stop, data: "${event.data}" } }
+      answer: { send: { to: parent, event: answer, data: "${event.data}" } }
+      done: hearing
+      failed: resting
+  resting:
+    timers: { again: 1m }
+    on: { again: hearing }

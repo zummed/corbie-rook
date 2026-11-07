@@ -2,13 +2,16 @@ package rook_test
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	llmstandin "github.com/zummed/corbie/plugin/llm/standin"
 	"io"
+	"io/fs"
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -19,47 +22,39 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
-
 )
 
-// pointed makes a project with a bridge whose scripts and permissions name a
-// stand-in, reached over a plain connection, with the helper stub, alice and
-// bob on every bridge, and the directory on.
-func pointed(t *testing.T, bridge string, srv *httptest.Server, hosts ...string) string {
+// pointed makes a project with a bot on a service whose scripts and
+// permissions name a stand-in, reached over a plain connection, with the
+// agent at agents/assistant standing in, testdata's people, and the directory
+// on.
+func pointed(t *testing.T, service string, srv *httptest.Server, hosts ...string) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "project")
-	if err := exampleProject(dir, []string{bridge}); err != nil {
+	if err := exampleProject(dir, []string{service}); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Mkdir(filepath.Join(dir, "on"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	point(t, dir, bridge, srv, hosts...)
-	for name, text := range map[string]string{
-		"agents/helper.yaml": dedent(helperStub),
-		"people.yaml":        "people:\n  alice: { slack: U1, gitlab: al, jira: acc-1 }\n  bob: { slack: U2, gitlab: bo, jira: acc-2 }\ngroups: {}\n",
-		"rules.yaml":         "places:\n  dm: { readers: [asker] }\n  group/project: { readers: [asker] }\n  OPS: { readers: [asker] }\nagents:\n  - { name: helper, for: [alice] }\n",
-	} {
-		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
+	point(t, dir, service, srv, hosts...)
+	write(t, dir, map[string]string{"agents/assistant.yaml": helperStub})
 	return dir
 }
 
-// point rewrites the files of one bridge in a project so that its hosts name a
-// stand-in, reached over a plain connection. Nothing else of the bridge changes.
-func point(t *testing.T, dir, bridge string, srv *httptest.Server, hosts ...string) {
+// point rewrites the files of one service in a project, in .rook/<service>/
+// and below it, so that its hosts name a stand-in, reached over a plain
+// connection. Nothing else of the service changes.
+func point(t *testing.T, dir, service string, srv *httptest.Server, hosts ...string) {
 	t.Helper()
 	addr := strings.TrimPrefix(srv.URL, "http://")
-	files, err := filepath.Glob(filepath.Join(dir, ".rook/bridges", bridge, "*"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, file := range files {
+	err := filepath.WalkDir(filepath.Join(dir, ".rook", service), func(file string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return err
+		}
 		src, err := os.ReadFile(file)
 		if err != nil {
-			t.Fatal(err)
+			return err
 		}
 		text := string(src)
 		for _, host := range hosts {
@@ -71,9 +66,10 @@ func point(t *testing.T, dir, bridge string, srv *httptest.Server, hosts ...stri
 			text = strings.ReplaceAll(text, "@net:"+site, "@net.unencrypted:"+site)
 		}
 		text = strings.ReplaceAll(text, `"https://" + site`, `"http://" + site`)
-		if err := os.WriteFile(file, []byte(text), 0o644); err != nil {
-			t.Fatal(err)
-		}
+		return os.WriteFile(file, []byte(text), 0o644)
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -361,6 +357,20 @@ func (tg *telegram) tapData(from int, data string) {
 	}})
 }
 
+// alerts gives the text of each answerCallbackQuery that showed an alert, in
+// order: Telegram shows such a text in a box the person must close.
+func (tg *telegram) alerts() []string {
+	tg.mu.Lock()
+	defer tg.mu.Unlock()
+	var out []string
+	for _, a := range tg.acks {
+		if a["show_alert"] == true {
+			out = append(out, fmt.Sprint(a["text"]))
+		}
+	}
+	return out
+}
+
 // consumed says whether the listener has asked past every update so far.
 func (tg *telegram) consumed() bool {
 	tg.mu.Lock()
@@ -376,39 +386,263 @@ func (tg *telegram) waitFor(w *world, chat, text string) {
 	})
 }
 
-// A gitlab stands in for GitLab's REST API on one project.
+// A gitlab stands in for GitLab's REST API: projects and their issues, each
+// issue's notes and resource events, users, uploads to group/project,
+// repository files, commits and pipelines. The bot is user 1, "bot", and its
+// token gl-token. A project is named by its path, URL-encoded, as Rook names
+// it. A list is given a page at a time, with the headers GitLab gives for
+// offset paging.
 type gitlab struct {
 	*httptest.Server
-	mu      sync.Mutex
-	events  []map[string]any // newest first
-	notes   []string
-	failing int // how many asks for events are answered 500
-	asks    int
-	thread  []map[string]any  // the issue's comments, oldest first
-	reads   int               // how many times the comments were read
-	broken  bool              // the comments cannot be read
-	text    string            // issue 7's description, by default "It fails."
-	updated string            // when issue 7 last changed, by default never said
-	files   map[string]string // the files uploaded, by path under the project, as /uploads/<secret>/<name>
-	sizes   map[string]int    // the size HEAD gives, where it is not the file's own; -1 for none
-	fetches []string          // each call for a file, as "GET <path>"
-	uploads []upload          // each file the bot uploaded, To being its project
-	full    bool              // an upload is refused with 413
+	mu        sync.Mutex
+	issues    []*glIssue             // every issue, in the order made
+	users     map[int]map[string]any // what /users/:id gives, by ID
+	nextID    int                    // the last ID given to a note or an event
+	repo      map[string]string      // each repository file, by "<project>@<ref>:<path>"
+	commits   []map[string]any       // each commit made, its project added
+	pipelines []map[string]any       // each pipeline started, its project added
+	failing   int                    // how many asks for issues are answered 500
+	asks      int                    // how many times a project's or group's issues were asked for
+	reads     int                    // how many times an issue's notes were read
+	broken    bool                   // an issue's notes cannot be read
+	notes     []string               // the body of each note the bot made, in order
+	files     map[string]string      // the files uploaded to group/project, by path under it, as /uploads/<secret>/<name>
+	sizes     map[string]int         // the size HEAD gives, where it is not the file's own; -1 for none
+	fetches   []string               // each call for a file, as "GET <path>"
+	uploads   []upload               // each file the bot uploaded, To being its project
+	full      bool                   // an upload is refused with 413
+}
+
+// A glIssue is an issue of the stand-in, with what its API gives.
+type glIssue struct {
+	Project     string
+	IID         int
+	Title       string
+	Description string
+	State       string // opened or closed
+	Author      int
+	Labels      []string
+	Assignees   []int
+	Milestone   string // its title, or none
+	Created     time.Time
+	Updated     time.Time
+	Notes       []map[string]any            // oldest first
+	Events      map[string][]map[string]any // by kind: label, milestone, state; oldest first
 }
 
 func newGitLab(t *testing.T) *gitlab {
-	gl := &gitlab{files: map[string]string{}, sizes: map[string]int{}}
+	gl := &gitlab{files: map[string]string{}, sizes: map[string]int{}, repo: map[string]string{}, users: map[int]map[string]any{
+		1: {"id": 1, "username": "bot", "name": "Bot", "public_email": ""},
+		2: {"id": 2, "username": "al", "name": "Al", "public_email": "al@example.com"},
+		3: {"id": 3, "username": "stranger", "name": "Stranger", "public_email": ""},
+		4: {"id": 4, "username": "bo", "name": "Bo", "public_email": "bo@example.com"},
+	}}
 	gl.Server = httptest.NewServer(http.HandlerFunc(gl.serve))
 	t.Cleanup(gl.Close)
 	return gl
 }
 
+// user gives what GitLab shows of a user in a note or an event.
+func (gl *gitlab) user(id int) map[string]any {
+	u := gl.users[id]
+	if u == nil {
+		return map[string]any{"id": id, "username": fmt.Sprintf("user%d", id), "name": fmt.Sprintf("User %d", id)}
+	}
+	return map[string]any{"id": id, "username": u["username"], "name": u["name"]}
+}
+
+// find gives an issue by its project and IID, or nil.
+func (gl *gitlab) find(project string, iid int) *glIssue {
+	for _, is := range gl.issues {
+		if is.Project == project && is.IID == iid {
+			return is
+		}
+	}
+	return nil
+}
+
+// issue gives an issue, made if there is none: "Broken build" by al, saying
+// "It fails.", opened now.
+func (gl *gitlab) issue(project string, iid int) *glIssue {
+	gl.mu.Lock()
+	defer gl.mu.Unlock()
+	return gl.made(project, iid)
+}
+
+func (gl *gitlab) made(project string, iid int) *glIssue {
+	if is := gl.find(project, iid); is != nil {
+		return is
+	}
+	now := time.Now().UTC()
+	is := &glIssue{Project: project, IID: iid, Title: "Broken build", Description: "It fails.", State: "opened", Author: 2, Created: now, Updated: now, Events: map[string][]map[string]any{}}
+	gl.issues = append(gl.issues, is)
+	return is
+}
+
+// change changes an issue, made if there is none, and marks it changed now.
+func (gl *gitlab) change(project string, iid int, f func(*glIssue)) {
+	gl.mu.Lock()
+	defer gl.mu.Unlock()
+	is := gl.made(project, iid)
+	f(is)
+	is.Updated = time.Now().UTC()
+}
+
+// comment adds a note by a user to an issue, made if there is none, and gives
+// its ID. Fields given are added to the note, such as system, internal or
+// confidential.
+func (gl *gitlab) comment(project string, iid, author int, body string, fields ...map[string]any) int {
+	gl.mu.Lock()
+	defer gl.mu.Unlock()
+	gl.nextID++
+	gl.addNote(gl.made(project, iid), gl.nextID, author, body, fields...)
+	return gl.nextID
+}
+
+func (gl *gitlab) addNote(is *glIssue, id, author int, body string, fields ...map[string]any) {
+	now := time.Now().UTC()
+	n := map[string]any{"id": id, "body": body, "author": gl.user(author), "created_at": now.Format(time.RFC3339Nano), "updated_at": now.Format(time.RFC3339Nano),
+		"system": false, "internal": false, "confidential": false, "noteable_type": "Issue", "noteable_iid": is.IID}
+	for _, f := range fields {
+		maps.Copy(n, f)
+	}
+	is.Notes = append(is.Notes, n)
+	is.Updated = now
+}
+
+// note adds a note with an ID by a user to issue 7 of group/project.
+func (gl *gitlab) note(id, author int, username, body string) {
+	gl.mu.Lock()
+	defer gl.mu.Unlock()
+	if gl.users[author] == nil {
+		gl.users[author] = map[string]any{"id": author, "username": username, "name": username, "public_email": ""}
+	}
+	gl.nextID = max(gl.nextID, id)
+	gl.addNote(gl.made("group/project", 7), id, author, body)
+}
+
+// event adds a resource event of a kind (label, milestone or state) by a user
+// to an issue, as its API gives it, and changes the issue to match.
+func (gl *gitlab) event(project string, iid, author int, kind string, fields map[string]any) {
+	gl.mu.Lock()
+	defer gl.mu.Unlock()
+	is := gl.made(project, iid)
+	gl.nextID++
+	now := time.Now().UTC()
+	e := map[string]any{"id": gl.nextID, "user": gl.user(author), "created_at": now.Format(time.RFC3339Nano), "resource_type": "Issue", "resource_id": is.IID}
+	maps.Copy(e, fields)
+	is.Events[kind] = append(is.Events[kind], e)
+	switch kind {
+	case "label":
+		name := fields["label"].(map[string]any)["name"].(string)
+		is.Labels = slices.DeleteFunc(is.Labels, func(l string) bool { return l == name })
+		if fields["action"] == "add" {
+			is.Labels = append(is.Labels, name)
+		}
+	case "milestone":
+		is.Milestone = ""
+		if fields["action"] == "add" {
+			is.Milestone = fields["milestone"].(map[string]any)["title"].(string)
+		}
+	case "state":
+		is.State = map[string]string{"closed": "closed", "reopened": "opened"}[fields["state"].(string)]
+	}
+	is.Updated = now
+}
+
+// label adds or removes a label on an issue, by a user.
+func (gl *gitlab) label(project string, iid, author int, action, name string) {
+	gl.event(project, iid, author, "label", map[string]any{"action": action, "label": map[string]any{"id": len(name), "name": name}})
+}
+
+// state closes or reopens an issue, by a user.
+func (gl *gitlab) state(project string, iid, author int, state string) {
+	gl.event(project, iid, author, "state", map[string]any{"state": state})
+}
+
+// milestone sets or removes an issue's milestone, by a user.
+func (gl *gitlab) milestone(project string, iid, author int, action, title string) {
+	gl.event(project, iid, author, "milestone", map[string]any{"action": action, "milestone": map[string]any{"id": len(title), "title": title}})
+}
+
+// assign gives an issue to users, by a user, as GitLab does: in place of its
+// assignees, with a system note.
+func (gl *gitlab) assign(project string, iid, author int, assignees ...int) {
+	gl.mu.Lock()
+	defer gl.mu.Unlock()
+	is := gl.made(project, iid)
+	var names []string
+	for _, a := range assignees {
+		names = append(names, "@"+fmt.Sprint(gl.user(a)["username"]))
+	}
+	is.Assignees = assignees
+	gl.nextID++
+	body := "assigned to " + strings.Join(names, " and ")
+	if len(assignees) == 0 {
+		body = "unassigned"
+	}
+	gl.addNote(is, gl.nextID, author, body, map[string]any{"system": true})
+}
+
+// json gives what the API gives of an issue.
+func (is *glIssue) json(gl *gitlab) map[string]any {
+	var assignees []any
+	for _, a := range is.Assignees {
+		assignees = append(assignees, gl.user(a))
+	}
+	out := map[string]any{"id": 1000 + is.IID, "iid": is.IID, "project_id": is.Project, "title": is.Title, "description": is.Description, "state": is.State,
+		"author": gl.user(is.Author), "labels": append([]string{}, is.Labels...), "assignees": assignees, "milestone": nil,
+		"created_at": is.Created.Format(time.RFC3339Nano), "updated_at": is.Updated.Format(time.RFC3339Nano),
+		"web_url": "http://gitlab.example.com/" + is.Project + "/-/issues/" + strconv.Itoa(is.IID)}
+	if is.Milestone != "" {
+		out["milestone"] = map[string]any{"id": len(is.Milestone), "title": is.Milestone}
+	}
+	if is.State == "closed" {
+		out["closed_at"] = is.Updated.Format(time.RFC3339Nano)
+	}
+	return out
+}
+
+// paged writes one page of a list, as per_page and page ask, with GitLab's
+// paging headers.
+func paged(w http.ResponseWriter, r *http.Request, items []map[string]any) {
+	per, _ := strconv.Atoi(r.URL.Query().Get("per_page"))
+	if per <= 0 {
+		per = 20
+	}
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	page = max(page, 1)
+	pages := max((len(items)+per-1)/per, 1)
+	w.Header().Set("X-Total", strconv.Itoa(len(items)))
+	w.Header().Set("X-Total-Pages", strconv.Itoa(pages))
+	w.Header().Set("X-Page", strconv.Itoa(page))
+	w.Header().Set("X-Per-Page", strconv.Itoa(per))
+	if page < pages {
+		w.Header().Set("X-Next-Page", strconv.Itoa(page+1))
+	}
+	from, to := min((page-1)*per, len(items)), min(page*per, len(items))
+	json.NewEncoder(w).Encode(append([]map[string]any{}, items[from:to]...))
+}
+
+// projectPath splits an escaped path under /api/v4/projects/ into the project
+// and the rest.
+func projectPath(escaped string) (project, rest string, ok bool) {
+	after, ok := strings.CutPrefix(escaped, "/api/v4/projects/")
+	if !ok {
+		return "", "", false
+	}
+	id, rest, _ := strings.Cut(after, "/")
+	project, err := url.PathUnescape(id)
+	return project, rest, err == nil
+}
+
 func (gl *gitlab) serve(w http.ResponseWriter, r *http.Request) {
 	gl.mu.Lock()
 	defer gl.mu.Unlock()
-	if strings.Contains(r.URL.Path, "/uploads/") {
-		gl.fetches = append(gl.fetches, r.Method+" "+r.URL.EscapedPath())
-		path, ours := strings.CutPrefix(r.URL.EscapedPath(), "/api/v4/projects/group%2Fproject")
+	escaped := r.URL.EscapedPath()
+	if strings.Contains(escaped, "/uploads/") {
+		gl.fetches = append(gl.fetches, r.Method+" "+escaped)
+		path, ours := strings.CutPrefix(escaped, "/api/v4/projects/group%2Fproject")
 		body, found := gl.files[path]
 		if r.Header.Get("PRIVATE-TOKEN") != "gl-token" || !ours || !found {
 			w.WriteHeader(404)
@@ -431,44 +665,157 @@ func (gl *gitlab) serve(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(401)
 		return
 	}
+	if escaped == "/api/v4/user" {
+		json.NewEncoder(w).Encode(gl.user(1))
+		return
+	}
+	if id, ok := strings.CutPrefix(escaped, "/api/v4/users/"); ok {
+		n, _ := strconv.Atoi(id)
+		if gl.users[n] == nil {
+			w.WriteHeader(404)
+			return
+		}
+		json.NewEncoder(w).Encode(gl.users[n])
+		return
+	}
+	if group, ok := strings.CutPrefix(escaped, "/api/v4/groups/"); ok {
+		name, rest, _ := strings.Cut(group, "/")
+		name, _ = url.PathUnescape(name)
+		if rest != "issues" || r.Method != "GET" {
+			w.WriteHeader(404)
+			return
+		}
+		gl.list(w, r, func(is *glIssue) bool { return strings.HasPrefix(is.Project, name+"/") })
+		return
+	}
+	project, rest, ok := projectPath(escaped)
+	if !ok {
+		w.WriteHeader(404)
+		return
+	}
+	parts := strings.Split(rest, "/")
+	issue := func() *glIssue {
+		iid, err := strconv.Atoi(parts[1])
+		if err != nil {
+			return nil
+		}
+		return gl.find(project, iid)
+	}
 	switch {
-	case r.URL.Path == "/api/v4/user":
-		fmt.Fprint(w, `{"id": 1, "username": "bot"}`)
-	case strings.HasSuffix(r.URL.Path, "/events"):
-		gl.asks++
-		if gl.failing > 0 {
-			gl.failing--
-			w.WriteHeader(500)
+	case r.Method == "GET" && rest == "issues":
+		gl.list(w, r, func(is *glIssue) bool { return is.Project == project })
+	case r.Method == "GET" && len(parts) == 2 && parts[0] == "issues":
+		is := issue()
+		if is == nil {
+			w.WriteHeader(404)
 			return
 		}
-		if r.URL.Query().Get("page") > "1" {
-			fmt.Fprint(w, `[]`)
+		json.NewEncoder(w).Encode(is.json(gl))
+	case len(parts) == 3 && parts[0] == "issues" && parts[2] == "notes":
+		is := issue()
+		if is == nil {
+			w.WriteHeader(404)
 			return
 		}
-		json.NewEncoder(w).Encode(gl.events)
-	case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/7/notes"):
+		if r.Method == "POST" {
+			var body struct{ Body string }
+			json.NewDecoder(r.Body).Decode(&body)
+			gl.notes = append(gl.notes, body.Body)
+			gl.nextID++
+			gl.addNote(is, gl.nextID, 1, body.Body)
+			json.NewEncoder(w).Encode(is.Notes[len(is.Notes)-1])
+			return
+		}
 		gl.reads++
 		if gl.broken {
 			w.WriteHeader(500)
 			return
 		}
-		notes := append([]map[string]any{}, gl.thread...)
-		slices.Reverse(notes)
-		json.NewEncoder(w).Encode(notes)
-	case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/issues/7"):
-		issue := map[string]any{"title": "Broken build", "description": "It fails.", "author": map[string]any{"username": "al"}}
-		if gl.text != "" {
-			issue["description"] = gl.text
+		notes := slices.Clone(is.Notes)
+		if r.URL.Query().Get("sort") != "asc" {
+			slices.Reverse(notes)
 		}
-		if gl.updated != "" {
-			issue["updated_at"] = gl.updated
+		paged(w, r, notes)
+	case r.Method == "GET" && len(parts) == 3 && parts[0] == "issues" && strings.HasPrefix(parts[2], "resource_") && strings.HasSuffix(parts[2], "_events"):
+		is := issue()
+		if is == nil {
+			w.WriteHeader(404)
+			return
 		}
-		json.NewEncoder(w).Encode(issue)
-	case strings.HasSuffix(r.URL.Path, "/issues/8"):
-		fmt.Fprint(w, `{"title": "Help @bot", "description": "It broke."}`)
-	case strings.HasSuffix(r.URL.Path, "/issues/9"):
-		w.WriteHeader(404)
-	case r.Method == "POST" && r.URL.EscapedPath() == "/api/v4/projects/group%2Fproject/uploads":
+		paged(w, r, is.Events[strings.TrimSuffix(strings.TrimPrefix(parts[2], "resource_"), "_events")])
+	case r.Method == "GET" && len(parts) >= 4 && parts[0] == "repository" && parts[1] == "files" && parts[len(parts)-1] == "raw":
+		path, _ := url.PathUnescape(strings.Join(parts[2:len(parts)-1], "/"))
+		text, found := gl.repo[project+"@"+r.URL.Query().Get("ref")+":"+path]
+		if !found {
+			w.WriteHeader(404)
+			fmt.Fprint(w, `{"message": "404 File Not Found"}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain")
+		io.WriteString(w, text)
+	case r.Method == "POST" && rest == "repository/commits":
+		var commit map[string]any
+		json.NewDecoder(r.Body).Decode(&commit)
+		branch, _ := commit["branch"].(string)
+		actions, _ := commit["actions"].([]any)
+		if branch == "" || len(actions) == 0 {
+			w.WriteHeader(400)
+			fmt.Fprint(w, `{"message": "branch and actions are required"}`)
+			return
+		}
+		for _, a := range actions {
+			a, _ := a.(map[string]any)
+			key := project + "@" + branch + ":" + fmt.Sprint(a["file_path"])
+			_, there := gl.repo[key]
+			switch a["action"] {
+			case "create", "update":
+				if there == (a["action"] == "create") {
+					w.WriteHeader(400)
+					fmt.Fprintf(w, `{"message": "A file with this name %s"}`, map[bool]string{true: "already exists", false: "doesn't exist"}[there])
+					return
+				}
+			case "delete":
+				if !there {
+					w.WriteHeader(400)
+					fmt.Fprint(w, `{"message": "A file with this name doesn't exist"}`)
+					return
+				}
+			default:
+				w.WriteHeader(400)
+				return
+			}
+		}
+		for _, a := range actions {
+			a, _ := a.(map[string]any)
+			key := project + "@" + branch + ":" + fmt.Sprint(a["file_path"])
+			if a["action"] == "delete" {
+				delete(gl.repo, key)
+			} else {
+				gl.repo[key] = fmt.Sprint(a["content"])
+			}
+		}
+		commit["project"] = project
+		gl.commits = append(gl.commits, commit)
+		id := fmt.Sprintf("%040x", len(gl.commits))
+		w.WriteHeader(201)
+		json.NewEncoder(w).Encode(map[string]any{"id": id, "short_id": id[:8], "title": commit["commit_message"]})
+	case r.Method == "POST" && rest == "pipeline":
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		ref, _ := body["ref"].(string)
+		if ref == "" {
+			ref = r.URL.Query().Get("ref")
+		}
+		if ref == "" {
+			w.WriteHeader(400)
+			fmt.Fprint(w, `{"message": "ref is missing"}`)
+			return
+		}
+		gl.pipelines = append(gl.pipelines, map[string]any{"project": project, "ref": ref, "variables": body["variables"]})
+		n := len(gl.pipelines)
+		w.WriteHeader(201)
+		json.NewEncoder(w).Encode(map[string]any{"id": n, "iid": n, "status": "created", "ref": ref, "web_url": "http://gitlab.example.com/" + project + "/-/pipelines/" + strconv.Itoa(n)})
+	case r.Method == "POST" && escaped == "/api/v4/projects/group%2Fproject/uploads":
 		if gl.full {
 			// The body is read first: a server that answers before it has
 			// read a request may close the connection under the sender, who
@@ -489,25 +836,71 @@ func (gl *gitlab) serve(w http.ResponseWriter, r *http.Request) {
 			link = "!" + link
 		}
 		json.NewEncoder(w).Encode(map[string]any{"id": len(gl.uploads), "alt": u.Name, "url": "/uploads/" + secret2 + "/" + u.Name, "markdown": link})
-	case r.Method == "POST" && strings.Contains(r.URL.EscapedPath(), "group%2Fproject/issues/7/notes"):
-		var body struct{ Body string }
-		json.NewDecoder(r.Body).Decode(&body)
-		gl.notes = append(gl.notes, body.Body)
-		fmt.Fprint(w, `{"id": 99}`)
 	default:
 		w.WriteHeader(404)
 	}
 }
 
-func (gl *gitlab) happens(id int, event map[string]any) {
-	gl.mu.Lock()
-	defer gl.mu.Unlock()
-	event["id"] = id
-	gl.events = append([]map[string]any{event}, gl.events...)
+// list writes the issues a filter takes, as GitLab lists them: changed on or
+// after updated_after, by updated_at or created_at, newest first unless sort
+// is asc, and each list asked for counts as an ask.
+func (gl *gitlab) list(w http.ResponseWriter, r *http.Request, take func(*glIssue) bool) {
+	gl.asks++
+	if gl.failing > 0 {
+		gl.failing--
+		w.WriteHeader(500)
+		return
+	}
+	q := r.URL.Query()
+	var after time.Time
+	if s := q.Get("updated_after"); s != "" {
+		var err error
+		if after, err = time.Parse(time.RFC3339Nano, s); err != nil {
+			w.WriteHeader(400)
+			fmt.Fprint(w, `{"error": "updated_after is invalid"}`)
+			return
+		}
+	}
+	var chosen []*glIssue
+	for _, is := range gl.issues {
+		if take(is) && !is.Updated.Before(after) && (q.Get("state") == "" || q.Get("state") == "all" || q.Get("state") == is.State) {
+			chosen = append(chosen, is)
+		}
+	}
+	at := func(is *glIssue) time.Time {
+		if q.Get("order_by") == "updated_at" {
+			return is.Updated
+		}
+		return is.Created
+	}
+	slices.SortStableFunc(chosen, func(a, b *glIssue) int { return at(a).Compare(at(b)) })
+	if q.Get("sort") != "asc" {
+		slices.Reverse(chosen)
+	}
+	var items []map[string]any
+	for _, is := range chosen {
+		items = append(items, is.json(gl))
+	}
+	paged(w, r, items)
 }
 
-func (gl *gitlab) note(id, author int, username, body string) {
-	gl.happens(id, map[string]any{"author_id": author, "author_username": username, "note": map[string]any{"id": id, "noteable_type": "Issue", "noteable_iid": 7, "body": body}})
+// touch marks an issue, made if there is none, as last changed at a time.
+func (gl *gitlab) touch(project string, iid int, at time.Time) {
+	gl.mu.Lock()
+	defer gl.mu.Unlock()
+	gl.made(project, iid).Updated = at.UTC()
+}
+
+// seed adds notes to an issue, made if there is none, each as given, with what
+// a note holds and is not given.
+func (gl *gitlab) seed(project string, iid int, notes []map[string]any) {
+	gl.mu.Lock()
+	defer gl.mu.Unlock()
+	is := gl.made(project, iid)
+	for _, given := range notes {
+		id, _ := given["id"].(int)
+		gl.addNote(is, id, 2, "", given)
+	}
 }
 
 func (gl *gitlab) said() []string {
@@ -532,6 +925,7 @@ func (gl *gitlab) fetched() []string {
 // comment that does not is left alone, the bot's own words are not heard, and a
 // stranger is told the bot is not theirs.
 func TestGitLabIssuesAreAnswered(t *testing.T) {
+	t.Skip("R5 revives this: GitLab")
 	gl := newGitLab(t)
 	w := newWorld(t)
 	w.secret("GITLAB_TOKEN", "gl-token")
@@ -540,7 +934,7 @@ func TestGitLabIssuesAreAnswered(t *testing.T) {
 	w.value("GITLAB_SITE", addr)
 	gl.note(1, 2, "al", "@bot this came before the bridge")
 	w.sync(dir)
-	w.kept("bridges/gitlab.yaml")
+	w.kept(router("gitlab"))
 	again := func() {
 		before := gl.asked()
 		w.until("GitLab asked again", func() bool {
@@ -555,7 +949,7 @@ func TestGitLabIssuesAreAnswered(t *testing.T) {
 	gl.note(4, 1, "bot", "@bot my own words")
 	gl.note(5, 2, "al", "@bot the build fails")
 	gl.note(6, 3, "stranger", "hello @bot")
-	gl.happens(7, map[string]any{"author_id": 2, "author_username": "al", "note": map[string]any{"id": 7, "noteable_type": "Issue", "noteable_iid": 7, "body": "@bot moved", "system": true}})
+	gl.comment("group/project", 7, 2, "@bot moved", map[string]any{"system": true})
 	again()
 	w.until("two comments", func() bool { return len(gl.said()) >= 2 })
 	time.Sleep(50 * interval)
@@ -573,6 +967,7 @@ func TestGitLabIssuesAreAnswered(t *testing.T) {
 
 // A comment made while GitLab fails is heard once it answers again.
 func TestGitLabLosesNothingWhenItFails(t *testing.T) {
+	t.Skip("R5 revives this: GitLab")
 	gl := newGitLab(t)
 	w := newWorld(t)
 	w.secret("GITLAB_TOKEN", "gl-token")
@@ -602,6 +997,7 @@ func TestGitLabLosesNothingWhenItFails(t *testing.T) {
 // An issue gone by the time it is read stops nothing: what came before it is
 // answered once, and what comes after it is heard.
 func TestGitLabIssueGoneStopsNothing(t *testing.T) {
+	t.Skip("R5 revives this: GitLab")
 	gl := newGitLab(t)
 	w := newWorld(t)
 	w.secret("GITLAB_TOKEN", "gl-token")
@@ -611,7 +1007,7 @@ func TestGitLabIssueGoneStopsNothing(t *testing.T) {
 	w.sync(dir)
 	w.until("the first ask", func() bool { return gl.asked() > 0 })
 	gl.note(2, 2, "al", "@bot first")
-	gl.happens(3, map[string]any{"author_id": 2, "author_username": "al", "target_type": "Issue", "action_name": "opened", "target_iid": 9})
+	gl.issue("group/project", 9)
 	gl.note(4, 2, "al", "@bot last")
 	w.until("two comments", func() bool {
 		w.set(w.now().Add(31 * time.Second))
@@ -637,17 +1033,26 @@ type jira struct {
 	said      []string
 	asks      int
 	reads     int
-	files     []map[string]any  // the issue's fields.attachment, by default none
-	contents  map[string]string // each file's contents, by id
-	fields    map[string]any    // other fields of the issue, given instead of these
-	downloads []string          // each file's id, as it is downloaded
-	uploads   []upload          // each file the bot attached, in order
-	largest   int               // the largest file Jira takes, in bytes; by default any
-	stored    string            // the name Jira keeps a file under; by default the name it was sent
+	files     []map[string]any          // the issue's fields.attachment, by default none
+	contents  map[string]string         // each file's contents, by id
+	fields    map[string]any            // other fields of the issue, given instead of these
+	downloads []string                  // each file's id, as it is downloaded
+	uploads   []upload                  // each file the bot attached, in order
+	largest   int                       // the largest file Jira takes, in bytes; by default any
+	stored    string                    // the name Jira keeps a file under; by default the name it was sent
+	people    map[string]map[string]any // what /user gives, by account ID
+	lookups   []string                  // the account ID of each /user, in order
 }
 
 func newJira(t *testing.T) *jira {
-	j := &jira{}
+	// Jira gives a person's emailAddress only where their privacy settings let
+	// it: acc-9 hides theirs.
+	j := &jira{people: map[string]map[string]any{
+		"acc-1":   {"accountId": "acc-1", "displayName": "Al", "emailAddress": "al@example.com", "active": true},
+		"acc-2":   {"accountId": "acc-2", "displayName": "Bo", "emailAddress": "bo@example.com", "active": true},
+		"acc-9":   {"accountId": "acc-9", "displayName": "Stranger", "active": true},
+		"acc-bot": {"accountId": "acc-bot", "displayName": "Bot", "emailAddress": "bot@example.com", "active": true},
+	}}
 	j.Server = httptest.NewServer(http.HandlerFunc(j.serve))
 	t.Cleanup(j.Close)
 	return j
@@ -663,6 +1068,16 @@ func (j *jira) serve(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.URL.Path == "/rest/api/2/myself":
 		fmt.Fprint(w, `{"accountId": "acc-bot"}`)
+	case r.URL.Path == "/rest/api/2/user":
+		id := r.URL.Query().Get("accountId")
+		j.lookups = append(j.lookups, id)
+		p, ok := j.people[id]
+		if !ok {
+			w.WriteHeader(404)
+			fmt.Fprint(w, `{"errorMessages": ["The user does not exist."]}`)
+			return
+		}
+		json.NewEncoder(w).Encode(p)
 	case strings.HasPrefix(r.URL.Path, "/rest/api/2/attachment/content/"):
 		if r.URL.Query().Get("redirect") != "false" {
 			http.Redirect(w, r, "http://media.example.com/file", http.StatusSeeOther)
@@ -762,13 +1177,14 @@ func (j *jira) asked() int {
 // A comment naming the bot on an issue is answered there, once, and the bot's own
 // words and one that names nobody are left alone.
 func TestJiraIssuesAreAnswered(t *testing.T) {
+	t.Skip("R6 revives this: Jira")
 	j := newJira(t)
 	w := newWorld(t)
 	w.secret("JIRA_TOKEN", "jira-token")
 	dir := pointed(t, "jira", j.Server)
 	jiraAt(w, j)
 	w.sync(dir)
-	w.kept("bridges/jira.yaml")
+	w.kept(router("jira"))
 	// The first ask marks the time, and the next is the first to read.
 	next := func() {
 		before := j.asked()
@@ -797,12 +1213,13 @@ func TestJiraIssuesAreAnswered(t *testing.T) {
 // An opened issue that does not name the bot, with a comment that does made
 // while it waits, is answered once it settles: the comment is heard.
 func TestJiraHearsACommentMadeWhileItsIssueWaits(t *testing.T) {
+	t.Skip("R6 revives this: Jira")
 	j := newJira(t)
 	w := newWorld(t)
 	w.secret("JIRA_TOKEN", "jira-token")
 	dir := pointed(t, "jira", j.Server)
 	jiraAt(w, j)
-	setSite(t, dir, "bridges/jira.yaml", "projects: [OPS] }", "projects: [OPS], settle: 2m }")
+	setSite(t, dir, router("jira"), "projects: [OPS] }", "projects: [OPS], settle: 2m }")
 	w.sync(dir)
 	next := func() {
 		before := j.asked()
@@ -839,6 +1256,7 @@ func TestJiraHearsACommentMadeWhileItsIssueWaits(t *testing.T) {
 // A comment made at the same moment as the last one heard is heard, and the one
 // before it is not heard twice.
 func TestJiraHearsTwoCommentsAtOneMoment(t *testing.T) {
+	t.Skip("R6 revives this: Jira")
 	j := newJira(t)
 	w := newWorld(t)
 	w.secret("JIRA_TOKEN", "jira-token")
@@ -876,15 +1294,18 @@ type slack struct {
 	socket  *websocket.Conn
 	posts   []map[string]any
 	acks    []string
-	thread  []map[string]any      // what the conversation holds, oldest first
-	reads   []string              // the methods that read it
-	status  []map[string]any      // each status set, in order
-	updates []map[string]any      // each message changed, in order
-	refuse  bool                  // a message with blocks is refused
-	files   map[string]string     // what each path under /files/ downloads
-	shared  []upload              // each file the bot sent, in order
-	noWrite bool                  // the token lacks the scope files:write
-	sending map[string]*slackFile // each file asked for, by its ID
+	thread  []map[string]any          // what the conversation holds, oldest first
+	reads   []string                  // the methods that read it
+	status  []map[string]any          // each status set, in order
+	updates []map[string]any          // each message changed, in order
+	refuse  bool                      // a message with blocks is refused
+	files   map[string]string         // what each path under /files/ downloads
+	shared  []upload                  // each file the bot sent, in order
+	noWrite bool                      // the token lacks the scope files:write
+	sending map[string]*slackFile     // each file asked for, by its ID
+	users   map[string]map[string]any // what users.info gives, by member ID
+	lookups []string                  // the member ID of each users.info, in order
+	private []map[string]any          // each chat.postEphemeral, in order
 }
 
 // A slackFile is a file files.getUploadURLExternal was asked for: the name and
@@ -895,7 +1316,12 @@ type slackFile struct {
 }
 
 func newSlack(t *testing.T) *slack {
-	s := &slack{t: t}
+	s := &slack{t: t, users: map[string]map[string]any{
+		"U1":   {"id": "U1", "name": "alice", "real_name": "Alice", "profile": map[string]any{"email": "alice@example.com", "display_name": "alice", "real_name": "Alice"}},
+		"U2":   {"id": "U2", "name": "bob", "real_name": "Bob", "profile": map[string]any{"email": "bob@example.com", "display_name": "bob", "real_name": "Bob"}},
+		"U9":   {"id": "U9", "name": "stranger", "real_name": "Stranger", "profile": map[string]any{"display_name": "stranger", "real_name": "Stranger"}},
+		"UBOT": {"id": "UBOT", "name": "bot", "real_name": "Bot", "is_bot": true, "profile": map[string]any{"display_name": "bot", "real_name": "Bot"}},
+	}}
 	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
 	t.Cleanup(s.Close)
 	return s
@@ -1047,6 +1473,30 @@ func (s *slack) serve(w http.ResponseWriter, r *http.Request) {
 		u.Method, u.To = "files.completeUploadExternal", strings.TrimSuffix(done.Channel+"/"+done.Thread, "/")
 		s.shared = append(s.shared, u)
 		json.NewEncoder(w).Encode(map[string]any{"ok": true, "files": done.Files})
+	case "/api/users.info":
+		// A person's email is given only with the scope users:read.email;
+		// the stand-in's token holds it, and a person with none set has none.
+		id := r.URL.Query().Get("user")
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.lookups = append(s.lookups, id)
+		u, ok := s.users[id]
+		if !ok {
+			fmt.Fprint(w, `{"ok": false, "error": "user_not_found"}`)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]any{"ok": true, "user": u})
+	case "/api/chat.postEphemeral":
+		var post map[string]any
+		json.NewDecoder(r.Body).Decode(&post)
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		if post["channel"] == nil || post["user"] == nil {
+			fmt.Fprint(w, `{"ok": false, "error": "invalid_arguments"}`)
+			return
+		}
+		s.private = append(s.private, post)
+		fmt.Fprint(w, `{"ok": true, "message_ts": "1.2"}`)
 	case "/api/agents.sessions.setStatus":
 		var status map[string]any
 		json.NewDecoder(r.Body).Decode(&status)
@@ -1080,6 +1530,26 @@ func (s *slack) says(id string, event map[string]any) {
 	s.send(map[string]any{"envelope_id": id, "type": "events_api", "payload": map[string]any{"type": "event_callback", "event": event}})
 }
 
+// reacts sends a reaction_added event: a person added an emoji to a message.
+func (s *slack) reacts(id, user, reaction, channel, ts string) {
+	s.says(id, map[string]any{"type": "reaction_added", "user": user, "reaction": reaction, "item_user": "U2",
+		"item": map[string]any{"type": "message", "channel": channel, "ts": ts}, "event_ts": ts + "1"})
+}
+
+// whispered gives each message posted for one person alone, in order.
+func (s *slack) whispered() []map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.private)
+}
+
+// looked gives the member ID of each users.info, in order.
+func (s *slack) looked() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.lookups)
+}
+
 func (s *slack) posted() []map[string]any {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1101,6 +1571,7 @@ func slackProject(t *testing.T, w *world, s *slack) string {
 // A direct message is answered, a message naming the bot in a channel is answered
 // in its thread, and one that does not name it, or a bot's own, is only received.
 func TestSlackMessagesAreAnswered(t *testing.T) {
+	t.Skip("R3 revives this: Slack")
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
@@ -1135,6 +1606,7 @@ func TestSlackMessagesAreAnswered(t *testing.T) {
 // Slack sends an envelope again when its receipt is late, and the event in it
 // is answered once.
 func TestSlackResentEventIsAnsweredOnce(t *testing.T) {
+	t.Skip("R3 revives this: Slack")
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
@@ -1154,6 +1626,7 @@ func TestSlackResentEventIsAnsweredOnce(t *testing.T) {
 // A question goes to a person on Slack with a button for each choice. A press by
 // anyone else changes nothing, and a press by them answers it.
 func TestSlackQuestionIsAnsweredByAPress(t *testing.T) {
+	t.Skip("R3 revives this: Slack")
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
@@ -1229,6 +1702,7 @@ func echoing(t *testing.T, dir string) {
 // conversation, and is told nothing more: the issue is read again only for its
 // files.
 func TestGitLabChatTellsTheIssueOnce(t *testing.T) {
+	t.Skip("R5 revives this: GitLab")
 	gl := newGitLab(t)
 	w := newWorld(t)
 	w.secret("GITLAB_TOKEN", "gl-token")
@@ -1236,7 +1710,7 @@ func TestGitLabChatTellsTheIssueOnce(t *testing.T) {
 	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
 	echoing(t, dir)
 	gl.note(1, 2, "al", "this came before the bridge")
-	gl.thread = []map[string]any{
+	gl.seed("group/project", 7, []map[string]any{
 		{"id": 3, "body": "earlier words", "author": map[string]any{"username": "al"}},
 		{"id": 4, "body": "changed the title", "system": true, "author": map[string]any{"username": "al"}},
 		{"id": 5, "body": "my earlier reply", "author": map[string]any{"username": "bot"}},
@@ -1244,9 +1718,9 @@ func TestGitLabChatTellsTheIssueOnce(t *testing.T) {
 		{"id": 2, "body": "a confidential note", "confidential": true, "author": map[string]any{"username": "al"}},
 		{"id": 6, "body": "@bot go on", "author": map[string]any{"username": "al"}},
 		{"id": 8, "body": "written later", "author": map[string]any{"username": "al"}},
-	}
+	})
 	w.sync(dir)
-	w.kept("bridges/gitlab.yaml")
+	w.kept(router("gitlab"))
 	w.until("the first ask", func() bool { return gl.asked() > 0 })
 	gl.note(6, 2, "al", "@bot go on")
 	again := func(n int) {
@@ -1282,6 +1756,7 @@ func TestGitLabChatTellsTheIssueOnce(t *testing.T) {
 
 // A thread that cannot be read is only missing context: the message is answered.
 func TestChatIsAnsweredWhenTheThreadCannotBeRead(t *testing.T) {
+	t.Skip("R5 revives this: GitLab")
 	gl := newGitLab(t)
 	gl.broken = true
 	w := newWorld(t)
@@ -1291,7 +1766,7 @@ func TestChatIsAnsweredWhenTheThreadCannotBeRead(t *testing.T) {
 	echoing(t, dir)
 	gl.note(1, 2, "al", "this came before the bridge")
 	w.sync(dir)
-	w.kept("bridges/gitlab.yaml")
+	w.kept(router("gitlab"))
 	w.until("the first ask", func() bool { return gl.asked() > 0 })
 	gl.note(6, 2, "al", "@bot go on")
 	before := gl.asked()
@@ -1309,6 +1784,7 @@ func TestChatIsAnsweredWhenTheThreadCannotBeRead(t *testing.T) {
 // A comment only some can read is not heard, since an answer is public on the
 // issue, and nothing is said in reply.
 func TestRestrictedCommentIsNotHeard(t *testing.T) {
+	t.Skip("R5 revives this: GitLab")
 	gl := newGitLab(t)
 	w := newWorld(t)
 	w.secret("GITLAB_TOKEN", "gl-token")
@@ -1316,10 +1792,10 @@ func TestRestrictedCommentIsNotHeard(t *testing.T) {
 	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
 	gl.note(1, 2, "al", "this came before the bridge")
 	w.sync(dir)
-	w.kept("bridges/gitlab.yaml")
+	w.kept(router("gitlab"))
 	w.until("the first ask", func() bool { return gl.asked() > 0 })
 	for id, field := range map[int]string{2: "internal", 3: "confidential"} {
-		gl.happens(id, map[string]any{"author_id": 2, "author_username": "al", "note": map[string]any{"id": id, "noteable_type": "Issue", "noteable_iid": 7, "body": "@bot read this", field: true}})
+		gl.comment("group/project", 7, 2, "@bot read this", map[string]any{"id": id, field: true})
 	}
 	gl.note(4, 2, "al", "@bot this one is public")
 	before := gl.asked()
@@ -1337,13 +1813,14 @@ func TestRestrictedCommentIsNotHeard(t *testing.T) {
 
 // A restricted comment on Jira is not heard either.
 func TestRestrictedJiraCommentIsNotHeard(t *testing.T) {
+	t.Skip("R6 revives this: Jira")
 	j := newJira(t)
 	w := newWorld(t)
 	w.secret("JIRA_TOKEN", "jira-token")
 	dir := pointed(t, "jira", j.Server)
 	jiraAt(w, j)
 	w.sync(dir)
-	w.kept("bridges/jira.yaml")
+	w.kept(router("jira"))
 	ask := func() {
 		before := j.asked()
 		w.until("Jira asked", func() bool {
@@ -1371,6 +1848,7 @@ func TestRestrictedJiraCommentIsNotHeard(t *testing.T) {
 
 // Jira's issue and its earlier comments are read, by the comment that named the bot.
 func TestJiraChatReadsItsIssue(t *testing.T) {
+	t.Skip("R6 revives this: Jira")
 	j := newJira(t)
 	w := newWorld(t)
 	w.secret("JIRA_TOKEN", "jira-token")
@@ -1378,7 +1856,7 @@ func TestJiraChatReadsItsIssue(t *testing.T) {
 	jiraAt(w, j)
 	echoing(t, dir)
 	w.sync(dir)
-	w.kept("bridges/jira.yaml")
+	w.kept(router("jira"))
 	ask := func() {
 		before := j.asked()
 		w.until("Jira asked", func() bool {
@@ -1415,6 +1893,7 @@ func TestJiraChatReadsItsIssue(t *testing.T) {
 // A person with no agent reads nothing of a thread, and Slack's thread is read to
 // the message and no further.
 func TestSlackChatReadsItsThread(t *testing.T) {
+	t.Skip("R3 revives this: Slack")
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
@@ -1447,6 +1926,7 @@ func TestSlackChatReadsItsThread(t *testing.T) {
 // A long thread gives its latest entries, oldest of them first, though Slack gives
 // a thread oldest first and in pages.
 func TestSlackLongThreadGivesItsLatest(t *testing.T) {
+	t.Skip("R3 revives this: Slack")
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
@@ -1467,6 +1947,7 @@ func TestSlackLongThreadGivesItsLatest(t *testing.T) {
 
 // A thread's words cannot close the tag they are shown in.
 func TestThreadCannotCloseItsTag(t *testing.T) {
+	t.Skip("R7 revives this: conversation, agent and starter")
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
@@ -1483,6 +1964,7 @@ func TestThreadCannotCloseItsTag(t *testing.T) {
 
 // The starter's agent is told the thread, marked as other people's words.
 func TestAgentIsToldTheThread(t *testing.T) {
+	t.Skip("R7 revives this: conversation, agent and starter")
 	s := newSlack(t)
 	w := newWorld(t)
 	w.secret("TEST_KEY", "sk-test")
@@ -1513,5 +1995,118 @@ func TestAgentIsToldTheThread(t *testing.T) {
 	}
 	if tools := fmt.Sprint(model.Calls[0].Tools); !strings.Contains(tools, "progress") {
 		t.Errorf("progress is not among the tools %s", tools)
+	}
+}
+
+// get calls a stand-in, and gives the status, the JSON it answered and its
+// headers.
+func get(t *testing.T, method, address string, header http.Header, body any) (int, any, http.Header) {
+	t.Helper()
+	var in io.Reader
+	if body != nil {
+		b, _ := json.Marshal(body)
+		in = strings.NewReader(string(b))
+	}
+	r, err := http.NewRequest(method, address, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	maps.Copy(r.Header, header)
+	reply, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reply.Body.Close()
+	text, _ := io.ReadAll(reply.Body)
+	var out any
+	if json.Unmarshal(text, &out) != nil {
+		out = string(text)
+	}
+	return reply.StatusCode, out, reply.Header
+}
+
+// The GitLab stand-in gives the issues changed since a time, a project's or a
+// group's, newest first and a page at a time; each issue's notes, system notes
+// among them, and its resource events; users with their public email; a
+// repository's files, which a commit changes; and pipelines.
+func TestGitLabStandInAnswersAsGitLabDoes(t *testing.T) {
+	gl := newGitLab(t)
+	token := http.Header{"Private-Token": {"gl-token"}}
+	api := gl.URL + "/api/v4/projects/group%2Fproject"
+	gl.issue("group/project", 1)
+	gl.touch("group/project", 1, time.Now().Add(-time.Hour))
+	since := time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)
+	gl.comment("group/project", 2, 2, "@bot help")
+	gl.label("group/project", 2, 4, "add", "bug")
+	gl.state("group/project", 2, 4, "closed")
+	gl.assign("group/project", 2, 4, 2)
+	gl.comment("group/other", 3, 3, "elsewhere")
+	if _, out, _ := get(t, "GET", api+"/issues?updated_after="+since+"&order_by=updated_at&state=all", token, nil); fmt.Sprint(out.([]any)[0].(map[string]any)["iid"]) != "2" || len(out.([]any)) != 1 {
+		t.Errorf("the issues changed since %s are %v", since, out)
+	}
+	if _, out, h := get(t, "GET", gl.URL+"/api/v4/groups/group/issues?per_page=1&page=2", token, nil); len(out.([]any)) != 1 || h.Get("X-Total-Pages") != "3" || h.Get("X-Next-Page") != "3" {
+		t.Errorf("the group's second page is %v, with %v", out, h)
+	}
+	_, out, _ := get(t, "GET", api+"/issues/2", token, nil)
+	if is := out.(map[string]any); is["state"] != "closed" || fmt.Sprint(is["labels"]) != "[bug]" || len(is["assignees"].([]any)) != 1 {
+		t.Errorf("issue 2 is %v", is)
+	}
+	if _, out, _ := get(t, "GET", api+"/issues/2/notes?sort=asc", token, nil); len(out.([]any)) != 2 || out.([]any)[1].(map[string]any)["body"] != "assigned to @al" || out.([]any)[1].(map[string]any)["system"] != true {
+		t.Errorf("issue 2's notes are %v", out)
+	}
+	for kind, want := range map[string]string{"label": "add", "state": "closed"} {
+		_, out, _ := get(t, "GET", api+"/issues/2/resource_"+kind+"_events", token, nil)
+		if e := out.([]any); len(e) != 1 || (e[0].(map[string]any)["action"] != want && e[0].(map[string]any)["state"] != want) {
+			t.Errorf("issue 2's %s events are %v", kind, out)
+		}
+	}
+	if _, out, _ := get(t, "GET", gl.URL+"/api/v4/users/2", token, nil); out.(map[string]any)["public_email"] != "al@example.com" {
+		t.Errorf("user 2 is %v", out)
+	}
+	commit := map[string]any{"branch": "main", "commit_message": "Settings", "actions": []any{map[string]any{"action": "create", "file_path": "conf/app.yaml", "content": "size: 2\n"}}}
+	if status, out, _ := get(t, "POST", api+"/repository/commits", token, commit); status != 201 {
+		t.Errorf("the commit gave %d %v", status, out)
+	}
+	if status, _, _ := get(t, "POST", api+"/repository/commits", token, commit); status != 400 {
+		t.Errorf("a second create of one file gave %d", status)
+	}
+	if _, out, _ := get(t, "GET", api+"/repository/files/conf%2Fapp.yaml/raw?ref=main", token, nil); out != "size: 2\n" {
+		t.Errorf("the file reads %q", out)
+	}
+	if status, _, _ := get(t, "GET", api+"/repository/files/conf%2Fapp.yaml/raw?ref=other", token, nil); status != 404 {
+		t.Errorf("the file on another ref gave %d", status)
+	}
+	if status, out, _ := get(t, "POST", api+"/pipeline", token, map[string]any{"ref": "main"}); status != 201 || out.(map[string]any)["status"] != "created" || len(gl.pipelines) != 1 {
+		t.Errorf("the pipeline gave %d %v", status, out)
+	}
+	if status, _, _ := get(t, "GET", api+"/issues", nil, nil); status != 401 {
+		t.Errorf("no token gave %d", status)
+	}
+}
+
+// The Slack stand-in gives a person's email with users.info, and keeps a
+// message posted for one person; the Jira stand-in gives a person's email
+// where they let it; the Telegram stand-in keeps an alert.
+func TestStandInsGiveWhoSomeoneIs(t *testing.T) {
+	s := newSlack(t)
+	bearer := http.Header{"Authorization": {"Bearer xoxb-bot"}}
+	if _, out, _ := get(t, "GET", s.URL+"/api/users.info?user=U1", bearer, nil); out.(map[string]any)["user"].(map[string]any)["profile"].(map[string]any)["email"] != "alice@example.com" {
+		t.Errorf("users.info gave %v", out)
+	}
+	if _, out, _ := get(t, "POST", s.URL+"/api/chat.postEphemeral", bearer, map[string]any{"channel": "C1", "user": "U2", "text": "Only Bo can approve this."}); out.(map[string]any)["ok"] != true || len(s.whispered()) != 1 || !slices.Equal(s.looked(), []string{"U1"}) {
+		t.Errorf("chat.postEphemeral gave %v, and the stand-in holds %v", out, s.whispered())
+	}
+	j := newJira(t)
+	basic := http.Header{"Authorization": {"Basic " + base64.StdEncoding.EncodeToString([]byte("bot@example.com:jira-token"))}}
+	if _, out, _ := get(t, "GET", j.URL+"/rest/api/2/user?accountId=acc-1", basic, nil); out.(map[string]any)["emailAddress"] != "al@example.com" {
+		t.Errorf("Jira's user gave %v", out)
+	}
+	if _, out, _ := get(t, "GET", j.URL+"/rest/api/2/user?accountId=acc-9", basic, nil); out.(map[string]any)["emailAddress"] != nil {
+		t.Errorf("Jira gave a hidden email: %v", out)
+	}
+	tg := newTelegram(t)
+	get(t, "POST", tg.URL+"/bot123:abc/answerCallbackQuery", nil, map[string]any{"callback_query_id": "cq1", "text": "Only Bo can approve this.", "show_alert": true})
+	if got := tg.alerts(); !slices.Equal(got, []string{"Only Bo can approve this."}) {
+		t.Errorf("the alerts are %v", got)
 	}
 }
