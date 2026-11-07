@@ -123,11 +123,10 @@ func failedRuns(t *testing.T, w *world) []string {
 // model answers, in reply to their message, and "typing" is shown first. No
 // model secret is set, and none is needed.
 func TestOnePersonFlowAgent(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir := chatProject(t, w, tg, map[string]string{
-		"agents/helper.yaml": echoAgent("helper"),
+		"agents/assistant.yaml": echoAgent("helper"),
 		"agents/turn.js":     turnJS,
 	})
 	tg.dm(1, "hello")
@@ -150,35 +149,26 @@ func TestOnePersonFlowAgent(t *testing.T) {
 	}
 }
 
-// Three people write at once in their own chats: each gets the agent rules.yaml
-// gives them, in a conversation of their own, and carol, in no group, is
-// told the bot does not answer her here.
-func TestSeveralPeopleGetTheirOwnAgents(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
+// Three people write at once in their own chats: each is answered in a
+// conversation of their own, which counts only their own turns.
+func TestSeveralPeopleHaveTheirOwnConversations(t *testing.T) {
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir := chatProject(t, w, tg, map[string]string{
-		"agents/helper.yaml": echoAgent("helper"),
-		"agents/team.yaml":   echoAgent("team"),
-		"agents/turn.js":     turnJS,
+		"agents/assistant.yaml": echoAgent("helper"),
+		"agents/turn.js":        turnJS,
 	})
 	tg.dm(1, "a1")
 	tg.dm(2, "b1")
 	tg.dm(3, "c1")
-	tg.dm(1, "a2")
-	tg.dm(2, "b2")
 	w.sync(dir)
+	tg.waitFor(w, "1", "helper to alice (1): a1")
+	tg.waitFor(w, "2", "helper to bob (1): b1")
+	tg.waitFor(w, "3", "helper to carol (1): c1")
+	tg.dm(1, "a2")
 	tg.waitFor(w, "1", "helper to alice (2): a2")
-	tg.waitFor(w, "2", "team to bob (2): b2")
-	tg.waitFor(w, "3", "This bot does not answer you here.")
-	if got := tg.texts("1"); !slices.Equal(got, []string{"helper to alice (1): a1", "helper to alice (2): a2"}) {
-		t.Errorf("alice was told %q", got)
-	}
-	if got := tg.texts("2"); !slices.Equal(got, []string{"team to bob (1): b1", "team to bob (2): b2"}) {
-		t.Errorf("bob was told %q", got)
-	}
-	keys := keyed(w, ".rook/blocks/conversation.yaml")
-	if len(keys) != 2 || keys["telegram:1:helper"] == nil || keys["telegram:2:team"] == nil {
+	keys := keyed(w, "conversation.yaml")
+	if len(keys) != 3 || len(keys["telegram:1:1:assistant"]) != 1 || len(keys["telegram:2:2:assistant"]) != 1 || len(keys["telegram:3:3:assistant"]) != 1 {
 		t.Errorf("the conversations are %v", keys)
 	}
 }
@@ -264,8 +254,9 @@ const houseToolkit = `
 	      approve: true
 `
 
-// turnOf splits a call into what the person last said, and the tool results
-// that came after it, each as JSON.
+// turnOf splits a call into what the person last said, without the thread
+// the prompt gives after it, and the tool results that came after it, each as
+// JSON.
 func turnOf(c llmstandin.Call) (said string, results []string) {
 	for i := len(c.Messages) - 1; i >= 0; i-- {
 		b, _ := json.Marshal(c.Messages[i])
@@ -278,7 +269,8 @@ func turnOf(c llmstandin.Call) (said string, results []string) {
 			results = append([]string{s}, results...)
 			continue
 		}
-		return s, results
+		said, _, _ = strings.Cut(s, "The thread so far")
+		return said, results
 	}
 	return "", results
 }
@@ -356,7 +348,6 @@ func houseProject(t *testing.T, w *world, tg *telegram, extra map[string]string)
 
 // A read tool runs with no one asked, and the model's reply carries its result.
 func TestModelReadToolRunsAtOnce(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir, model := houseProject(t, w, tg, nil)
@@ -539,11 +530,10 @@ func TestForgedChoiceApprovesNothing(t *testing.T) {
 	}
 }
 
-// Five quick messages to a model agent are answered one at a time, in the order
-// sent, each reply answering its own message, and each model call carrying the
-// conversation before it.
+// Five quick messages to a model agent are answered in turns, which are
+// given the five in the order sent; each turn's reply answers its last
+// message, and each model call carries the conversation before it.
 func TestQuickMessagesAnsweredInOrder(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir, model := houseProject(t, w, tg, nil)
@@ -551,27 +541,36 @@ func TestQuickMessagesAnsweredInOrder(t *testing.T) {
 		tg.dm(1, fmt.Sprintf("m%d", i))
 	}
 	w.sync(dir)
-	w.until("five answers", func() bool { return len(tg.texts("1")) == 5 })
-	want := []string{"ok: m1", "ok: m2", "ok: m3", "ok: m4", "ok: m5"}
-	if got := tg.texts("1"); !slices.Equal(got, want) {
-		t.Errorf("alice was told %q", got)
+	var given []string
+	var turns []*client.Run
+	w.until("five messages answered", func() bool {
+		given, turns = nil, agentRuns(w, "1", "1")
+		for _, run := range turns {
+			given = append(given, w.texts(run)...)
+		}
+		return len(given) == 5 && len(tg.texts("1")) == len(turns)
+	})
+	if !slices.Equal(given, []string{"m1", "m2", "m3", "m4", "m5"}) {
+		t.Errorf("the turns were given %q", given)
 	}
 	tg.mu.Lock()
-	for i, m := range tg.sent {
-		if rp, _ := m["reply_parameters"].(map[string]any); rp == nil || rp["message_id"] != float64(10+i) {
-			t.Errorf("reply %d answers %v", i, m["reply_parameters"])
+	sent := slices.Clone(tg.sent)
+	tg.mu.Unlock()
+	for i, run := range turns {
+		texts := w.texts(run)
+		last := 9 + slices.Index([]string{"m1", "m2", "m3", "m4", "m5"}, texts[len(texts)-1]) + 1
+		if rp, _ := sent[i]["reply_parameters"].(map[string]any); rp == nil || rp["message_id"] != float64(last) {
+			t.Errorf("reply %d answers %v, not message %d", i, sent[i]["reply_parameters"], last)
 		}
 	}
-	tg.mu.Unlock()
-	if n := len(model.Calls[4].Messages); n != 9 {
-		t.Errorf("the fifth call carried %d messages, and not the four turns before it", n)
+	if n := len(model.Calls[len(model.Calls)-1].Messages); n != 2*len(turns)-1 {
+		t.Errorf("the last call carried %d messages, and not the %d turns before it", n, len(turns)-1)
 	}
 }
 
 // Bob writes while alice's approval waits: he has his own conversation, and is
 // answered at once.
 func TestOthersAreAnsweredWhileAnApprovalWaits(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir, _ := houseProject(t, w, tg, nil)
@@ -579,29 +578,28 @@ func TestOthersAreAnsweredWhileAnApprovalWaits(t *testing.T) {
 	w.sync(dir)
 	w.until("a question", func() bool { return len(tg.buttons()) == 2 })
 	tg.dm(2, "hi")
-	tg.waitFor(w, "2", "team to bob (1): hi")
+	tg.waitFor(w, "2", "ok: hi")
 }
 
 // A message sent just as the quiet timer fires, a day after the last, is
-// answered: by the old chat and conversation or by new ones, but never lost.
-// The clock moves past a day, and the message is sent at once.
+// answered: by the old conversation or by a new one, but never lost. The
+// clock moves past a day, and the message is sent at once.
 func TestMessageAsTheQuietTimerFires(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
 	for round := range 3 {
 		t.Run(fmt.Sprint(round), func(t *testing.T) {
 			w := newWorld(t)
 			dir := copyStarter(t)
 			removeListener(t, dir)
 			w.sync(dir)
-			w.sendTo(".rook/blocks/chat.yaml", "telegram:1", "message", message("one"))
-			w.until("the first answer, and both waiting", func() bool {
-				chats, convs := keyed(w, ".rook/blocks/chat.yaml")["telegram:1"], keyed(w, ".rook/blocks/conversation.yaml")["telegram:1:helper"]
-				return sayings(t, w)["one"] != nil && len(chats) == 1 && len(convs) == 1 && w.show(chats[0].ID).Timers == 1 && w.show(convs[0].ID).Timers == 1
+			w.sendTo("conversation.yaml", key("1", "1"), "message", said("1", "1", "one"))
+			w.until("the first answer, and the conversation waiting", func() bool {
+				runs := keyed(w, "conversation.yaml")[key("1", "1")]
+				return sayings(t, w)["one"] != nil && len(runs) == 1 && w.show(runs[0].ID).Timers == 1
 			})
-			// Each round lands the message a little differently against the timers.
+			// Each round lands the message a little differently against the timer.
 			w.set(w.now().Add(24*time.Hour + time.Duration(round)*interval))
 			time.Sleep(time.Duration(round) * interval)
-			w.sendTo(".rook/blocks/chat.yaml", "telegram:1", "message", message("two"))
+			w.sendTo("conversation.yaml", key("1", "1"), "message", said("1", "1", "two"))
 			w.until("the second answer", func() bool { return sayings(t, w)["two"] != nil })
 		})
 	}
@@ -653,19 +651,19 @@ const attendFlow = `
 // The model fails (status 500): alice is told it could not be answered, and her
 // next message starts afresh and is answered.
 func TestModelFails(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	_, address := standin(t, w, func(c llmstandin.Call) llmstandin.Reply {
-		if strings.Contains(last(c), "boom") {
+		if strings.Contains(last(c), "asks: boom") {
 			return llmstandin.Reply{Error: "overloaded"}
 		}
 		return fileModel(c)
 	})
-	dir := chatProject(t, w, tg, map[string]string{"agents/helper.yaml": modelAgent("helper", address, "")})
+	dir := chatProject(t, w, tg, map[string]string{"agents/assistant.yaml": modelAgent("assistant", address, "")})
 	tg.dm(1, "boom")
-	tg.dm(1, "fine")
 	w.sync(dir)
+	w.until("one answer", func() bool { return len(tg.texts("1")) == 1 })
+	tg.dm(1, "fine")
 	w.until("two answers", func() bool { return len(tg.texts("1")) == 2 })
 	got := tg.texts("1")
 	if got[0] != "That could not be answered." || !strings.Contains(got[1], "fine") {
@@ -676,17 +674,16 @@ func TestModelFails(t *testing.T) {
 // The model's key is not set: alice is told it could not be answered, and
 // the error names the secret, not its value.
 func TestModelKeyMissing(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	model := &llmstandin.Server{Answer: fileModel}
 	web := httptest.NewServer(model)
 	t.Cleanup(web.Close)
-	dir := chatProject(t, w, tg, map[string]string{"agents/helper.yaml": modelAgent("helper", web.URL, "")})
+	dir := chatProject(t, w, tg, map[string]string{"agents/assistant.yaml": modelAgent("assistant", web.URL, "")})
 	tg.dm(1, "hello")
 	w.sync(dir)
 	tg.waitFor(w, "1", "That could not be answered.")
-	for _, r := range w.at("agents/helper.yaml") {
+	for _, r := range w.at("agents/assistant.yaml") {
 		if e := w.show(r.ID).Error; !strings.Contains(e, "TEST_KEY") {
 			t.Errorf("the agent failed with %q", e)
 		}
@@ -817,7 +814,7 @@ func TestPageAskAlice(t *testing.T) {
 // rook-design's schedules/evening.yaml, as written: at 18:00 in London, alice
 // is told the day is over on Telegram.
 func TestPageEveningSchedule(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
+	t.Skip("R8 revives this: pages")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir := chatProject(t, w, tg, nil)
@@ -837,7 +834,7 @@ func TestPageEveningSchedule(t *testing.T) {
 // rook-design's parts/messages/part.yaml and rook-project's helper, as written,
 // with only the model's address and service changed to the stand-in's.
 func TestPagePartAndAgent(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
+	t.Skip("R8 revives this: pages")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	model, address := standin(t, w, func(c llmstandin.Call) llmstandin.Reply {
@@ -921,7 +918,6 @@ func TestTwoQuestionsAnsweredOutOfOrder(t *testing.T) {
 // A model that never stops calling a tool reaches the agent's limit of turns:
 // alice is told it could not be answered, and the next message is answered.
 func TestAgentRunsOutOfTurns(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir, model := houseProject(t, w, tg, nil)
@@ -936,28 +932,26 @@ func TestAgentRunsOutOfTurns(t *testing.T) {
 		return houseModel(c)
 	}
 	tg.dm(1, "loop forever")
-	tg.dm(1, "after")
 	w.sync(dir)
+	w.until("one answer", func() bool { return len(tg.texts("1")) == 1 })
+	tg.dm(1, "after")
 	w.until("two answers", func() bool { return len(tg.texts("1")) == 2 })
 	if got := tg.texts("1"); got[0] != "That could not be answered." || got[1] != "ok: after" {
 		t.Errorf("alice was told %q", got)
 	}
 }
 
-// An approval answered three days later: the chat has ended by its quiet
-// timer meanwhile, the reply is still said, and alice's next message starts a
-// new chat whose conversation carries on.
-func TestApprovalOutlivesTheChat(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
+// An approval answered three days later: the conversation waits for its
+// turn all the while, the reply is still posted, and alice's next message
+// carries the conversation on.
+func TestApprovalAnsweredDaysLater(t *testing.T) {
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir, model := houseProject(t, w, tg, nil)
 	tg.dm(1, "tell bob hello")
 	w.sync(dir)
 	w.until("a question", func() bool { return len(tg.buttons()) == 2 })
-	chat := keyed(w, ".rook/blocks/chat.yaml")["telegram:1"][0].ID
 	w.set(w.now().Add(3 * 24 * time.Hour))
-	w.until("the chat ended", func() bool { return w.show(chat).HasEnded() })
 	// Three days at once may also time out the listener's job, which then
 	// rests a minute before it asks Telegram again: the clock moves on until
 	// the tap is heard.
@@ -968,11 +962,15 @@ func TestApprovalOutlivesTheChat(t *testing.T) {
 		return slices.ContainsFunc(tg.texts("1"), func(s string) bool { return strings.Contains(s, "tell gave") })
 	})
 	tg.dm(1, "thanks")
-	tg.waitFor(w, "1", "ok: thanks")
+	w.until(`"ok: thanks" said in chat 1`, func() bool {
+		w.set(w.now().Add(31 * time.Second))
+		time.Sleep(5 * interval)
+		return slices.Contains(tg.texts("1"), "ok: thanks")
+	})
 	if n := len(model.Calls[len(model.Calls)-1].Messages); n < 5 {
 		t.Errorf("the conversation did not carry on: %d messages", n)
 	}
-	if n := len(keyed(w, ".rook/blocks/conversation.yaml")["telegram:1:helper"]); n != 1 {
+	if n := len(keyed(w, "conversation.yaml")["telegram:1:1:assistant"]); n != 1 {
 		t.Errorf("%d conversations", n)
 	}
 }
