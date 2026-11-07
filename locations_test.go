@@ -92,50 +92,46 @@ func TestAnotherClientCannotCallABridge(t *testing.T) {
 	}
 }
 
-// A tap that names a chat's run, or a question that has ended, is noted as
-// undelivered in the listener's record, and reaches no run.
+// A tap that names a conversation's run, or a question that has ended, is
+// noted as undelivered in the router's record, and reaches no run: the router
+// sends a tap only to a question at the bot's chat/ask.
 func TestTapReachesOnlyAWaitingQuestion(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
 	w := newWorld(t)
 	dir := copyStarter(t)
 	write(t, dir, map[string]string{
 		".rook/telegram/telegram.js": oneMessage,
-		"on/asker.yaml": `
-			flow: asker
-			allow: [send:.rook/blocks/ask]
-			stages:
-			  asking: { job: { call: { at: .rook/blocks/ask }, input: { people: [alice], text: "Well?", choices: ["yes", "no"] } } }
-			output: ${stages.asking.output.choice}
-		`,
+		"agents/asker.yaml":          asker,
+		"people/find.yaml":           telegramFind,
+		"people/scopes.yaml":         "bob@example.com: { name: bob, scopes: [house:approve] }\n",
 	})
 	w.sync(dir)
 	w.until("the answer", func() bool { return sayings(t, w)["one"] != nil })
-	chat := keyed(w, ".rook/blocks/chat.yaml")["telegram:1"][0].ID
-	asker := w.start("on/asker.yaml", nil)
+	conversation := keyed(w, "conversation.yaml")["telegram:1:1:assistant"][0].ID
+	id := w.start("agents/asker.yaml", nil)
 	question := w.question(map[string]bool{}).ID
-	w.tap(question, "1", "yes")
-	w.until("the question answered", func() bool { return w.show(asker).HasEnded() })
+	w.tap(question, "2", "yes")
+	w.until("the question answered", func() bool { return w.show(id).HasEnded() })
 	own := func(id string) string { return id[strings.Index(id, "/")+1:] }
 	write(t, dir, map[string]string{".rook/telegram/telegram.js": `
 		if (input.do === "hear") {
 		  if (input.cursor !== null) throw new Error("nothing more")
-		  emit("answer", { bridge: "telegram", question: "` + own(chat) + `", from: "1", choice: "yes" })
-		  emit("answer", { bridge: "telegram", question: "` + own(question) + `", from: "1", choice: "no" })
+		  emit("answer", { service: "telegram", run: "` + own(conversation) + `", user: "2", choice: "yes" })
+		  emit("answer", { service: "telegram", run: "` + own(question) + `", user: "2", choice: "no" })
 		  return { cursor: 1 }
 		}
-		return { sent: [] }
+		return {}
 	`})
 	w.sync(dir)
-	listener := w.kept(router("telegram"))
-	w.until("both taps noted undelivered", func() bool { return len(undelivered(w, listener)) == 2 })
-	for _, e := range w.record(chat) {
+	router := w.kept(router("telegram"))
+	w.until("both taps noted undelivered", func() bool { return len(undelivered(w, router)) == 2 })
+	for _, e := range w.record(conversation) {
 		for _, ev := range e.Events {
 			if ev.Name == "answer" {
-				t.Errorf("the chat took %v", ev)
+				t.Errorf("the conversation took %v", ev)
 			}
 		}
 	}
-	if got := w.show(asker).Output; got != "yes" {
+	if got := w.show(id).Output; got != "yes" {
 		t.Errorf("the question gave %v", got)
 	}
 }

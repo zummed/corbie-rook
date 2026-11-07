@@ -52,8 +52,16 @@ slack, telegram, gitlab or jira.
   stop      service, place, chat, user, name, email
 
 `user` is the sender's ID on the service, and `email` is given where the
-service gives one. `run` is the ID of the question's run without its client's
-name, which the button holds.
+service gives one; Telegram gives none. `run` is the ID of the question's run
+without its client's name, which the button holds. `history` is a blob of the
+thread's entries before the message, oldest first, each { line, attachments },
+and `complete` says whether it goes back to the thread's start.
+
+Telegram's Bot API keeps no history a bot can read, so Telegram's listener
+keeps what it heard: 20 entries and 8000 characters a chat, 250,000 characters
+in all, and no chat quiet for a day. A new run of the listener starts with
+none. A Telegram answer also holds `callback`, the tap's ID, which the
+question answers to tell the presser.
 
 A router sends a message and a stop to the conversation keyed
 `<service>:<chat>:<user>:<agent>`, so each person in a thread has their own

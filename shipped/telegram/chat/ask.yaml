@@ -1,13 +1,86 @@
-# `to` is the person's ID. Each button holds `question` and its choice. It
-# gives `sent`, the messages it posted.
-flow: telegram-chat-ask
-description: Asks a person on Telegram, with a button for each choice.
-input: { to: string, text: string, choices: list, question: string }
-stages:
-  question:
+# Rook's question on Telegram, which an approval calls. It posts `text` in the
+# chat `in`, with a button for each of `choices`; a button holds this run's ID
+# without its client's name. The router sends each tap to this run as answer.
+# A tap counts when its choice is one of `choices`, the presser's scopes, by the
+# lookup at `lookup`, hold `approvers`, and the presser's email is not
+# `asker`'s. Telegram shows the presser why a tap does not count, and the
+# buttons stay. The first tap that counts ends the question with { choice, by }
+# and shows it under the text. No tap that counts within `within`, by default a
+# week, ends it with { choice: no }.
+statechart: telegram-chat-ask
+description: Asks a question in a Telegram chat, with a button for each choice, and gives the first choice pressed by an approver.
+title: "${input.text.split('\\n')[0]}"
+input: { in: string, text: string, choices: list, lookup: string, approvers: string, asker: "string?", within: "string?" }
+initial: asking
+states:
+  asking:
+    defer: [answer]
     job:
       script: .rook/telegram/telegram.js
-      input: { do: ask, token: TELEGRAM_TOKEN, to: "${input.to}", text: "${input.text}", choices: "${input.choices}", question: "${input.question}" }
+      input: { do: ask, token: TELEGRAM_TOKEN, in: "${input.in}", text: "${input.text}", choices: "${input.choices}", question: "${run.id.slice(run.id.indexOf('/') + 1)}" }
       allow: [net:api.telegram.org, "secret:TELEGRAM_TOKEN@net:api.telegram.org"]
       restart: { limit: 2 }          # Telegram sometimes drops a connection; a resend can repeat a message, never lose one
-output: ${stages.question.output}
+    on: { done: open }
+  open:
+    timers: { unanswered: "${input.within || '7d'}" }
+    initial: waiting
+    states:
+      waiting:
+        on: { answer: checking }
+      checking:
+        defer: [answer]
+        job:
+          input:
+            press: "${event.data}"
+            lookup: "${input.lookup}"
+            choices: "${input.choices}"
+            approvers: "${input.approvers}"
+            asker: "${input.asker || ''}"
+          machine:
+            flow: press
+            title: "${input.press.name || input.press.user}: ${input.press.choice}"
+            input: { press: map, lookup: string, choices: list, approvers: string, asker: string }
+            allow: ["send:${input.lookup}"]
+            stages:
+              who:
+                job:
+                  call: { at: "${input.lookup}" }
+                  input: { service: telegram, user: "${input.press.user}", name: "${input.press.name || ''}", email: "${input.press.email || ''}" }
+              verdict:
+                job:
+                  script: .rook/shared/press.js
+                  input:
+                    choice: "${String(input.press.choice)}"
+                    choices: "${input.choices}"
+                    approvers: "${input.approvers}"
+                    asker: "${input.asker}"
+                    by: "${stages.who.output.name || input.press.name || input.press.user}"
+                    email: "${stages.who.output.email || ''}"
+                    scopes: "${stages.who.output.scopes}"
+              tell:
+                when: "${!!input.press.callback}"
+                job:
+                  script: .rook/telegram/telegram.js
+                  input: { do: answer, token: TELEGRAM_TOKEN, callback: "${input.press.callback}", text: "${stages.verdict.output.refused || stages.verdict.output.choice}", alert: "${!stages.verdict.output.counts}" }
+                  allow: [net:api.telegram.org, "secret:TELEGRAM_TOKEN@net:api.telegram.org"]
+            output: ${stages.verdict.output}
+        on:
+          done:
+            - { go: answered, when: "${event.data.counts}" }
+            - waiting
+          failed: waiting
+    on: { unanswered: unanswered }
+  answered:
+    job:
+      script: .rook/telegram/telegram.js
+      input: { do: close, token: TELEGRAM_TOKEN, sent: "${states.asking.output.sent}", text: "${input.text + '\\n\\n' + states.checking.output.by + ' said ' + states.checking.output.choice + '.'}" }
+      allow: [net:api.telegram.org, "secret:TELEGRAM_TOKEN@net:api.telegram.org"]
+    on: { done: over, failed: over }
+  over: { end: done, output: { choice: "${states.checking.output.choice}", by: "${states.checking.output.by}" } }
+  unanswered:
+    job:
+      script: .rook/telegram/telegram.js
+      input: { do: close, token: TELEGRAM_TOKEN, sent: "${states.asking.output.sent}", text: "${input.text + '\\n\\nNo one answered in time, so the answer is no.'}" }
+      allow: [net:api.telegram.org, "secret:TELEGRAM_TOKEN@net:api.telegram.org"]
+    on: { done: expired, failed: expired }
+  expired: { end: done, output: { choice: "no" } }

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -94,7 +95,7 @@ func photo(id string, bytes int) []any {
 // largest size, and the model is shown it as an image beside the caption. A
 // photo with no caption is answered too.
 func TestTelegramPhotoIsShownToTheModel(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
+	t.Skip("R7 revives this: the conversation gives a message's files to the agent")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir, model := telegramProject(t, w, tg)
@@ -119,26 +120,10 @@ func TestTelegramPhotoIsShownToTheModel(t *testing.T) {
 	}
 }
 
-// Telegram gives a bot at most 20 MB of a file, so a larger one is named to
-// the model and not downloaded.
-func TestTelegramLargeFileIsNamedAndNotDownloaded(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
-	tg := newTelegram(t)
-	w := newWorld(t)
-	dir, model := telegramProject(t, w, tg)
-	tg.says(map[string]any{"document": map[string]any{"file_id": "D1", "file_unique_id": "u", "file_name": "film.mp4", "mime_type": "video/mp4", "file_size": 25 << 20}})
-	w.sync(dir)
-	w.until("the answer", func() bool { return len(tg.said()) >= 1 })
-	shown := fmt.Sprint(model.Calls[0].Messages)
-	if !strings.Contains(shown, "film.mp4") || strings.Contains(shown, "blob") || len(tg.got) != 0 {
-		t.Errorf("the model was shown %s, and getFile asked for %v; want the file's name and no download", shown, tg.got)
-	}
-}
-
 // Each item of an album is a message of its own, with its own caption, and
 // the text sent after it is heard once.
 func TestTelegramAlbumItemsAreMessages(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
+	t.Skip("R7 revives this: the conversation gives a message's files to the agent")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir, model := telegramProject(t, w, tg)
@@ -441,41 +426,123 @@ func sending(args string) func(llmstandin.Call) llmstandin.Reply {
 	}
 }
 
-// An agent sends a text as a file, typed by its name, in the chat it was
-// asked in.
-func TestTelegramAgentSendsATextAsAFile(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
+// filesAgent stands in for the agent at agents/assistant: it replies with each
+// file a message carries, as name, type, size and ID, after its text.
+var filesAgent = map[string]string{
+	"agents/assistant.yaml": `
+		flow: assistant
+		input: { messages: list, medium: string, asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
+		stages:
+		  turn: { job: { script: ./files.js, input: { message: "${input.messages[0]}" } } }
+		output: ${stages.turn.output}
+	`,
+	"agents/files.js": `
+		const m = input.message
+		return { reply: [m.text].concat((m.attachments || []).map((a) => [a.name, a.type, a.size, a.id].join(" "))).join(" + ") }
+	`,
+}
+
+// Telegram's listener sends a message's file as a reference, and downloads
+// nothing: a document by its name and type, a voice message with no caption
+// by its kind, a photo in its largest size, and each item of an album as a
+// message of its own, with its own caption.
+func TestTelegramFilesAreSentAsReferences(t *testing.T) {
 	tg := newTelegram(t)
 	w := newWorld(t)
-	dir, model := telegramProject(t, w, tg)
-	model.Answer = sending(`{"name": "report.csv", "text": "a,b\n1,2\n"}`)
-	tg.says(map[string]any{"text": "the report, please"})
+	dir := chatProject(t, w, tg, filesAgent)
+	tg.dm(1, "", map[string]any{"caption": "read this", "document": map[string]any{"file_id": "D1", "file_unique_id": "u", "file_name": "notes.txt", "mime_type": "text/plain", "file_size": 18}})
+	tg.dm(1, "", map[string]any{"voice": map[string]any{"file_id": "V1", "file_unique_id": "u", "mime_type": "audio/ogg", "duration": 2, "file_size": 7}})
+	tg.dm(1, "", map[string]any{"media_group_id": "g1", "caption": "before", "photo": photo("A1", 9)})
+	tg.dm(1, "", map[string]any{"media_group_id": "g1", "caption": "after", "photo": photo("A2", 9)})
+	tg.dm(1, "thanks")
 	w.sync(dir)
-	w.until("the reply", func() bool { return len(tg.said()) >= 1 })
-	want := upload{Method: "sendDocument", Field: "document", To: "1", Name: "report.csv", Type: "text/csv", Body: "a,b\n1,2\n"}
-	if len(tg.uploads) != 1 || tg.uploads[0] != want {
-		t.Fatalf("the bot sent %+v; want %+v", tg.uploads, want)
+	tg.waitFor(w, "1", "thanks")
+	want := []string{
+		"read this + notes.txt text/plain 18 D1",
+		" + voice audio/ogg 7 V1",
+		"before + photo.jpg image/jpeg 9 A1",
+		"after + photo.jpg image/jpeg 9 A2",
+		"thanks",
 	}
-	if got := tg.said(); got[0] != "sent" {
-		t.Errorf("the bot said %v", got)
+	if got := tg.texts("1"); !slices.Equal(got, want) {
+		t.Errorf("alice was told %q", got)
+	}
+	if len(tg.got) != 0 {
+		t.Errorf("the listener downloaded %v", tg.got)
 	}
 }
 
-// An agent sends back a picture it was shown.
-func TestTelegramAgentSendsAPhoto(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
+// A bot's files/get downloads each file it is given, as a blob of its type. A
+// file over the 20 MB Telegram gives a bot is given back as it is, with no
+// download; a file Telegram cannot give fails the call, naming the file and
+// not the token.
+func TestTelegramFilesGetDownloadsEachFile(t *testing.T) {
 	tg := newTelegram(t)
 	w := newWorld(t)
-	dir, model := telegramProject(t, w, tg)
-	model.Answer = sending(`{"name": "cat.jpg", "blob": "blob1"}`)
+	dir := chatProject(t, w, tg, nil)
+	tg.files["P1"] = "\xff\xd8 a cat"
+	w.sync(dir)
+	large := map[string]any{"name": "film.mp4", "type": "video/mp4", "size": 25 << 20, "id": "D1"}
+	id := w.start(bot+"/telegram/files/get.yaml", map[string]any{"attachments": []any{
+		map[string]any{"name": "photo.jpg", "type": "image/jpeg", "size": 8, "id": "P1"}, large,
+	}})
+	w.until("the download", func() bool { return w.show(id).HasEnded() })
+	run := w.show(id)
+	got, _ := run.Output.([]any)
+	if run.Status != "done" || len(got) != 2 {
+		t.Fatalf("files/get ended %s with %v: %s", run.Status, run.Output, run.Error)
+	}
+	if file, _ := got[0].(map[string]any)["file"].(map[string]any); file["type"] != "image/jpeg" || file["size"] != 8.0 {
+		t.Errorf("the photo was given as %v", got[0])
+	}
+	if !reflect.DeepEqual(got[1], map[string]any{"name": "film.mp4", "type": "video/mp4", "size": float64(25 << 20), "id": "D1"}) {
+		t.Errorf("the large file was given as %v", got[1])
+	}
+	if !slices.Equal(tg.got, []string{"P1"}) {
+		t.Errorf("getFile was asked for %v", tg.got)
+	}
+	gone := w.start(bot+"/telegram/files/get.yaml", map[string]any{"attachments": []any{
+		map[string]any{"name": "gone.pdf", "type": "application/pdf", "size": 10, "id": "GONE"},
+	}})
+	w.until("the failed download", func() bool { return w.show(gone).HasEnded() })
+	if run := w.show(gone); run.Status != "failed" || !strings.Contains(run.Error, "the download of gone.pdf with status 404") || strings.Contains(run.Error, "123:abc") {
+		t.Errorf("files/get ended %s: %s", run.Status, run.Error)
+	}
+}
+
+// A machine sends a file in a chat with the bot's placed files/send: a text it
+// made, typed by its name, and a photo files/get downloaded, as Telegram's
+// documents.
+func TestTelegramFilesSendSendsADocument(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorld(t)
+	dir := chatProject(t, w, tg, map[string]string{
+		bot + "/telegram/files/send.yaml": "include: .rook/telegram/files/send.yaml\n",
+		"agents/sender.yaml": `
+			flow: sender
+			allow: [send:gromit/telegram/files/get, send:gromit/telegram/files/send]
+			stages:
+			  made: { job: { script: ./made.js } }
+			  report: { job: { call: { at: gromit/telegram/files/send }, input: { in: "1", name: report.csv, file: "${stages.made.output}" } } }
+			  got: { job: { call: { at: gromit/telegram/files/get }, input: { attachments: [{ name: photo.jpg, type: image/jpeg, size: 8, id: P1 }] } } }
+			  photo: { job: { call: { at: gromit/telegram/files/send }, input: { in: "1", name: cat.jpg, file: "${stages.got.output[0].file}" } }, follows: [report] }
+		`,
+		"agents/made.js": `return blobs.make("a,b\n1,2\n", { type: "text/csv" })`,
+	})
 	cat := "\xff\xd8 a cat"
 	tg.files["P1"] = cat
-	tg.says(map[string]any{"caption": "send it back", "photo": photo("P1", len(cat))})
 	w.sync(dir)
-	w.until("the reply", func() bool { return len(tg.said()) >= 1 })
-	want := upload{Method: "sendDocument", Field: "document", To: "1", Name: "cat.jpg", Type: "image/jpeg", Body: cat}
-	if len(tg.uploads) != 1 || tg.uploads[0] != want {
-		t.Fatalf("the bot sent %+v; want %+v", tg.uploads, want)
+	id := w.start("agents/sender.yaml", nil)
+	w.until("the sends", func() bool { return w.show(id).HasEnded() })
+	if run := w.show(id); run.Status != "done" {
+		t.Fatalf("the sender ended %s: %s", run.Status, run.Error)
+	}
+	want := []upload{
+		{Method: "sendDocument", Field: "document", To: "1", Name: "report.csv", Type: "text/csv", Body: "a,b\n1,2\n"},
+		{Method: "sendDocument", Field: "document", To: "1", Name: "cat.jpg", Type: "image/jpeg", Body: cat},
+	}
+	if !slices.Equal(tg.uploads, want) {
+		t.Errorf("the bot sent %+v; want %+v", tg.uploads, want)
 	}
 }
 

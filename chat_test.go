@@ -28,13 +28,25 @@ const scenarioPeople = `
 	carol@example.com: { name: carol, scopes: [house] }
 `
 
+// telegramFind is a project's own lookup for Telegram, which gives no email:
+// it finds the email of each of the stand-in's people by their Telegram ID,
+// and then reads people/scopes.yaml as Rook's lookup does.
+const telegramFind = `
+	include: .rook/people/file.yaml
+	stages:
+	  find:
+	    job:
+	      input: { email: "${input.email || ({ '1': 'alice@example.com', '2': 'bob@example.com', '3': 'carol@example.com' })[input.user] || ''}" }
+`
+
 // chatProject makes a Telegram project reaching the stand-in, with the
-// scenario's people, and the files given (dedented), and sets the token.
+// scenario's people, a lookup that knows them by their Telegram IDs, and the
+// files given (dedented), and sets the token.
 func chatProject(t *testing.T, w *world, tg *telegram, files map[string]string) string {
 	t.Helper()
 	w.secret("TELEGRAM_TOKEN", "123:abc")
 	dir := pointed(t, "telegram", tg.Server, "api.telegram.org")
-	write(t, dir, map[string]string{"people/scopes.yaml": scenarioPeople})
+	write(t, dir, map[string]string{"people/scopes.yaml": scenarioPeople, "people/find.yaml": telegramFind})
 	write(t, dir, files)
 	return dir
 }
@@ -228,24 +240,13 @@ func TestSeveralPeopleGetTheirOwnAgents(t *testing.T) {
 	}
 }
 
-// A message in a Telegram group is not heard, even from someone with an agent
-// and even when it names the bot: Telegram's listener hears only direct
-// messages, as rook-design says, and logs that. Nothing is said in the group,
-// and no chat run starts for it.
+// A message in a Telegram group is not heard, even when it names the bot:
+// Telegram's listener hears only direct messages, as rook-design says, and
+// logs that. Nothing is said in the group, and no conversation starts for it.
 func TestGroupMessagesAreNotHeard(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
 	tg := newTelegram(t)
 	w := newWorld(t)
-	dir := chatProject(t, w, tg, map[string]string{
-		"agents/helper.yaml": echoAgent("helper"),
-		"agents/turn.js":     turnJS,
-		"rules.yaml": `
-			places:
-			  dm: { readers: [asker] }
-			agents:
-			  - { name: helper, for: [anyone] }
-		`,
-	})
+	dir := chatProject(t, w, tg, nil)
 	tg.group(-100, 1, "@rook_bot hello from the group")
 	tg.group(-100, 2, "and me")
 	tg.dm(1, "direct")
@@ -255,12 +256,12 @@ func TestGroupMessagesAreNotHeard(t *testing.T) {
 	if got := tg.texts("-100"); len(got) != 0 {
 		t.Errorf("the bot said in the group %q", got)
 	}
-	for key := range keyed(w, ".rook/blocks/chat.yaml") {
-		if key != "telegram:1" {
-			t.Errorf("a chat %s", key)
+	for key := range keyed(w, "conversation.yaml") {
+		if key != "telegram:1:1:assistant" {
+			t.Errorf("a conversation %s", key)
 		}
 	}
-	if got := logged(w, "telegram"); !slices.Contains(got, "a message in a group is not heard: the Telegram bridge hears only direct messages") {
+	if got := logged(w, "telegram"); !slices.Contains(got, "a message in a group is not heard: the Telegram listener hears only direct messages") {
 		t.Errorf("the listener logged %q", got)
 	}
 }
@@ -268,13 +269,9 @@ func TestGroupMessagesAreNotHeard(t *testing.T) {
 // The /start Telegram sends when a person opens the bot is logged and not
 // passed on: the agent answers only the message after it.
 func TestTelegramStartIsNotPassedOn(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
 	tg := newTelegram(t)
 	w := newWorld(t)
-	dir := chatProject(t, w, tg, map[string]string{
-		"agents/helper.yaml": echoAgent("helper"),
-		"agents/turn.js":     turnJS,
-	})
+	dir := chatProject(t, w, tg, nil)
 	tg.dm(1, "/start")
 	tg.dm(1, "hello")
 	w.sync(dir)
@@ -288,14 +285,13 @@ func TestTelegramStartIsNotPassedOn(t *testing.T) {
 	}
 }
 
-// Telegram's listener takes no input: overhear given in bridges/telegram.yaml
-// fails the listener, naming it, and is not passed over.
+// Telegram's listener takes no input: overhear given in the router fails the
+// listener, naming it, and is not passed over.
 func TestTelegramOverhearIsRefused(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
 	tg := newTelegram(t)
 	w := newWorld(t)
-	dir := chatProject(t, w, tg, map[string]string{"agents/helper.yaml": echoAgent("helper"), "agents/turn.js": turnJS})
-	setSite(t, dir, router("telegram"), "restart: { when: always }", "restart: { when: always }\n      input: { overhear: true }")
+	dir := chatProject(t, w, tg, nil)
+	setSite(t, dir, router("telegram"), "restart: { after: always }", "restart: { after: always }, input: { overhear: true }")
 	w.sync(dir)
 	w.until("the listener refuses overhear", func() bool {
 		return slices.ContainsFunc(failures(w), func(s string) bool { return strings.Contains(s, "additional properties 'overhear' not allowed") })
@@ -367,12 +363,13 @@ func TestRuleNamesAMissingAgent(t *testing.T) {
 }
 
 // houseToolkit is a toolkit with a read tool, lights, and an act tool, tell,
-// which waits for a yes from someone with house:approve in alice's chat.
+// which waits for a yes from someone with house:approve in alice's chat. It
+// names no asker, so alice may approve what she asked for.
 const houseToolkit = `
 	description: The house, and messages to its people.
 	ask:
 	  machine: .rook/approval.yaml
-	  input: { ask: gromit/telegram/chat/ask, lookup: people/find, approvers: "house:approve", in: "1", asker: "${input.asker.email}" }
+	  input: { ask: gromit/telegram/chat/ask, lookup: people/find, approvers: "house:approve", in: "1", request: "${input.messages.map((m) => m.text).join('\\n')}" }
 	tools:
 	  lights:
 	    description: Which lights are on.
@@ -503,7 +500,6 @@ func TestModelReadToolRunsAtOnce(t *testing.T) {
 // heard by the listener, the question's message shows her answer with no
 // buttons, the tool runs (bob is told), and alice gets the reply.
 func TestApprovalByATapOnYes(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir, _ := houseProject(t, w, tg, nil)
@@ -515,7 +511,7 @@ func TestApprovalByATapOnYes(t *testing.T) {
 		t.Errorf("the buttons are %v", b)
 	}
 	question := tg.texts("1")[0]
-	for _, want := range []string{"An agent wants to run tell.", "hello from alice", "alice: tell bob hello"} {
+	for _, want := range []string{"An agent wants to run tell.", "hello from alice", "> tell bob hello"} {
 		if !strings.Contains(question, want) {
 			t.Errorf("the question %q lacks %q", question, want)
 		}
@@ -538,7 +534,6 @@ func TestApprovalByATapOnYes(t *testing.T) {
 // A tap on No: the tool does not run, the model is told alice said no,
 // and alice gets the model's reply.
 func TestApprovalRefusedByATap(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir, model := houseProject(t, w, tg, nil)
@@ -559,10 +554,9 @@ func TestApprovalRefusedByATap(t *testing.T) {
 	}
 }
 
-// Bob, who is not the part's approver, and a stranger tap Yes: neither counts,
-// the question stays open, and then alice's No counts.
+// Bob, who lacks house:approve, and a stranger tap Yes: neither counts, each is
+// told why in an alert, the question stays open, and then alice's No counts.
 func TestOnlyTheApproversTapCounts(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir, _ := houseProject(t, w, tg, nil)
@@ -579,6 +573,10 @@ func TestOnlyTheApproversTapCounts(t *testing.T) {
 	if len(tg.edited()) != 0 {
 		t.Fatalf("the question was closed: %q", tg.edited())
 	}
+	w.until("both told", func() bool { return len(tg.alerts()) == 2 })
+	if got := tg.alerts(); got[0] != "Only someone with the scope house:approve can answer this." || got[1] != got[0] {
+		t.Errorf("the alerts are %q", got)
+	}
 	tg.tapOn(t, 0, 1, "no")
 	tg.waitFor(w, "1", "tell gave")
 }
@@ -586,7 +584,6 @@ func TestOnlyTheApproversTapCounts(t *testing.T) {
 // A question nobody answers gives no after seven days: the message shows that
 // no one answered, the tool does not run, and alice gets a reply.
 func TestApprovalTimesOut(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir, model := houseProject(t, w, tg, nil)
@@ -629,11 +626,39 @@ func TestTwoHeldCallsAreOneQuestion(t *testing.T) {
 	tg.waitFor(w, "1", "twice gave")
 }
 
+// A toolkit whose ask names the asker: alice's own tap on her request does not
+// count, she is told someone else must answer it, and the buttons stay. Carol,
+// who also holds house:approve, answers it.
+func TestOwnRequestIsNotApprovedByTheAsker(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorld(t)
+	dir, _ := houseProject(t, w, tg, map[string]string{
+		"toolkits/house.yaml": strings.Replace(houseToolkit, `in: "1",`, `in: "1", asker: "${input.asker.email}",`, 1),
+	})
+	write(t, dir, map[string]string{"people/scopes.yaml": strings.Replace(scenarioPeople, "carol, scopes: [house]", "carol, scopes: [house, house:approve]", 1)})
+	tg.dm(1, "tell bob hello")
+	w.sync(dir)
+	w.until("a question", func() bool { return len(tg.buttons()) == 2 })
+	tg.tapOn(t, 0, 1, "yes")
+	w.until("alice told", func() bool { return len(tg.alerts()) == 1 })
+	if got := tg.alerts(); got[0] != "You asked for this, so someone else must answer it." {
+		t.Errorf("the alert is %q", got)
+	}
+	quiet()
+	if got := tg.edited(); len(got) != 0 {
+		t.Fatalf("alice's own tap closed the question: %q", got)
+	}
+	tg.tapOn(t, 0, 3, "yes")
+	tg.waitFor(w, "2", "hello from alice")
+	if got := tg.edited(); len(got) != 1 || !strings.HasSuffix(got[0], "carol said yes.") {
+		t.Errorf("the question shows %q", got)
+	}
+}
+
 // A tap whose choice is not one of the buttons (Telegram's callback data is
-// whatever the client sends) does not count, and the question waits for one
-// that does.
+// whatever the client sends) does not count, the presser is told so, and the
+// question waits for one that does.
 func TestForgedChoiceApprovesNothing(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir, _ := houseProject(t, w, tg, nil)
@@ -646,6 +671,10 @@ func TestForgedChoiceApprovesNothing(t *testing.T) {
 	quiet()
 	if got := tg.edited(); len(got) != 0 {
 		t.Fatalf("a choice that is no button closed the question: %q", got)
+	}
+	w.until("alice told", func() bool { return len(tg.alerts()) == 1 })
+	if got := tg.alerts(); got[0] != "That is not one of the choices." {
+		t.Errorf("the alert is %q", got)
 	}
 	tg.tapOn(t, 0, 1, "yes")
 	tg.waitFor(w, "2", "hello from alice")
@@ -766,74 +795,12 @@ func fileModel(c llmstandin.Call) llmstandin.Reply {
 	return llmstandin.Reply{Text: "shown: " + said}
 }
 
-// A text document sent with a caption is downloaded and given to the agent;
-// the model is shown its handle, not its key.
-func TestDocumentIsGivenToTheAgent(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
-	tg := newTelegram(t)
-	w := newWorld(t)
-	_, address := standin(t, w, fileModel)
-	dir := chatProject(t, w, tg, map[string]string{"agents/helper.yaml": modelAgent("helper", address, "")})
-	tg.files["D1"] = "line one\nline two\n"
-	tg.dm(1, "", map[string]any{"caption": "read this", "document": map[string]any{"file_id": "D1", "file_unique_id": "u", "file_name": "notes.txt", "mime_type": "text/plain", "file_size": 18}})
-	w.sync(dir)
-	w.until("the answer", func() bool { return len(tg.texts("1")) == 1 })
-	got := tg.texts("1")[0]
-	for _, want := range []string{"read this", "notes.txt", "text/plain"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("the model was not shown %q: %s", want, got)
-		}
-	}
-	if !slices.Equal(tg.got, []string{"D1"}) {
-		t.Errorf("getFile was asked for %v", tg.got)
-	}
-	w.titled(map[string][]string{"message": {"read this"}, "helper": {"alice: read this"}})
-}
-
-// A voice message with no caption is a message, titled by its file's name.
-func TestVoiceWithNoText(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
-	tg := newTelegram(t)
-	w := newWorld(t)
-	_, address := standin(t, w, fileModel)
-	dir := chatProject(t, w, tg, map[string]string{"agents/helper.yaml": modelAgent("helper", address, "")})
-	tg.files["V1"] = "OggS..."
-	tg.dm(1, "", map[string]any{"voice": map[string]any{"file_id": "V1", "file_unique_id": "u", "mime_type": "audio/ogg", "duration": 2, "file_size": 7}})
-	w.sync(dir)
-	w.until("the answer", func() bool { return len(tg.texts("1")) == 1 })
-	if got := tg.texts("1")[0]; !strings.Contains(got, "voice") {
-		t.Errorf("the model was shown %s", got)
-	}
-	w.titled(map[string][]string{"message": {"voice"}, "chat": {"dm: voice"}})
-}
-
-// A file Telegram cannot give (getFile works, the download is 404) is given to
-// the agent as the message holds it, with no contents, and the message is
-// answered.
-func TestBrokenDownloadIsAnswered(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
-	tg := newTelegram(t)
-	w := newWorld(t)
-	_, address := standin(t, w, fileModel)
-	dir := chatProject(t, w, tg, map[string]string{"agents/helper.yaml": modelAgent("helper", address, "")})
-	tg.dm(1, "", map[string]any{"caption": "this one", "document": map[string]any{"file_id": "GONE", "file_unique_id": "u", "file_name": "gone.pdf", "mime_type": "application/pdf", "file_size": 10}})
-	w.sync(dir)
-	w.until("the answer", func() bool { return len(tg.texts("1")) == 1 })
-	if got := tg.texts("1")[0]; !strings.Contains(got, "gone.pdf") || strings.Contains(got, "could not") {
-		t.Errorf("alice was told %s", got)
-	}
-}
-
 // A sticker, an edited message and a message from a bot are not messages: none
 // is answered, and the text after them is.
 func TestNonMessagesAreSkipped(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
 	tg := newTelegram(t)
 	w := newWorld(t)
-	dir := chatProject(t, w, tg, map[string]string{
-		"agents/helper.yaml": echoAgent("helper"),
-		"agents/turn.js":     turnJS,
-	})
+	dir := chatProject(t, w, tg, nil)
 	tg.dm(1, "", map[string]any{"sticker": map[string]any{"file_id": "S1", "file_unique_id": "u", "width": 1, "height": 1, "is_animated": false, "is_video": false, "type": "regular"}})
 	tg.update(map[string]any{"edited_message": map[string]any{"message_id": 10, "date": 1, "chat": map[string]any{"id": 1, "type": "private"}, "from": map[string]any{"id": 1, "is_bot": false, "first_name": "Alice"}, "text": "edited"}})
 	tg.update(map[string]any{"message": map[string]any{"message_id": 99, "date": 1, "chat": map[string]any{"id": 1, "type": "private"}, "from": map[string]any{"id": 1, "is_bot": true, "first_name": "Bot"}, "text": "from a bot"}})
@@ -843,54 +810,6 @@ func TestNonMessagesAreSkipped(t *testing.T) {
 	quiet()
 	if got := tg.texts("1"); len(got) != 1 {
 		t.Errorf("alice was told %q", got)
-	}
-}
-
-// Telegram keeps no history a bot can read: the agent is given no history and
-// no earlier files. A photo sent in one message is still in the conversation
-// for the next, since the conversation carries what the model was shown.
-func TestEarlierPhotoOnTelegram(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
-	tg := newTelegram(t)
-	w := newWorld(t)
-	model, address := standin(t, w, fileModel)
-	dir := chatProject(t, w, tg, map[string]string{"agents/helper.yaml": modelAgent("helper", address, "")})
-	cat := "\xff\xd8 a cat"
-	tg.files["P1"] = cat
-	tg.dm(1, "", map[string]any{"caption": "look", "photo": photo("P1", len(cat))})
-	tg.dm(1, "what was in the photo I sent?")
-	w.sync(dir)
-	w.until("two answers", func() bool { return len(tg.texts("1")) == 2 })
-	for _, run := range w.at("agents/helper.yaml") {
-		in := w.show(run.ID).Input.(map[string]any)
-		if in["history"] != nil || (in["earlier"] != nil && len(in["earlier"].([]any)) > 0) {
-			t.Errorf("the agent was given history %v and earlier %v", in["history"], in["earlier"])
-		}
-	}
-	all, _ := json.Marshal(model.Calls[1].Messages)
-	if !strings.Contains(string(all), "image/jpeg") {
-		t.Errorf("the second call does not carry the photo: %s", all)
-	}
-}
-
-// The tool look on Telegram has no earlier files to look at: a model that
-// calls it with an id gets nothing, and the message is answered.
-func TestLookOnTelegramGivesNothing(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
-	tg := newTelegram(t)
-	w := newWorld(t)
-	_, address := standin(t, w, func(c llmstandin.Call) llmstandin.Reply {
-		if _, r := turnOf(c); len(r) == 0 {
-			return calls("look", `{"id": "P1"}`)
-		}
-		return fileModel(c)
-	})
-	dir := chatProject(t, w, tg, map[string]string{"agents/helper.yaml": modelAgent("helper", address, "")})
-	tg.dm(1, "the photo above")
-	w.sync(dir)
-	w.until("the answer", func() bool { return len(tg.texts("1")) == 1 })
-	if len(tg.got) != 0 {
-		t.Errorf("look downloaded %v", tg.got)
 	}
 }
 
@@ -1075,26 +994,20 @@ func TestModelKeyMissing(t *testing.T) {
 }
 
 // A long reply is cut into Telegram's 4096 characters, at a line's end, the
-// first part answering the message; a chart is written as a table.
+// first part answering the message; a chart is written as a table. The agent
+// at agents/assistant replies with what it was sent.
 func TestLongReplyAndChart(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
 	tg := newTelegram(t)
 	w := newWorld(t)
-	long := strings.Repeat("a line of the reply that is long enough\n", 150)
+	long := strings.TrimSpace(strings.Repeat("a line of the reply that is long enough\n", 150))
 	chart := "Here.\n\n```chart\n{\"type\": \"bar\", \"title\": \"Tickets\", \"labels\": [\"Jan\", \"Feb\"], \"series\": [{\"name\": \"Email\", \"values\": [140, 165]}]}\n```\n"
-	_, address := standin(t, w, func(c llmstandin.Call) llmstandin.Reply {
-		if strings.Contains(last(c), "chart") {
-			return llmstandin.Reply{Text: chart}
-		}
-		return llmstandin.Reply{Text: long}
-	})
-	dir := chatProject(t, w, tg, map[string]string{"agents/helper.yaml": modelAgent("helper", address, "")})
-	tg.dm(1, "long")
-	tg.dm(1, "chart")
+	dir := chatProject(t, w, tg, nil)
+	tg.dm(1, long)
+	tg.dm(1, chart)
 	w.sync(dir)
 	w.until("three messages", func() bool { return len(tg.texts("1")) == 3 })
 	got := tg.texts("1")
-	if len(got[0]) > 4096 || !strings.HasSuffix(got[0], "\n") || got[0]+got[1] != strings.TrimSpace(long) {
+	if len(got[0]) > 4096 || !strings.HasSuffix(got[0], "\n") || got[0]+got[1] != long {
 		t.Errorf("the long reply was cut into %d and %d", len(got[0]), len(got[1]))
 	}
 	if strings.Contains(got[2], "```") || !strings.Contains(got[2], "165") {
@@ -1105,14 +1018,10 @@ func TestLongReplyAndChart(t *testing.T) {
 // Telegram refuses to send to a chat (the person blocked the bot). The
 // failure, wherever it is recorded, never holds the token.
 func TestRefusalDoesNotLeakTheToken(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	tg.refuse["1"] = "Forbidden: bot was blocked by the user"
-	dir := chatProject(t, w, tg, map[string]string{
-		"agents/helper.yaml": echoAgent("helper"),
-		"agents/turn.js":     turnJS,
-	})
+	dir := chatProject(t, w, tg, nil)
 	tg.dm(1, "hello")
 	w.sync(dir)
 	w.until("a say failed", func() bool {
@@ -1140,24 +1049,20 @@ func TestRefusalDoesNotLeakTheToken(t *testing.T) {
 	}
 }
 
-// The tool progress on Telegram shows "typing", and not the model's text, as
-// its description: tells the model.
-func TestProgressOnTelegram(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
+// While the conversation answers a message, Telegram shows "typing" in its
+// chat, and says nothing else for it.
+func TestTypingIsShownWhileAnswering(t *testing.T) {
 	tg := newTelegram(t)
 	w := newWorld(t)
-	_, address := standin(t, w, func(c llmstandin.Call) llmstandin.Reply {
-		if _, r := turnOf(c); len(r) == 0 {
-			return calls("progress", `{"text": "Checking the boiler"}`)
-		}
-		return llmstandin.Reply{Text: "done"}
-	})
-	dir := chatProject(t, w, tg, map[string]string{"agents/helper.yaml": modelAgent("helper", address, "")})
+	dir := chatProject(t, w, tg, nil)
 	tg.dm(1, "check")
 	w.sync(dir)
-	tg.waitFor(w, "1", "done")
-	if got := tg.said(); slices.ContainsFunc(got, func(s string) bool { return strings.Contains(s, "boiler") }) {
-		t.Errorf("the progress text was said: %q", got)
+	tg.waitFor(w, "1", "check")
+	tg.mu.Lock()
+	typing := slices.Clone(tg.typing)
+	tg.mu.Unlock()
+	if !slices.Equal(typing, []string{"1"}) || !slices.Equal(tg.said(), []string{"check"}) {
+		t.Errorf("typing was shown in %v, and the bot said %q", typing, tg.said())
 	}
 }
 
@@ -1290,9 +1195,8 @@ func TestApprovedToolFails(t *testing.T) {
 }
 
 // Two taps in a row from alice, Yes then No: the first is the answer; the
-// second is acknowledged and changes nothing.
+// second changes nothing.
 func TestDoubleTap(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir, _ := houseProject(t, w, tg, nil)
@@ -1310,20 +1214,13 @@ func TestDoubleTap(t *testing.T) {
 	}
 }
 
-// Bob, whose agent also has the house part, and alice each ask for a held
-// call. alice gets two questions, and answers the second (bob's) first: each
+// Bob and alice each ask for a held call, which the house toolkit lets both
+// open. alice gets two questions, and answers the second (bob's) first: each
 // tap goes to its own question.
 func TestTwoQuestionsAnsweredOutOfOrder(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
 	tg := newTelegram(t)
 	w := newWorld(t)
-	dir, model := houseProject(t, w, tg, nil)
-	_ = model
-	helper, err := os.ReadFile(filepath.Join(dir, "agents/helper.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	writeRaw(t, dir, "agents/team.yaml", strings.Replace(string(helper), "agent: helper", "agent: team", 1))
+	dir, _ := houseProject(t, w, tg, nil)
 	tg.dm(1, "tell bob hello")
 	w.sync(dir)
 	w.until("alice's question", func() bool { return len(tg.buttons()) == 2 })
@@ -1340,23 +1237,9 @@ func TestTwoQuestionsAnsweredOutOfOrder(t *testing.T) {
 		t.Errorf("alice's own request was answered by a tap on bob's: %q", tg.texts("1"))
 	}
 	tg.tapOn(t, 0, 1, "yes")
-	for i := 0; i < 100 && !slices.ContainsFunc(tg.texts("1"), func(s string) bool { return strings.Contains(s, "tell gave") }); i++ {
-		time.Sleep(100 * time.Millisecond)
-	}
-	if !slices.ContainsFunc(tg.texts("1"), func(s string) bool { return strings.Contains(s, "tell gave") }) {
-		runs, _ := w.List(context.Background(), client.Filter{})
-		for _, r := range runs {
-			t.Logf("RUN %s %s %s", r.Machine, r.Status, r.ID)
-		}
-		fin, _ := w.List(context.Background(), client.Filter{Finished: true})
-		for _, r := range fin {
-			t.Logf("ENDED %s %s %s %s", r.Machine, r.Status, r.ID, w.show(r.ID).Error)
-		}
-		t.Logf("texts %q", tg.texts("1"))
-	}
 	tg.waitFor(w, "1", "tell gave")
 	tg.waitFor(w, "2", "hello from alice")
-	if q := tg.texts("1")[1]; !strings.Contains(q, "bob: please tell bob hello") {
+	if q := tg.texts("1")[1]; !strings.Contains(q, "> please tell bob hello") {
 		t.Errorf("alice was shown %q for bob's request", q)
 	}
 }

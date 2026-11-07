@@ -40,8 +40,9 @@ const telegramScript = `
 	  emit("message", { service: "telegram", text: "hello", chat: "9", user: "9", name: "Stranger", place: "dm", answers: "9:13" })
 	  return { cursor: 1 }
 	}
-	if (input.do === "ask") return {}
-	return { sent: [input.answers || ""] }
+	if (input.do === "ask") return { sent: [{ chat: input.in, id: 101 }] }
+	if (input.do === "post") return { sent: [input.answers || ""] }
+	return {}
 `
 
 // helperStub stands in for the agent at agents/assistant: it replies with what
@@ -163,10 +164,10 @@ func heard(events ...map[string]any) string {
 		  ` + strings.Join(emits, "\n\t\t  ") + `
 		  return { cursor: 1 }
 		}
-		if (input.do === "ask") return { sent: [{ chat: input.to, id: 101 }] }
-		if (input.do === "send") return { sent: input.to + ":1" }
-		if (input.do === "close" || input.do === "status") return {}
-		return { sent: [input.answers || ""] }
+		if (input.do === "ask") return { sent: [{ chat: input.in, id: 101 }] }
+		if (input.do === "send") return { sent: input.in + ":1" }
+		if (input.do === "post") return { sent: [input.answers || ""] }
+		return {}
 	`
 }
 
@@ -522,46 +523,48 @@ func TestApprovalAsksThePartsApprovers(t *testing.T) {
 	}
 }
 
-// A question is a run of .rook/blocks/ask that a machine calls, and a tap by a
-// person it names answers it, on any of their bridges. A tap by anyone else
-// changes nothing.
+// asker is a machine that asks a question on Telegram, in chat 2, of people
+// whose scopes hold house:approve, and gives the choice. It is under agents/,
+// whose machines the placed question takes calls from.
+const asker = `
+	flow: asker
+	allow: [send:gromit/telegram/chat/ask]
+	stages:
+	  asking: { job: { call: { at: gromit/telegram/chat/ask }, input: { in: "2", text: "Well?", choices: ["yes", "no"], lookup: people/find, approvers: "house:approve" } } }
+	output: ${stages.asking.output.choice}
+`
+
+// A question is a run of a bot's chat/ask that a machine calls, and a tap by a
+// person whose scopes, by the lookup, hold its approvers answers it. A tap by
+// anyone else changes nothing.
 func TestAskPersonIsAnsweredByATap(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
 	w := newWorld(t)
 	dir := copyStarter(t)
-	// The test's controller holds no secret, and this question is asked of no one.
 	write(t, dir, map[string]string{
-		".rook/bridges/slack/ask.yaml": "flow: slack-ask\ninput: { to: string, text: string, choices: list, question: string }\nstages:\n  question: { job: { script: ./asked.js } }\n",
-		".rook/bridges/slack/asked.js": "return {}",
-		"on/asker.yaml": `
-			flow: asker
-			allow: [send:.rook/blocks/ask]
-			stages:
-			  asking: { job: { call: { at: .rook/blocks/ask }, input: { people: [bob], text: "Well?", choices: ["yes", "no"] } } }
-			output: ${stages.asking.output.choice}
-		`,
-		"people.yaml": "people:\n  alice: { telegram: \"1\" }\n  bob: { telegram: \"2\", slack: \"5\" }\ngroups: {}\n",
+		"agents/asker.yaml":  asker,
+		"people/find.yaml":   telegramFind,
+		"people/scopes.yaml": "alice@example.com: { name: alice, scopes: [house] }\nbob@example.com: { name: bob, scopes: [house:approve] }\n",
 	})
 	removeListener(t, dir)
 	w.sync(dir)
-	asker := w.start("on/asker.yaml", nil)
+	id := w.start("agents/asker.yaml", nil)
 	question := w.question(map[string]bool{})
 	for _, from := range []string{"3", "1"} {
 		w.tap(question.ID, from, "yes")
 		time.Sleep(10 * interval)
-		if run := w.show(asker); run.Status != "running" {
+		if run := w.show(id); run.Status != "running" {
 			t.Fatalf("a tap by %s ended the asker: %+v", from, run)
 		}
 	}
-	w.send(question.ID, "answer", map[string]any{"bridge": "slack", "from": "5", "choice": "no"})
-	w.until("the asker done", func() bool { return w.show(asker).Status == "done" })
-	if got := w.show(asker).Output; got != "no" {
+	w.tap(question.ID, "2", "no")
+	w.until("the asker done", func() bool { return w.show(id).Status == "done" })
+	if got := w.show(id).Output; got != "no" {
 		t.Fatalf("the choice was %v", got)
 	}
-	if run := w.show(question.ID); run.StartedBy == "" {
-		t.Errorf("the question does not name the run that called it: %+v", run)
+	if run := w.show(question.ID); run.StartedBy == "" || !reflect.DeepEqual(run.Output, map[string]any{"choice": "no", "by": "bob"}) {
+		t.Errorf("the question does not name the run that called it, or gave %v: %+v", run.Output, run)
 	}
-	w.titled(map[string][]string{"ask": {"Well?"}})
+	w.titled(map[string][]string{"telegram-chat-ask": {"Well?"}})
 }
 
 // A project with a bot on every service reads: the routers are singletons,
@@ -859,8 +862,8 @@ func TestRouterSendsEachPersonToTheirConversation(t *testing.T) {
 	}
 }
 
-// sayings gives the address of everything a project's bridge was told to say, by
-// its text, with the `to` the bridge's own say was given.
+// sayings gives everything a project's services were told to post, by its
+// text, with the `in` each post was given.
 func sayings(t *testing.T, w *world) map[string]map[string]any {
 	t.Helper()
 	runs, err := w.List(context.Background(), client.Filter{Finished: true})
@@ -869,7 +872,7 @@ func sayings(t *testing.T, w *world) map[string]map[string]any {
 	}
 	said := map[string]map[string]any{}
 	for _, run := range runs {
-		if run.Machine != "say" {
+		if !strings.HasSuffix(run.Machine, "-chat-post") {
 			continue
 		}
 		input := w.show(run.ID).Input.(map[string]any)
@@ -880,8 +883,8 @@ func sayings(t *testing.T, w *world) map[string]map[string]any {
 		if address, ok := input["address"].(map[string]any); ok {
 			maps.Copy(said[text], address)
 		}
-		if to, ok := input["to"]; ok {
-			said[text]["to"] = to
+		if in, ok := input["in"]; ok {
+			said[text]["in"] = in
 		}
 	}
 	return said
@@ -935,10 +938,12 @@ func TestApprovalFromAChatGetsToTheApprover(t *testing.T) {
 const oneMessage = `
 	if (input.do === "hear") {
 	  if (input.cursor !== null) throw new Error("nothing more")
-	  emit("message", { bridge: "telegram", text: "one", chat: "1", from: "1", place: "dm", answers: "1:10" })
+	  emit("message", { service: "telegram", text: "one", chat: "1", user: "1", name: "Alice", place: "dm", answers: "1:10" })
 	  return { cursor: 1 }
 	}
-	return { sent: [input.answers || ""] }
+	if (input.do === "ask") return { sent: [{ chat: input.in, id: 101 }] }
+	if (input.do === "post") return { sent: [input.answers || ""] }
+	return {}
 `
 
 // A machine that answers can say a text at the message's address while it works,
