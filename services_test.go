@@ -1,8 +1,8 @@
 package rook_test
 
-// The Slack, GitLab and Jira bridges against their stand-ins: threads,
+// The Slack, GitLab and Jira services against their stand-ins: threads,
 // mentions, envelopes Slack sends again, files, hosts as values, questions
-// answered by Slack's buttons, comments as chats, and several bridges in one
+// answered by Slack's buttons, comments as chats, and several services in one
 // project.
 
 import (
@@ -645,18 +645,18 @@ func TestTelegramHistoryIsLostWithTheListener(t *testing.T) {
 // GITLAB_SITE and JIRA_SITE given with https:// fail the listener, saying
 // each is a host name.
 func TestSiteWithASchemeIsExplained(t *testing.T) {
-	for _, c := range []struct{ bridge, value, want string }{
+	for _, c := range []struct{ service, value, want string }{
 		{"gitlab", "https://gitlab.example.com", "GITLAB_SITE is a host name, such as gitlab.example.com, with no https:// and no path: it is https://gitlab.example.com"},
 		{"jira", "https://example.atlassian.net/", "JIRA_SITE is a host name, such as example.atlassian.net, with no https:// and no path: it is https://example.atlassian.net/"},
 	} {
-		t.Run(c.bridge, func(t *testing.T) {
+		t.Run(c.service, func(t *testing.T) {
 			w := newWorld(t)
 			srv := httptest.NewServer(http.NotFoundHandler())
 			t.Cleanup(srv.Close)
-			dir := pointed(t, c.bridge, srv)
-			w.secret(strings.ToUpper(c.bridge)+"_TOKEN", "token")
+			dir := pointed(t, c.service, srv)
+			w.secret(strings.ToUpper(c.service)+"_TOKEN", "token")
 			w.value("JIRA_EMAIL", "bot@example.com")
-			w.value(strings.ToUpper(c.bridge)+"_SITE", c.value)
+			w.value(strings.ToUpper(c.service)+"_SITE", c.value)
 			w.sync(dir)
 			w.until(c.want, func() bool {
 				return slices.ContainsFunc(failures(w), func(s string) bool { return strings.Contains(s, c.want) })

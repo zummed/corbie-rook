@@ -374,3 +374,38 @@ func TestAgentPostsAsItWorksAndGivesNoReply(t *testing.T) {
 		})
 	}
 }
+
+// A changed agent answers the next message of a conversation already under way,
+// and a changed router restarts its listener, and the conversation goes on.
+func TestChangedAgentAnswersTheNextMessage(t *testing.T) {
+	s := newSlack(t)
+	w := newWorld(t)
+	dir := slackProject(t, w, s)
+	echoing(t, dir)
+	w.sync(dir)
+	w.until("Slack connected", s.connected)
+	s.says("a", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "ts": "3.0", "text": "first"})
+	w.until("the first answer", func() bool { return len(s.posted()) >= 1 })
+	setSite(t, dir, "agents/assistant.yaml", `output: { reply: "${stages.echo.output}"`, `output: { reply: "${'changed: ' + input.messages.at(-1).text}"`)
+	w.sync(dir)
+	s.says("b", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "ts": "4.0", "text": "second"})
+	w.until("the second answer", func() bool { return len(s.posted()) >= 2 })
+	if got := fmt.Sprint(s.posted()[1]["markdown_text"]); got != "changed: second" {
+		t.Fatalf("the bot said %q", got)
+	}
+	listener := w.kept(router("slack"))
+	setSite(t, dir, router("slack"), "lifetime: singleton\n", "lifetime: singleton\nmeta: { changed: true }\n")
+	s.mu.Lock()
+	s.socket = nil
+	s.mu.Unlock()
+	w.sync(dir)
+	if w.kept(router("slack")) == listener {
+		t.Fatal("the changed router did not restart its listener")
+	}
+	w.until("Slack connected again", s.connected)
+	s.says("c", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "ts": "5.0", "text": "third"})
+	w.until("the third answer", func() bool { return len(s.posted()) >= 3 })
+	if runs := keyed(w, "conversation.yaml"); len(runs) != 1 || len(runs["slack:D1:U1:assistant"]) != 1 {
+		t.Errorf("the conversations are %v", runs)
+	}
+}

@@ -1,4 +1,4 @@
-// Charts and layouts in a text, shared by the bridges. A chart is a fenced block marked
+// Charts and layouts in a text, shared by the services. A chart is a fenced block marked
 // chart that holds one JSON object:
 //
 //   { "type": "bar", "title": "Tickets", "labels": ["Jan", "Feb"],

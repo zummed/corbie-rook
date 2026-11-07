@@ -277,7 +277,7 @@ stop button Slack shows under a thread while the bot works there.
 2. The conversation leaves the turn, which cancels the agent's run, its tools' runs, and any approval and question they wait on.
 3. The conversation posts `Stopped.`, and answers the next message with the conversation as it was before the stopped one.
 
-- A stop reaches only the sender's own conversation, so nobody can stop another person's agent.
+- A stop goes only to the sender's own conversation, so nobody can stop another person's agent.
 - A stop that comes while a message is added cancels the turn as it starts. A stop with no turn coming is dropped.
 - A Slack direct message outside a thread shows no status, so it has no stop button.
 - A question that is cancelled keeps its buttons. A press on one is noted as undelivered in the router's record, and runs nothing.
