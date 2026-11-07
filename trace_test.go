@@ -265,14 +265,22 @@ func TestTraceMessageToToolsAndApproval(t *testing.T) {
 		t.Errorf("the approval called %s, and the question is %s", asked, question.ID)
 	}
 	var answer any
+	var press string
 	for _, run := range stubs(t, w, "press") {
 		if run.Parent == asked {
-			answer = w.show(run.ID).Output
+			answer, press = w.show(run.ID).Output, run.ID
 		}
 	}
 	if m, _ := answer.(map[string]any); m["by"] != "alice" || m["counts"] != true {
 		t.Errorf("the question's record says it was answered by %v", answer)
 	}
+	// 5. the record lines rook-design shows are what corbie run show --record
+	// prints for these runs.
+	recordsAsThePageShows(t, w, map[string]string{
+		"router": router, "conversation": conversation, "turn": turn, "agent": agent,
+		"approval": approval, "question": asked, "press": press, "tell": told,
+		"find": lastOf(t, "lookup", w.sentFrom(turn, instance.AskCall, location("people/find"))),
+	})
 }
 
 // recordsAsThePageShows checks each record rook-design shows under Following
