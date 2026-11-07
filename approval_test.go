@@ -43,7 +43,7 @@ var byTelegramID = map[string]string{
 	`,
 }
 
-// approvalProject is the starter on Telegram with no router, Telegram's script
+// approvalProject is the starter on Telegram with no listener, Telegram's script
 // standing in, the lookup by Telegram ID, and testdata's helper as the agent
 // at agents/assistant, asking a model at an address.
 func approvalProject(t *testing.T, w *world, address string) string {
@@ -102,11 +102,11 @@ func (w *world) told(question string) []string {
 	return out
 }
 
-// press sends a press of a question's button, as a router forwards one from
-// Telegram, which gives no email.
+// press sends a press of a question's button to the Telegram router, which
+// sends it to the question. Telegram gives no email.
 func (w *world) press(question, user, choice string) {
 	w.t.Helper()
-	w.send(question, "answer", map[string]any{"service": "telegram", "run": question[strings.Index(question, "/")+1:], "user": user, "name": names[atoi(user)], "choice": choice})
+	w.answer("telegram", question, map[string]any{"service": "telegram", "user": user, "name": names[atoi(user)], "choice": choice})
 }
 
 // checked waits until a question has checked n presses.
@@ -304,7 +304,7 @@ func receiveFrom(t *testing.T, dir, service, from string) {
 func TestQuestionUnansweredWithinIsNo(t *testing.T) {
 	w := newWorld(t)
 	dir := approvalProject(t, w, noModel)
-	write(t, dir, map[string]string{"on/asker.yaml": asker("telegram", `{ in: "1", text: "Deploy?", choices: [yes, no], lookup: people/find, approvers: "messages:approve", within: 1h }`)})
+	write(t, dir, map[string]string{"on/asker.yaml": asker("telegram", `{ in: "1", text: "Deploy?", choices: [yes, no], approvers: "messages:approve", within: 1h }`)})
 	receiveFrom(t, dir, "telegram", "on/*")
 	w.sync(dir)
 	id := w.start("on/asker.yaml", nil)
@@ -332,7 +332,7 @@ func TestQuestionRefusesTheAskerOnlyWhenNamed(t *testing.T) {
 			if named {
 				by = `, asker: ALICE@example.com`
 			}
-			write(t, dir, map[string]string{"on/asker.yaml": asker("telegram", `{ in: "1", text: "Deploy?", choices: [yes, no], lookup: people/find, approvers: "messages:approve"`+by+` }`)})
+			write(t, dir, map[string]string{"on/asker.yaml": asker("telegram", `{ in: "1", text: "Deploy?", choices: [yes, no], approvers: "messages:approve"`+by+` }`)})
 			receiveFrom(t, dir, "telegram", "on/*")
 			w.sync(dir)
 			id := w.start("on/asker.yaml", nil)
@@ -364,7 +364,7 @@ func TestPressThatCannotBeCheckedDoesNotCount(t *testing.T) {
 	w := newWorld(t)
 	dir := approvalProject(t, w, noModel)
 	write(t, dir, map[string]string{
-		"on/asker.yaml":  asker("telegram", `{ in: "1", text: "Deploy?", choices: [yes, no], lookup: people/find, approvers: "messages:approve" }`),
+		"on/asker.yaml":  asker("telegram", `{ in: "1", text: "Deploy?", choices: [yes, no], approvers: "messages:approve" }`),
 		"people/find.js": `if (input.user === "3") throw new Error("the directory is down"); return { name: "alice", email: "alice@example.com", scopes: ["messages:approve"] }`,
 	})
 	receiveFrom(t, dir, "telegram", "on/*")
@@ -409,7 +409,7 @@ func TestStatechartAsksForApproval(t *testing.T) {
 			allow: [send:ops/pipeline]
 			ask:
 			  machine: .rook/approval.yaml
-			  input: { ask: gromit/telegram/chat/ask, lookup: people/find, approvers: "messages:approve", in: "1", within: 1h, asker: "${input.email}", request: "${input.text}" }
+			  input: { ask: gromit/telegram/chat/ask, approvers: "messages:approve", in: "1", within: 1h, asker: "${input.email}", request: "${input.text}" }
 			initial: waiting
 			states:
 			  waiting:
@@ -488,10 +488,8 @@ func TestSlackQuestionTellsAPressThatDoesNotCount(t *testing.T) {
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
-	if err := os.Remove(filepath.Join(dir, router("slack"))); err != nil {
-		t.Fatal(err)
-	}
-	write(t, dir, map[string]string{"on/asker.yaml": asker("slack", `{ in: "#approvals", text: "Deploy?", choices: [yes, no], lookup: people/find, approvers: "messages:approve", asker: bob@example.com }`)})
+	removeListenerOf(t, dir, "slack")
+	write(t, dir, map[string]string{"on/asker.yaml": asker("slack", `{ in: "#approvals", text: "Deploy?", choices: [yes, no], approvers: "messages:approve", asker: bob@example.com }`)})
 	receiveFrom(t, dir, "slack", "on/*")
 	w.sync(dir)
 	id := w.start("on/asker.yaml", nil)
@@ -509,7 +507,7 @@ func TestSlackQuestionTellsAPressThatDoesNotCount(t *testing.T) {
 		return question != nil
 	})
 	press := func(user, email, choice string) {
-		w.send(question.ID, "answer", map[string]any{"service": "slack", "run": question.ID[strings.Index(question.ID, "/")+1:], "user": user, "email": email, "choice": choice})
+		w.answer("slack", question.ID, map[string]any{"service": "slack", "user": user, "email": email, "choice": choice})
 	}
 	press("U2", "bob@example.com", "yes")
 	press("U9", "", "yes")
@@ -556,7 +554,7 @@ func TestTelegramQuestionAnswersEachTap(t *testing.T) {
 	dir, _ := telegramProject(t, w, tg)
 	removeListener(t, dir)
 	write(t, dir, byTelegramID)
-	write(t, dir, map[string]string{"on/asker.yaml": asker("telegram", `{ in: "-5", text: "Deploy?", choices: [yes, no], lookup: people/find, approvers: "messages:approve", asker: bob@example.com }`)})
+	write(t, dir, map[string]string{"on/asker.yaml": asker("telegram", `{ in: "-5", text: "Deploy?", choices: [yes, no], approvers: "messages:approve", asker: bob@example.com }`)})
 	receiveFrom(t, dir, "telegram", "on/*")
 	tg.mu.Lock()
 	tg.old["cq9"] = true
@@ -574,7 +572,7 @@ func TestTelegramQuestionAnswersEachTap(t *testing.T) {
 		return question != nil
 	})
 	tap := func(user, tap, choice string) {
-		w.send(question.ID, "answer", map[string]any{"service": "telegram", "run": question.ID[strings.Index(question.ID, "/")+1:], "user": user, "name": names[atoi(user)], "choice": choice, "tap": tap})
+		w.answer("telegram", question.ID, map[string]any{"service": "telegram", "user": user, "name": names[atoi(user)], "choice": choice, "tap": tap})
 	}
 	tap("2", "cq2", "yes")
 	w.checked(question.ID, 1)
@@ -611,7 +609,8 @@ func TestTelegramQuestionAnswersEachTap(t *testing.T) {
 }
 
 // Each service's chat/ask takes what the approval gives it: no field the
-// approval does not give is required, and every field it gives is declared.
+// approval does not give is required but router and lookup, which the placed
+// file gives, and every field the approval gives is declared.
 // Each is Slack's statechart: the same input, states and transitions, with
 // its own service's script.
 func TestApprovalFitsEveryQuestion(t *testing.T) {
@@ -654,13 +653,15 @@ func TestApprovalFitsEveryQuestion(t *testing.T) {
 	for _, name := range asks {
 		question := read(name)
 		input, _ := question["input"].(map[string]any)
-		for field, s := range input {
-			if s, _ := s.(string); given[field] == nil && !strings.HasSuffix(s, "?") {
+		properties, _ := input["properties"].(map[string]any)
+		required, _ := input["required"].([]any)
+		for _, field := range required {
+			if given[field.(string)] == nil && field != "router" && field != "lookup" {
 				t.Errorf("%s requires %s, which the approval does not give", name, field)
 			}
 		}
 		for field := range given {
-			if input[field] == nil {
+			if properties[field] == nil {
 				t.Errorf("%s does not take %s, which the approval gives", name, field)
 			}
 		}

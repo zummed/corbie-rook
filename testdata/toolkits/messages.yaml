@@ -6,7 +6,6 @@ ask:
   machine: .rook/approval.yaml
   input:
     ask: gromit/telegram/chat/ask
-    lookup: people/find
     approvers: messages:approve
     in: "1"
     asker: "${input.asker.email}"

@@ -184,13 +184,25 @@ func heardIn(chat, user, place, text string) map[string]any {
 
 func atoi(s string) int { n, _ := strconv.Atoi(s); return n }
 
-// removeListener removes the one machine the project keeps running: the
-// Telegram router, whose child is the listener.
+// removeListener takes the listener out of the Telegram router, the one
+// machine the project keeps running: the router runs and hears nothing.
 func removeListener(t *testing.T, dir string) {
 	t.Helper()
-	if err := os.Remove(filepath.Join(dir, router("telegram"))); err != nil {
-		t.Fatal(err)
-	}
+	removeListenerOf(t, dir, "telegram")
+}
+
+// removeListenerOf takes the listener out of a service's router.
+func removeListenerOf(t *testing.T, dir, service string) {
+	t.Helper()
+	setSite(t, dir, router(service), "    job: { machine: .rook/"+service+"/listen.yaml, restart: { after: always } }\n", "")
+}
+
+// answer sends an answer to a question to the router of a service, as its
+// listener does, and the router sends it to the question.
+func (w *world) answer(service, question string, data map[string]any) {
+	w.t.Helper()
+	data["run"] = question[strings.Index(question, "/")+1:]
+	w.send(w.kept(router(service)), "answer", data)
 }
 
 // keyed gives the runs of a keyed location of the project by their key.
@@ -232,10 +244,11 @@ func (w *world) question(seen map[string]bool) *client.Run {
 	return found
 }
 
-// tap answers a question as a tap on Telegram by the person with an ID.
+// tap answers a question as a tap on Telegram by the person with an ID,
+// which the router sends to the question.
 func (w *world) tap(question, user, choice string) {
 	w.t.Helper()
-	w.send(question, "answer", map[string]any{"service": "telegram", "user": user, "name": names[atoi(user)], "choice": choice})
+	w.answer("telegram", question, map[string]any{"service": "telegram", "user": user, "name": names[atoi(user)], "choice": choice})
 }
 
 // telegramAsker is a machine that asks a question on Telegram, in chat 2, of
@@ -245,7 +258,7 @@ const telegramAsker = `
 	flow: asker
 	allow: [send:gromit/telegram/chat/ask]
 	stages:
-	  asking: { job: { call: { at: gromit/telegram/chat/ask }, input: { in: "2", text: "Well?", choices: ["yes", "no"], lookup: people/find, approvers: "house:approve" } } }
+	  asking: { job: { call: { at: gromit/telegram/chat/ask }, input: { in: "2", text: "Well?", choices: ["yes", "no"], approvers: "house:approve" } } }
 	output: ${stages.asking.output.choice}
 `
 

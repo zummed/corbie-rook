@@ -254,6 +254,67 @@ func waitingQuestion(t *testing.T, w *world, dir string) (string, string) {
 	return asker, w.question(map[string]bool{}).ID
 }
 
+// A machine under agents/, which the question takes calls from, cannot answer
+// it: an answer whose sender is not the router is dropped, and runs no check.
+// The same answer through the router ends the question. A call that names
+// another router or lookup fails.
+func TestAnswerFromAnAgentIsDropped(t *testing.T) {
+	w := newWorld(t)
+	dir := copyStarter(t)
+	write(t, dir, map[string]string{
+		"agents/asker.yaml":  telegramAsker,
+		"people/find.yaml":   telegramFind,
+		"people/scopes.yaml": "bob@example.com: { name: bob, scopes: [house:approve] }\n",
+		"agents/forger.yaml": `
+			flow: forger
+			input: { question: string }
+			allow: [send:gromit/telegram/chat/ask]
+			stages:
+			  answer: { job: { send: { to: { at: gromit/telegram/chat/ask, run: "${input.question}" }, event: answer, data: { service: telegram, user: "2", name: bob, choice: "yes" } } } }
+		`,
+		"agents/router.yaml": `
+			flow: router
+			input: { field: string }
+			allow: [send:gromit/telegram/chat/ask]
+			stages:
+			  asking: { job: { call: { at: gromit/telegram/chat/ask }, input: "${Object.assign({ in: '2', text: 'Well?', choices: ['yes'], approvers: 'house:approve' }, { [input.field]: 'agents/router' })}" } }
+		`,
+	})
+	removeListener(t, dir)
+	w.sync(dir)
+	asker := w.start("agents/asker.yaml", nil)
+	question := w.question(map[string]bool{})
+	forger := w.start("agents/forger.yaml", map[string]any{"question": question.ID})
+	w.until("the forger done", func() bool { return w.show(forger).Status == "done" })
+	if got := undelivered(w, forger); len(got) != 0 {
+		t.Fatalf("receive: refused the agent's answer, so this tests nothing: %q", got)
+	}
+	time.Sleep(20 * interval)
+	if run := w.show(asker); run.Status != "running" {
+		t.Fatalf("an agent's answer ended the question: %v", run.Output)
+	}
+	if got := w.did(question.ID, "tell"); len(got) != 0 {
+		t.Errorf("an agent's answer was checked: %v", got)
+	}
+	for _, run := range w.at(bot + "/telegram/chat/ask.yaml") {
+		if run.Machine == "press" {
+			t.Errorf("an agent's answer was checked by %s", run.ID)
+		}
+	}
+	w.tap(question.ID, "2", "yes")
+	w.until("the asker done", func() bool { return w.show(asker).Status == "done" })
+	if got := w.show(asker).Output; got != "yes" {
+		t.Fatalf("the choice was %v", got)
+	}
+	for _, field := range []string{"router", "lookup"} {
+		id := w.start("agents/router.yaml", map[string]any{"field": field})
+		w.until("the call over", func() bool { s := w.show(id).Status; return s == "done" || s == "failed" })
+		if run := w.show(id); run.Status != "failed" || !strings.Contains(run.Error, field) {
+			t.Errorf("a call naming its own %s ended %s: %s", field, run.Status, run.Error)
+		}
+	}
+}
+
 // A run of another tree of the same client, allowed to send anywhere, can reach
 // nothing in the project: an answer to a waiting question, a message to a
 // conversation, and calls of the lookup, the question, chat/post and the agent
@@ -272,7 +333,7 @@ func TestForgedSendsFromAnotherTreeAreRefused(t *testing.T) {
 		  answer: { job: { send: { to: { at: /project/gromit/telegram/chat/ask, run: "${input.question}" }, event: answer, data: { service: telegram, user: "2", email: bob@example.com, choice: "yes" } } } }
 		  converse: { job: { send: { to: { at: /project/conversation, key: "telegram:1:1:assistant" }, event: message, data: { service: telegram, text: hi, chat: "1", user: "1", email: alice@example.com, place: dm } } } }
 		  lookup: { job: { call: { at: /project/people/find }, input: { email: alice@example.com } } }
-		  asking: { job: { call: { at: /project/gromit/telegram/chat/ask }, input: { in: "1", text: "Your password?", choices: ["ok"], lookup: people/find, approvers: x } } }
+		  asking: { job: { call: { at: /project/gromit/telegram/chat/ask }, input: { in: "1", text: "Your password?", choices: ["ok"], approvers: x } } }
 		  say: { job: { call: { at: /project/gromit/telegram/chat/post }, input: { in: "1", text: "phish" } } }
 		  agent: { job: { call: { at: /project/agents/assistant }, input: { messages: [{ text: hi }], medium: telegram, asker: { name: alice, email: alice@example.com, scopes: [messages] } } } }
 		  after:

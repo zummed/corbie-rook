@@ -817,7 +817,7 @@ func TestGitLabQuestionIsAnsweredByAComment(t *testing.T) {
 		"people/scopes.yaml": "al@example.com: { name: Al, scopes: [infra:read] }\nbo@example.com: { name: Bo, scopes: [infra:read, infra:approve] }\n",
 	})
 	id := w.start("gromit/gitlab/chat/ask.yaml", map[string]any{"in": "group/project#7", "text": "Restart web?", "choices": []string{"yes", "no"},
-		"lookup": "people/find", "approvers": "infra:approve", "asker": "AL@example.com"})
+		"approvers": "infra:approve", "asker": "AL@example.com"})
 	w.until("the question", func() bool { return len(gl.said()) >= 1 })
 	if got := gl.said()[0]; !strings.HasPrefix(got, "Restart web?\n\nAnswer with a comment that says `yes` or `no`.\n\n<!-- rook question ") {
 		t.Fatalf("the question is %q", got)
@@ -862,7 +862,7 @@ func TestGitLabQuestionChoiceMatchesInAnyCase(t *testing.T) {
 	w := newWorld(t)
 	gitlabProject(t, w, gl, "", map[string]string{"people/scopes.yaml": "bo@example.com: { name: Bo, scopes: [infra:approve] }\n"})
 	id := w.start("gromit/gitlab/chat/ask.yaml", map[string]any{"in": "group/project#7", "text": "Restart web?", "choices": []string{"Yes", "No"},
-		"lookup": "people/find", "approvers": "infra:approve"})
+		"approvers": "infra:approve"})
 	w.until("the question", func() bool { return len(gl.said()) >= 1 })
 	if got := gl.said()[0]; !strings.HasPrefix(got, "Restart web?\n\nAnswer with a comment that says `Yes` or `No`.") {
 		t.Fatalf("the question is %q", got)
@@ -882,12 +882,13 @@ func TestGitLabQuestionChoiceMatchesInAnyCase(t *testing.T) {
 
 // When the lookup fails, the answer does not count, the person is told so in a
 // comment, and the question waits on.
-func TestGitLabQuestionWithAMissingLookupWaitsOn(t *testing.T) {
+func TestGitLabQuestionWithAFailingLookupWaitsOn(t *testing.T) {
 	gl := newGitLab(t)
 	w := newWorld(t)
-	gitlabProject(t, w, gl, "", nil)
+	// A row that is not { name, scopes } fails every lookup.
+	gitlabProject(t, w, gl, "", map[string]string{"people/scopes.yaml": "al@example.com: 1\n"})
 	id := w.start("gromit/gitlab/chat/ask.yaml", map[string]any{"in": "group/project#7", "text": "Restart web?", "choices": []string{"yes", "no"},
-		"lookup": "people/missing", "approvers": "infra:approve"})
+		"approvers": "infra:approve"})
 	w.until("the question", func() bool { return len(gl.said()) >= 1 })
 	tick(w, gl.asked)
 	gl.idle(w)
@@ -912,7 +913,7 @@ func TestGitLabAgentsCommentClosesNoQuestion(t *testing.T) {
 	files["people/scopes.yaml"] = "bo@example.com: { name: Bo, scopes: [infra:approve] }\n"
 	gitlabProject(t, w, gl, "", files)
 	id := w.start("gromit/gitlab/chat/ask.yaml", map[string]any{"in": "group/project#7", "text": "Restart web?", "choices": []string{"yes", "no"},
-		"lookup": "people/find", "approvers": "infra:approve"})
+		"approvers": "infra:approve"})
 	w.until("the question", func() bool { return len(gl.said()) >= 1 })
 	question := strings.Fields(strings.SplitN(gl.said()[0], "<!-- rook question ", 2)[1])[0]
 	tick(w, gl.asked)
@@ -942,7 +943,7 @@ func TestGitLabQuestionNobodyAnswersIsNo(t *testing.T) {
 	w := newWorld(t)
 	gitlabProject(t, w, gl, "", nil)
 	id := w.start("gromit/gitlab/chat/ask.yaml", map[string]any{"in": "group/project#7", "text": "Restart web?", "choices": []string{"yes", "no"},
-		"lookup": "people/find", "approvers": "infra:approve", "within": "1h"})
+		"approvers": "infra:approve", "within": "1h"})
 	w.until("the question", func() bool { return len(gl.said()) >= 1 })
 	w.set(w.now().Add(61 * time.Minute))
 	run, err := w.Wait(context.Background(), id, interval)

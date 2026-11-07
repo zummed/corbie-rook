@@ -16,7 +16,21 @@
 statechart: slack-chat-ask
 description: Asks a question on Slack with a button for each choice, and gives the first choice pressed by someone whose scopes hold the approvers.
 title: "${input.text.split('\\n')[0]}"
-input: { in: string, text: string, choices: list, lookup: string, approvers: string, asker: "string?", within: "string?" }
+# The placed file fixes `router`, the router whose answers the question takes,
+# and `lookup`, each with const: and default:, so no caller gives either. An
+# answer from any other location is dropped.
+input:
+  type: object
+  required: [in, text, choices, approvers, router, lookup]
+  properties:
+    in: { type: string }
+    text: { type: string }
+    choices: { type: array }
+    approvers: { type: string }
+    asker: { type: string }
+    within: { type: string }
+    router: { type: string }
+    lookup: { type: string }
 initial: asking
 states:
   asking:
@@ -32,7 +46,7 @@ states:
     initial: waiting
     states:
       waiting:
-        on: { answer: checking }
+        on: { answer: { go: checking, when: "${event.from.at === run.tree + '/' + input.router}" } }
       checking:
         defer: [answer]
         job:

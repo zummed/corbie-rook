@@ -128,7 +128,7 @@ func TestOnePersonFlowAgent(t *testing.T) {
 	w := newWorld(t)
 	dir := chatProject(t, w, tg, map[string]string{
 		"agents/assistant.yaml": echoAgent("helper"),
-		"agents/turn.js":     turnJS,
+		"agents/turn.js":        turnJS,
 	})
 	tg.dm(1, "hello")
 	w.sync(dir)
@@ -239,7 +239,7 @@ const houseToolkit = `
 	description: The house, and messages to its people.
 	ask:
 	  machine: .rook/approval.yaml
-	  input: { ask: gromit/telegram/chat/ask, lookup: people/find, approvers: "house:approve", in: "1", request: "${input.messages.map((m) => m.text).join('\\n')}" }
+	  input: { ask: gromit/telegram/chat/ask, approvers: "house:approve", in: "1", request: "${input.messages.map((m) => m.text).join('\\n')}" }
 	tools:
 	  lights:
 	    description: Which lights are on.

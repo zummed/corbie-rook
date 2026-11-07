@@ -379,8 +379,18 @@ if (input.do === "status") {
   return {}
 }
 
-// post: one message of those cut gives, in input.in. A message with charts or
-// a layout that Slack refuses is posted again as its plain markdown.
+// inert gives a layout's blocks with no action_id at any depth, and no value
+// in a button, url buttons included. Slack gives each element an action_id of
+// its own, which never starts with choice-, so no press of a button a post
+// holds is a question's answer.
+const inert = (v) => Array.isArray(v) ? v.map(inert)
+  : v && typeof v === "object"
+    ? Object.fromEntries(Object.entries(v).filter(([k]) => k !== "action_id" && !(k === "value" && v.type === "button")).map(([k, x]) => [k, inert(x)]))
+    : v
+
+// post: one message of those cut gives, in input.in, its layout made inert. A
+// message with charts or a layout that Slack refuses is posted again as its
+// plain markdown.
 if (input.do === "post") {
   const where = place(input.in)
   const channel = where.channel
@@ -388,7 +398,7 @@ if (input.do === "post") {
   const post = Object.assign({ channel: channel }, where.thread ? { thread_ts: where.thread } : {})
   if (!m.blocks) return { sent: channel + ":" + call("chat.postMessage", Object.assign(post, { markdown_text: m.plain })).ts }
   try {
-    return { sent: channel + ":" + call("chat.postMessage", Object.assign({}, post, { text: m.plain.slice(0, 3000), blocks: m.blocks })).ts }
+    return { sent: channel + ":" + call("chat.postMessage", Object.assign({}, post, { text: m.plain.slice(0, 3000), blocks: inert(m.blocks) })).ts }
   } catch (e) {
     if (!e.slack) throw e
     log(e.message)
@@ -399,8 +409,9 @@ if (input.do === "post") {
 // cut: the text as the messages Slack takes, each { plain, blocks }, blocks only
 // for one with charts or a layout. Markdown is cut at a line's end where one is
 // near, and a message holds at most 12000 characters of it, two charts and 50
-// blocks. A layout's blocks are posted as they are. A chart Slack cannot draw is
-// shown as its table, and plain is the markdown with each layout as its text.
+// blocks. A layout's blocks are kept as they are, and post makes them inert. A
+// chart Slack cannot draw is shown as its table, and plain is the markdown with
+// each layout as its text.
 const rich = require("../shared/rich.js")
 if (!input.text) throw new Error("there is nothing to say")
 const short = (s, n) => s === undefined || String(s).length <= n

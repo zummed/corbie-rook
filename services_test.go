@@ -247,7 +247,7 @@ func TestSlackResentPressAnswersOnce(t *testing.T) {
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
-	write(t, dir, map[string]string{"agents/asker.yaml": asker("slack", `{ in: U1, text: "Restart?", choices: ["yes", "no"], lookup: people/find, approvers: messages:approve }`)})
+	write(t, dir, map[string]string{"agents/asker.yaml": asker("slack", `{ in: U1, text: "Restart?", choices: ["yes", "no"], approvers: messages:approve }`)})
 	w.sync(dir)
 	asking := w.start("agents/asker.yaml", nil)
 	w.until("Slack connected", s.connected)
@@ -781,7 +781,7 @@ const slackMessages = `
 	instructions: Write to a person only when the asker asks you to.
 	ask:
 	  machine: .rook/approval.yaml
-	  input: { ask: gromit/slack/chat/ask, lookup: people/find, approvers: messages:approve, in: "#approvals", asker: "${input.asker.email}" }
+	  input: { ask: gromit/slack/chat/ask, approvers: messages:approve, in: "#approvals", asker: "${input.asker.email}" }
 	tools:
 	  tell: { call: gromit/slack/chat/post, approve: true }
 `
@@ -942,7 +942,7 @@ const slackApprovedToolkit = `
 	description: Messages to people on Slack.
 	ask:
 	  machine: .rook/approval.yaml
-	  input: { ask: gromit/slack/chat/ask, lookup: people/find, approvers: "messages:approve", in: U1, request: "${input.messages.map((m) => m.text).join('\\n')}" }
+	  input: { ask: gromit/slack/chat/ask, approvers: "messages:approve", in: U1, request: "${input.messages.map((m) => m.text).join('\\n')}" }
 	tools:
 	  tell:
 	    description: Write a text to a person on Slack, by their member ID.

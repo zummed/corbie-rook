@@ -119,7 +119,7 @@ the value `GITLAB_SITE` at `/my-bot/gromit/gitlab`. To add the agent:
     instructions: { include: ./orders.md }
     ask:
       machine: .rook/approval.yaml
-      input: { ask: gromit/slack/chat/ask, lookup: people/find, approvers: "orders:approve", in: "#orders-team", within: 1d, asker: "${input.asker.email}", request: "${input.messages.map((m) => m.text).join('\\n')}" }
+      input: { ask: gromit/slack/chat/ask, approvers: "orders:approve", in: "#orders-team", within: 1d, asker: "${input.asker.email}", request: "${input.messages.map((m) => m.text).join('\\n')}" }
     tools:
       read_file: { call: gromit/gitlab/repository/files/read, input: { project: group/orders } }
       change_file:

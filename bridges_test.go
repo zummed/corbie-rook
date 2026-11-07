@@ -1472,7 +1472,7 @@ func TestSlackQuestionIsAnsweredByAPress(t *testing.T) {
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
-	write(t, dir, map[string]string{"agents/asker.yaml": asker("slack", `{ in: U1, text: "Well?", choices: ["yes", "no"], lookup: people/find, approvers: messages:approve }`)})
+	write(t, dir, map[string]string{"agents/asker.yaml": asker("slack", `{ in: U1, text: "Well?", choices: ["yes", "no"], approvers: messages:approve }`)})
 	w.sync(dir)
 	asking := w.start("agents/asker.yaml", nil)
 	w.until("Slack connected", s.connected)

@@ -4,7 +4,6 @@
 # `asking` and `jobs`; the ask's input gives the rest:
 #
 #   ask        the location of the question, such as gromit/slack/chat/ask
-#   lookup     the location of the lookup, such as people/find
 #   approvers  the scope a press needs to count
 #   in         where the question is posted: a channel, a thread or a chat
 #   within     how long it waits, by default 7d; no press in time is no
@@ -17,7 +16,6 @@ input:
   asking: any
   jobs: any
   ask: string
-  lookup: string
   approvers: string
   in: string
   within: "string?"
@@ -34,7 +32,6 @@ stages:
         in: "${input.in}"
         text: "${(input.asking || {}).machine || 'A machine'} wants to run ${stages.brief.output.names.join(', ')}.\n\n${stages.brief.output.context}"
         choices: ["yes", "no"]
-        lookup: "${input.lookup}"
         approvers: "${input.approvers}"
         asker: "${input.asker || ''}"
         within: "${input.within || '7d'}"

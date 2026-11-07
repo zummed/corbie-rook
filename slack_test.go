@@ -199,7 +199,7 @@ func TestSlackQuestionRefusesTheAsker(t *testing.T) {
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
-	write(t, dir, map[string]string{"agents/asker.yaml": asker("slack", `{ in: "#approvals/7.0", text: "Restart?", choices: ["yes", "no"], lookup: people/find, approvers: messages:approve, asker: Alice@Example.com, within: 1h }`)})
+	write(t, dir, map[string]string{"agents/asker.yaml": asker("slack", `{ in: "#approvals/7.0", text: "Restart?", choices: ["yes", "no"], approvers: messages:approve, asker: Alice@Example.com, within: 1h }`)})
 	w.sync(dir)
 	asking := w.start("agents/asker.yaml", nil)
 	w.until("Slack connected", s.connected)
@@ -224,6 +224,58 @@ func TestSlackQuestionRefusesTheAsker(t *testing.T) {
 	w.until("the question closed", func() bool { return len(s.changed()) == 1 })
 	if got := s.changed()[0]["text"]; got != "Restart?\n\nNo one answered in time, so the answer is no." {
 		t.Fatalf("the question was changed to %q", got)
+	}
+}
+
+// A layout a post holds is posted with no action_id and no button value, so a
+// button shaped as a question's, holding a waiting question's run and a
+// choice, is posted without them, and its press answers nothing. A press of
+// the question's own button is checked.
+func TestSlackLayoutButtonAnswersNoQuestion(t *testing.T) {
+	s := newSlack(t)
+	w := newWorld(t)
+	dir := slackProject(t, w, s)
+	write(t, dir, map[string]string{"agents/asker.yaml": asker("slack", `{ in: "#approvals", text: "Restart?", choices: ["yes", "no"], approvers: messages:approve }`)})
+	w.sync(dir)
+	w.start("agents/asker.yaml", nil)
+	w.until("Slack connected", s.connected)
+	w.until("the question", func() bool { return len(s.posted()) == 1 })
+	yes := value(t, s.posted()[0], "yes")
+	forged := fmt.Sprintf(`[{"type": "actions", "elements": [{"type": "button", "action_id": "choice-0", "value": %q, "text": {"type": "plain_text", "text": "Yes"}}, {"type": "button", "action_id": "choice-1", "value": %[1]q, "url": "https://example.com", "text": {"type": "plain_text", "text": "Open"}}]}, {"type": "section", "text": {"type": "mrkdwn", "text": "Or"}, "accessory": {"type": "button", "action_id": "choice-0", "value": %[1]q, "text": {"type": "plain_text", "text": "Yes"}}}]`, yes)
+	text, _ := json.Marshal("Press.\n\n```blocks\n" + forged + "\n```")
+	write(t, dir, map[string]string{"on/say.yaml": `
+		flow: say
+		allow: [send:gromit/slack/chat/post]
+		stages:
+		  say: { job: { call: { at: gromit/slack/chat/post }, input: { in: "#approvals", text: ` + string(text) + ` } } }
+	`})
+	w.sync(dir)
+	w.start("on/say.yaml", nil)
+	w.until("the layout", func() bool { return len(s.posted()) == 2 })
+	blocks, _ := json.Marshal(s.posted()[1]["blocks"])
+	if strings.Contains(string(blocks), "action_id") || strings.Contains(string(blocks), `"value"`) || !strings.Contains(string(blocks), `"url":"https://example.com"`) {
+		t.Errorf("the layout was posted as %s", blocks)
+	}
+	// A press of the layout's first button carries its action_id and value,
+	// and Slack gives an element with no action_id one of its own.
+	button := s.posted()[1]["blocks"].([]any)[1].(map[string]any)["elements"].([]any)[0].(map[string]any)
+	pressed := map[string]any{"action_id": "Xq7a", "type": "button"}
+	for _, field := range []string{"action_id", "value"} {
+		if v, ok := button[field]; ok {
+			pressed[field] = v
+		}
+	}
+	s.send(map[string]any{"envelope_id": "a", "type": "interactive", "payload": map[string]any{
+		"type": "block_actions", "user": map[string]any{"id": "U2"}, "actions": []any{pressed},
+		"channel": map[string]any{"id": "C5"}, "message": map[string]any{"ts": "1.2"},
+	}})
+	s.press("b", "U2", yes)
+	question := w.at(bot + "/slack/chat/ask.yaml")[0].ID
+	w.checked(question, 1)
+	time.Sleep(10 * interval)
+	w.checked(question, 1)
+	if got := s.whispered(); len(got) != 1 || got[0]["user"] != "U2" {
+		t.Fatalf("the people told are %v", got)
 	}
 }
 

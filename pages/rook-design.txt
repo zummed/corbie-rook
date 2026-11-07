@@ -81,14 +81,14 @@ and every other tree and client is refused.
 
   conversation.yaml                receive: [gromit/*/gromit]: only a router
   .rook/agent.yaml                 receive: [conversation], which an agent that includes it takes
-  gromit/<service>/chat/ask.yaml   receive: [gromit/<service>/gromit, agents/*]
+  gromit/<service>/chat/ask.yaml   receive: [gromit/<service>/gromit, agents/*]; an answer only from its router
 
 A sender needs `send:` for the location in its `allow:`.
 
   gromit/<service>/gromit.yaml     send:conversation, send:gromit/<service>/chat/ask
   conversation.yaml                in its turn, send:people/find, send:agents/assistant, and the bot's files/get and status; in its reply, send:gromit/*/chat/post
   .rook/approval.yaml              send: for the question its ask names
-  .rook/shared/press.yaml          send: for the lookup the question names
+  .rook/shared/press.yaml          send: for the question's lookup
   a toolkit's tool                 a tool written call: holds send: for its location; a job writes its own allow:
 
 - The lookup's answer is trusted because only the conversation calls the agent, and only a router sends to the conversation.
@@ -325,11 +325,11 @@ Asking a person
 ---------------
 
 A question is a run of the bot's placed `chat/ask`, the same statechart on
-every service. A machine calls it with `{ in, text, choices, lookup,
-approvers, asker, within }`, and it gives `{ choice, by }`.
+every service. A machine calls it with `{ in, text, choices, approvers,
+asker, within }`, and it gives `{ choice, by }`.
 
 1. It posts `text` in `in` with a button for each of `choices`, each holding its run's ID.
-2. For each press it runs `.rook/shared/press.yaml`, which calls the lookup at `lookup` for the presser.
+2. For each press the router sends it, it runs `.rook/shared/press.yaml`, which calls the lookup for the presser.
 3. A press from someone whose scopes lack `approvers`, or whose email is `asker`, is refused. The presser is told why, and the buttons stay.
 4. The first press that counts ends it with `{ choice, by }`, and shows who answered in place of the buttons. With none within `within`, by default 7d, it ends with `{ choice: no }`.
 
@@ -338,13 +338,18 @@ approvers, asker, within }`, and it gives `{ choice, by }`.
   GitLab      asks in a comment on the issue; a comment that is only a choice is the answer
   Jira        shows a line for each choice, <choice> <run>; a comment that holds only such a line is the answer
 
+The placed file fixes two fields of the input with `const:` and `default:`,
+so no caller gives them, as the file with deploys added below shows.
+
+  router   the router, gromit/slack/gromit: the question drops an answer whose sender, event.from, is any other location
+  lookup   the lookup the question calls for who pressed, people/find
+
 Rook's approval, `.rook/approval.yaml`, is an ask, which a toolkit or a
 machine names under `ask:`. It calls the question with yes and no, naming
 each held call with its arguments, and quoting what was asked and what the
 agent said. It gives `{ approved, note }`.
 
   ask         the question's location, such as gromit/slack/chat/ask
-  lookup      the lookup's location, people/find
   approvers   the scope a press needs to count
   in          where the question is posted: a channel, a thread or a chat
   within      how long it waits; 7d by default, and no press in time is no
@@ -363,7 +368,7 @@ presses yes.
     allow: [send:gromit/gitlab/pipeline/create, send:gromit/slack/chat/post]
     ask:
       machine: .rook/approval.yaml
-      input: { ask: gromit/slack/chat/ask, lookup: people/find, approvers: "deploy:approve", in: "${input.chat}", within: 1h, asker: "${input.email}", request: "${input.text}" }
+      input: { ask: gromit/slack/chat/ask, approvers: "deploy:approve", in: "${input.chat}", within: 1h, asker: "${input.email}", request: "${input.text}" }
     initial: waiting
     states:
       waiting:
@@ -390,6 +395,10 @@ presses yes.
     # gromit/slack/chat/ask.yaml, with deploys added
     include: .rook/slack/chat/ask.yaml
     receive: [gromit/slack/gromit, agents/*, deploys]
+    input:
+      properties:
+        router: { const: gromit/slack/gromit, default: gromit/slack/gromit }
+        lookup: { const: people/find, default: people/find }
 
 - The approval runs at the asking machine's location, so the question's `receive:` lists that location, or the call is refused.
 - A held call that is not approved fails as `denied`, which goes back to a model as the tool's result.
@@ -461,7 +470,7 @@ Slack, for a chart outside its limits.
   series     each a name and one number in values for each label; on Slack at most 12, names different and at most 20 characters
   x, y       the names of the axes, at most 50 characters on Slack
 
-- A layout is a fenced block marked `blocks`, holding a JSON list of Slack's Block Kit blocks. Slack posts them as they are, at most 50 to a message.
+- A layout is a fenced block marked `blocks`, holding a JSON list of Slack's Block Kit blocks. Slack posts them, at most 50 to a message, with every `action_id` and each button's `value` taken out, so a button in a layout only opens its `url`.
 - Every other service, and Slack for a layout it refuses, writes the layout's text.
 - GitLab draws a fenced block marked `mermaid` as a diagram, and every other service shows it as it was written.
 

@@ -67,7 +67,7 @@ func traceHelper(address, system string) map[string]string {
 			description: Messages to the people this bot knows, and the time.
 			ask:
 			  machine: .rook/approval.yaml
-			  input: { ask: gromit/telegram/chat/ask, lookup: people/find, approvers: "messages:approve", in: "1" }
+			  input: { ask: gromit/telegram/chat/ask, approvers: "messages:approve", in: "1" }
 			tools:
 			  clock:
 			    description: Give the time in a zone.
@@ -358,7 +358,7 @@ func TestNoModelFlowAgentIsFollowed(t *testing.T) {
 			  question:
 			    job:
 			      call: { at: gromit/telegram/chat/ask }
-			      input: { in: "1", text: "${input.asker.name} asks: ${input.messages[0].text}. Allow?", choices: ["yes", "no"], lookup: people/find, approvers: "messages:approve" }
+			      input: { in: "1", text: "${input.asker.name} asks: ${input.messages[0].text}. Allow?", choices: ["yes", "no"], approvers: "messages:approve" }
 			output: { reply: "alice said ${stages.question.output.choice}" }
 		`,
 	})
@@ -451,7 +451,7 @@ func TestDeletedAgentWhileQuestionWaits(t *testing.T) {
 			  question:
 			    job:
 			      call: { at: gromit/telegram/chat/ask }
-			      input: { in: "1", text: "bob asks: ${input.messages[0].text}. Allow?", choices: ["yes", "no"], lookup: people/find, approvers: "messages:approve" }
+			      input: { in: "1", text: "bob asks: ${input.messages[0].text}. Allow?", choices: ["yes", "no"], approvers: "messages:approve" }
 			output: { reply: "alice said ${stages.question.output.choice}" }
 		`,
 	})
