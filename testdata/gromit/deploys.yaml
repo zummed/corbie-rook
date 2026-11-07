@@ -1,0 +1,30 @@
+# One run for each thread in #deploys, with no model. "deploy orders" starts
+# the orders pipeline once someone with deploy:approve, who did not ask,
+# presses yes in the thread. Any other first message ends the run.
+statechart: deploys
+description: Starts the orders pipeline when someone writes "deploy orders".
+lifetime: keyed
+receive: [gromit/slack/gromit]
+allow: [send:gromit/gitlab/pipeline/create, send:gromit/slack/chat/post]
+ask:
+  machine: .rook/approval.yaml
+  input: { ask: gromit/slack/chat/ask, approvers: "deploy:approve", in: "${input.chat}", within: 1h, asker: "${input.email}", request: "${input.text}" }
+initial: waiting
+states:
+  waiting:
+    on:
+      message:
+        - { go: deploying, when: "${event.data.text === 'deploy orders'}" }
+        - over
+  deploying:
+    job:
+      call: { at: gromit/gitlab/pipeline/create }
+      input: { project: group/orders, ref: main }
+      approve: true
+    on: { done: telling, failed: telling }
+  telling:
+    job:
+      call: { at: gromit/slack/chat/post }
+      input: { in: "${input.chat}", text: "${event.name === 'done' ? 'Pipeline started.' : 'The pipeline did not start.'}" }
+    on: { done: over, failed: over }
+  over: { end: done }

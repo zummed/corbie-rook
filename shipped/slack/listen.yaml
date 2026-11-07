@@ -9,9 +9,13 @@
 # Slack's stop button under a thread is sent as stop, and a press of a
 # question's button as answer. A job ends after four minutes, and the next
 # connects again. An event Slack sends again is sent once.
+#
+# `receive: []` refuses a send from any location, which could otherwise
+# address this run by its ID, so what it sends its parent came from Slack.
 statechart: slack-listen
 description: Sends its parent each Slack message, reaction, button press and stop meant for the bot.
 title: Slack listener
+receive: []
 input: { overhear: "boolean?" }
 initial: hearing
 states:

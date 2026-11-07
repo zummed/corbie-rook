@@ -13,9 +13,13 @@
 # first: the issue itself and the public comments before it, of the latest 50.
 # complete is true when those were every comment. An opened issue is sent once
 # nobody has changed it for settle.
+#
+# `receive: []` refuses a send from any location, which could otherwise
+# address this run by its ID, so what it sends its parent came from Jira.
 statechart: jira-listen
 description: Sends its parent each Jira issue and comment meant for the bot, and each answer to a question.
 title: Jira listener
+receive: []
 input:
   projects: list
   overhear: "boolean?"

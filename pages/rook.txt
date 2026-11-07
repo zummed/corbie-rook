@@ -47,7 +47,8 @@ While you write
 - Place a call of Rook's with a file of one line under `<bot>/<service>/`, as `include: .rook/gitlab/pipeline/create.yaml`.
 - Add a location that calls the bot's `chat/ask` to the `receive:` of its placed file, or the call is refused.
 - An agent that includes `.rook/agent.yaml` takes calls only from `conversation`. When another conversation calls it, write `receive:` in the agent naming both.
-- A router writes `receive: []` and takes events only from its listener. Keep it: a machine sends nothing to a router.
+- A router and Rook's listener write `receive: []`, so the router takes events only from its listener. Keep it: a machine sends nothing to a router.
+- Give a statechart a router sends to `receive:` naming that router, and a statechart run as a child its own `receive:`: a child run is addressed by its ID at its parent's location.
 - Give each job only the permissions it needs, in its `allow:` list.
 - Never ask for a secret's value or write one in a file. Give the person the command `corbie controller secret set <NAME> --at /<project>/<location>`, where `<project>` is the project directory's name.
 - For Slack, give the person the steps and the manifest under The Slack app in `corbie rook manual rook-project`, with their name and description.

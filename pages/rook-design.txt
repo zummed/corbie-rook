@@ -80,9 +80,15 @@ The client that submitted the project may send to and call every location,
 and every other tree and client is refused.
 
   gromit/<service>/gromit.yaml     receive: []: no location; it takes events only from its listener, a child run
+  .rook/<service>/listen.yaml      receive: []: no location; it sends its router only what its service gave
   conversation.yaml                receive: [gromit/*/gromit]: only a router
+  deploys.yaml                     receive: [gromit/slack/gromit]: only the router that sends to it
   .rook/agent.yaml                 receive: [conversation]; an agent a second conversation calls writes its own, naming both
   gromit/<service>/chat/ask.yaml   receive: [gromit/<service>/gromit, agents/*]; an answer only from its router
+
+A child run is addressed by its ID at its parent's location, and only its
+own `receive:` applies to it, so a child of a trusted run writes its own, as
+each listener does.
 
 A sender needs `send:` for the location in its `allow:`.
 
@@ -93,7 +99,7 @@ A sender needs `send:` for the location in its `allow:`.
   a toolkit's tool                 a tool written call: holds send: for its location; a job writes its own allow:
 
 - The lookup's answer is trusted because only the conversation calls the agent, only a router sends to the conversation, and a router takes events only from its listener.
-- A question trusts an answer from its router for the same reason: no location can send to the router, so each answer it sends on came from its listener.
+- A question trusts an answer from its router for the same reason: no location can send to the router or its listener, so each answer the router sends on came from the service.
 - A gateway is a client, so a gateway whose client submitted the project can call any of its locations with any input. Submit the project from a client no gateway uses.
 
 The project's files
@@ -163,7 +169,7 @@ goes.
 
 - A rule can only send, and a send goes only to a statechart: a singleton's run, or a keyed run, which it starts. A post or a lookup is a call, so the conversation makes it.
 - An answer goes only to a run at the bot's `chat/ask`, whatever the button holds.
-- `receive: []` refuses a send from any location, so the router takes events only from its listener.
+- `receive: []`, in the router and in Rook's listener, refuses a send from any location, so the router takes events only from its listener, and the listener sends only what its service gave.
 - `restart: { after: always }` starts the listener again when it ends. A listener whose read fails waits, then reads again.
 - A listener reads a value when it starts. After changing one, run `corbie run cancel /my-bot/gromit/<service>/gromit`, then `corbie run submit .`.
 
@@ -371,6 +377,7 @@ presses yes.
     statechart: deploys
     description: Starts the orders pipeline when someone writes "deploy orders".
     lifetime: keyed
+    receive: [gromit/slack/gromit]
     allow: [send:gromit/gitlab/pipeline/create, send:gromit/slack/chat/post]
     ask:
       machine: .rook/approval.yaml

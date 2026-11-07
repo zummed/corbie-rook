@@ -139,9 +139,12 @@ func (w *world) secretAt(at, name, value string) {
 }
 
 // value sets a value at the project.
-func (w *world) value(name, value string) {
+func (w *world) value(name, value string) { w.valueAt(project, name, value) }
+
+// valueAt sets a value at a location.
+func (w *world) valueAt(at, name, value string) {
 	w.t.Helper()
-	if err := secret.SetValue(context.Background(), w.controller.Store, w.controller.ID, project, name, value); err != nil {
+	if err := secret.SetValue(context.Background(), w.controller.Store, w.controller.ID, at, name, value); err != nil {
 		w.t.Fatal(err)
 	}
 }

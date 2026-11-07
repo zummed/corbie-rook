@@ -1,0 +1,9 @@
+# Each person's email, name and scopes, which people/find reads. The agent
+# offers orders to a person with orders:read, change_file with orders:write,
+# and infra with infra:read. A question counts a press from a person whose
+# scopes hold its approvers, who did not ask.
+ana@acme.example: { name: Ana, scopes: [orders:read, orders:write] }
+bo@acme.example: { name: Bo, scopes: [infra:read, infra:approve] }
+cy@acme.example: { name: Cy, scopes: [infra:read] }
+di@acme.example: { name: Di, scopes: [orders:read, orders:approve, deploy:approve] }
+ed@acme.example: { name: Ed, scopes: [infra:approve] }
