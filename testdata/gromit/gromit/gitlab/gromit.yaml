@@ -5,7 +5,7 @@
 # the bot's own comments. It sends an answer to a question to that question.
 # The host is the value GITLAB_SITE and the token the secret GITLAB_TOKEN, set
 # at /<project>/gromit/gitlab. It takes events only from its listener:
-# `receive: []` refuses a send from any location.
+# `receive: []`, here and in the listener, refuses a send from any location.
 statechart: gromit
 description: The router of gromit on GitLab.
 lifetime: singleton

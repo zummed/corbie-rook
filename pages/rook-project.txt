@@ -44,6 +44,26 @@ any file, run in the project:
   corbie test .            reads every machine, and starts nothing
   corbie run submit .      records the files, and starts again what the change says
 
+`corbie test .` names each location a machine calls that the project lacks,
+and still exits 0. In a new project these are the agent, and the calls the
+conversation makes only for a message from a service the project is not on.
+
+    corbie test .
+      conversation.yaml                   ok
+      gromit/slack/assistant/status.yaml  ok
+      gromit/slack/chat/ask.yaml          ok
+      gromit/slack/chat/post.yaml         ok
+      gromit/slack/files/get.yaml         ok
+      gromit/slack/gromit.yaml            ok
+      people/find.yaml                    ok
+      .rook/                              listed
+      people/scopes.yaml                  listed
+      nothing in the tree is at /my-bot/agents/assistant, named by conversation.yaml states.answering.job.machine.stages.answer.job.call
+      nothing in the tree is at /my-bot/gromit/gitlab/chat/post, named by conversation.yaml states.replying.job.machine.stages.gitlab.job.call
+      nothing in the tree is at /my-bot/gromit/jira/chat/post, named by conversation.yaml states.replying.job.machine.stages.jira.job.call
+      nothing in the tree is at /my-bot/gromit/telegram/chat/post, named by conversation.yaml states.replying.job.machine.stages.telegram.job.call
+      nothing in the tree is at /my-bot/gromit/telegram/chat/status, named by conversation.yaml states.answering.job.machine.stages.telegram_status.job.call
+
 Submit to one Corbie only: a second copy of a router, with the same token,
 takes the first one's messages.
 
@@ -178,7 +198,7 @@ Common changes
   be on another service                             corbie rook init . --bot gromit --services <name>
   be a second bot                                   corbie rook init . --bot <name> --services <names>, and a second conversation
 
-- To send a channel's messages to a machine of your own, such as `deploys.yaml` in `corbie rook manual rook-design` under Asking a person, add a rule before the conversation's in the router, and `send:deploys` to its `allow:`:
+- To send a channel's messages to a machine of your own, such as `deploys.yaml` in `corbie rook manual rook-design` under Asking a person, add a rule before the conversation's in the router, and `send:deploys` to its `allow:`. Write `receive: [gromit/slack/gromit]` in your machine, so no other location starts it:
 
       message:
         - when: "${event.data.place === '#deploys' && !event.data.change && !event.data.unaddressed}"

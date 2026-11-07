@@ -51,7 +51,8 @@ func TestEveryPageTheBriefingNamesIsThere(t *testing.T) {
 
 // The page rook-project shows what corbie rook init printed: making the
 // project with Slack, then adding GitLab in it, which names the router's
-// placeholder.
+// placeholder. It shows what corbie test printed in the project on Slack
+// alone: the locations the conversation calls that it lacks, and exit 0.
 func TestThePageShowsWhatInitPrints(t *testing.T) {
 	var page string
 	for _, p := range rook.Pages() {
@@ -61,7 +62,7 @@ func TestThePageShowsWhatInitPrints(t *testing.T) {
 	}
 	// shown gives what the page shows a command printed.
 	shown := func(command string) string {
-		_, after, ok := strings.Cut(page, "    "+command+"\n")
+		_, after, ok := strings.Cut(page, "\n    "+command+"\n")
 		if !ok {
 			t.Fatalf("rook-project does not show %q", command)
 		}
@@ -77,10 +78,19 @@ func TestThePageShowsWhatInitPrints(t *testing.T) {
 	t.Chdir(t.TempDir())
 	for _, c := range []struct{ in, command string }{
 		{".", "corbie rook init my-bot --bot gromit --services slack"},
-		{"my-bot", "corbie rook init . --bot gromit --services gitlab"},
+		{"my-bot", "corbie test ."},
+		{".", "corbie rook init . --bot gromit --services gitlab"},
 	} {
 		t.Chdir(c.in)
-		out, status := run(t, "", strings.Fields(c.command)[2:]...)
+		var out string
+		var status int
+		if args := strings.Fields(c.command); args[1] == "rook" {
+			out, status = run(t, "", args[2:]...)
+		} else {
+			var stdout, stderr bytes.Buffer
+			status = cli.Main(args[1:], strings.NewReader(""), &stdout, &stderr)
+			out = stdout.String() + stderr.String()
+		}
 		if want := shown(c.command); status != 0 || out != want {
 			t.Errorf("%s ended %d and printed\n%s\nand the page shows\n%s", c.command, status, out, want)
 		}

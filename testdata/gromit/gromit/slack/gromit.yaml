@@ -5,7 +5,8 @@
 # support. It drops changes, and messages from any other channel. It sends a
 # press of a question's button to that question, and a stop to the
 # conversation. The tokens are set at /<project>/gromit/slack. It takes events
-# only from its listener: `receive: []` refuses a send from any location.
+# only from its listener: `receive: []`, here and in the listener, refuses a
+# send from any location.
 statechart: gromit
 description: The router of gromit on Slack.
 lifetime: singleton

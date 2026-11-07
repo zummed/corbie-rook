@@ -680,6 +680,61 @@ func TestARouterTakesNoSendFromALocation(t *testing.T) {
 	}
 }
 
+// A listener takes no send from a location either. It is a child run, which a
+// machine addresses by its ID at the router's location; without its own
+// receive: it would take the send, and send it on to the router as if from
+// Telegram. An answer to a waiting question, and a message in another
+// person's name, sent to the listener from a machine under agents/ are noted
+// as undelivered: the question still waits, and no conversation starts.
+func TestAListenerTakesNoSendFromALocation(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorld(t)
+	dir := chatProject(t, w, tg, map[string]string{
+		"agents/asker.yaml": telegramAsker,
+		"agents/forger.yaml": `
+			flow: forger
+			input: { listener: string, question: string }
+			allow: [send:gromit/telegram/gromit]
+			stages:
+			  answer: { job: { send: { to: { at: gromit/telegram/gromit, run: "${input.listener}" }, event: answer, data: { service: telegram, run: "${input.question}", user: "1", name: Alice, choice: "yes" } } } }
+			  message: { job: { send: { to: { at: gromit/telegram/gromit, run: "${input.listener}" }, event: message, data: { service: telegram, text: hi, chat: "2", user: "2", name: Bob, place: dm, answers: "2:1" } } } }
+		`,
+	})
+	w.sync(dir)
+	var listener string
+	w.until("the listener hearing", func() bool {
+		for _, run := range w.at(router("telegram")) {
+			if run.Parent != "" && run.Status == "running" {
+				listener = run.ID
+			}
+		}
+		return listener != ""
+	})
+	asker := w.start("agents/asker.yaml", nil)
+	question := w.question(map[string]bool{})
+	forger := w.start("agents/forger.yaml", map[string]any{"listener": listener, "question": question.ID[strings.Index(question.ID, "/")+1:]})
+	w.until("the forger done", func() bool { return w.show(forger).Status == "done" })
+	got := undelivered(w, forger)
+	if len(got) != 2 {
+		t.Fatalf("the sends noted undelivered are %q", got)
+	}
+	for _, note := range got {
+		if !strings.Contains(note, "/project/gromit/telegram/gromit does not receive") {
+			t.Errorf("a note gives another reason: %q", note)
+		}
+	}
+	time.Sleep(10 * interval)
+	if run := w.show(asker); run.Status != "running" {
+		t.Errorf("the forged answer ended the asker: %+v", run)
+	}
+	if run := w.show(question.ID); run.Status != "running" || run.Timers != 1 {
+		t.Errorf("the question no longer waits: %+v", run)
+	}
+	if runs := w.at("conversation.yaml"); len(runs) != 0 {
+		t.Errorf("the forged message started a conversation: %v", runs)
+	}
+}
+
 // A tap whose data names no question, as a changed client can send to the bot,
 // is skipped: the listener goes on, and the message after it is answered.
 func TestMalformedTapDoesNotStopTheListener(t *testing.T) {

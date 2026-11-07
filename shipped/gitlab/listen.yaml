@@ -11,9 +11,13 @@
 # Its first ask hears nothing. When GitLab asks it to wait, or takes few more
 # asks, it waits as long. The host is the value GITLAB_SITE, and the token the
 # secret GITLAB_TOKEN.
+#
+# `receive: []` refuses a send from any location, which could otherwise
+# address this run by its ID, so what it sends its parent came from GitLab.
 statechart: gitlab-listen
 description: Sends its parent each GitLab comment, opened issue and change, and each answer to a question.
 title: GitLab listener
+receive: []
 input:
   projects: "list?"
   group: "string?"
