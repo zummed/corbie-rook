@@ -566,17 +566,18 @@ func TestFailedToolIsFollowed(t *testing.T) {
 	}
 }
 
-// A tap by someone the question does not name does not answer it, and the
-// question's record shows the tap, who it was from, and that it did not count.
+// A tap by someone whose scopes lack the approvers' does not answer a
+// question, and the question's record shows the tap, who it was from, and that
+// it did not count. Bob asks, so alice's tap counts.
 func TestTapByAStrangerIsShownAndIgnored(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
 	w := newWorld(t)
-	dir, _ := traceProject(t, w, from("1", "tell bob", 10))
+	dir, _ := traceProject(t, w, from("2", "tell bob", 10))
+	write(t, dir, map[string]string{"people/find.yaml": telegramFind})
 	w.sync(dir)
 	question := w.question(map[string]bool{})
-	w.tap(question.ID, "2", "yes")
+	w.tap(question.ID, "9", "yes")
 	w.until("the tap checked", func() bool {
-		for _, run := range stubs(t, w, "tap") {
+		for _, run := range stubs(t, w, "press") {
 			if run.Parent == question.ID && run.Status == "done" {
 				return true
 			}
@@ -584,13 +585,13 @@ func TestTapByAStrangerIsShownAndIgnored(t *testing.T) {
 		return false
 	})
 	if run := w.show(question.ID); run.Status != "running" {
-		t.Fatalf("bob's tap ended the question: %s", run.Status)
+		t.Fatalf("the stranger's tap ended the question: %s", run.Status)
 	}
 	var out any
-	for _, run := range stubs(t, w, "tap") {
+	for _, run := range stubs(t, w, "press") {
 		out = w.show(run.ID).Output
 	}
-	if m, _ := out.(map[string]any); m["person"] != "bob" || m["counts"] != false {
+	if m, _ := out.(map[string]any); m["by"] != "Stranger" || m["counts"] != false {
 		t.Errorf("the tap's record says %v", out)
 	}
 	w.tap(question.ID, "1", "yes")

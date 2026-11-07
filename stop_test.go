@@ -308,22 +308,36 @@ func TestStopKeepsTheConversation(t *testing.T) {
 	tg.waitFor(w, "1", "helper to alice (2): again")
 }
 
-// /stop@<bot>, and /stop with words after it, are a stop. /stopwatch is a
+// /stop@<bot>, and /stop with words after it, are a stop, which the router
+// sends to the person's conversation, and is not answered. /stopwatch is a
 // message.
 func TestStopWithABotNameOrWords(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
 	for _, text := range []string{"/stop@rook_bot", "/stop please", "/stopwatch"} {
 		t.Run(text, func(t *testing.T) {
 			tg := newTelegram(t)
 			w := newWorld(t)
-			dir := stopProject(t, w, tg)
+			dir := chatProject(t, w, tg, nil)
 			tg.dm(1, text)
+			tg.dm(1, "after")
 			w.sync(dir)
-			want := "Nothing is running."
-			if text == "/stopwatch" {
-				want = "ok: /stopwatch"
+			tg.waitFor(w, "1", "after")
+			var events []string
+			for _, run := range keyed(w, "conversation.yaml")["telegram:1:1:assistant"] {
+				for _, e := range w.own(run.ID) {
+					for _, ev := range e.Events {
+						if ev.Name == "stop" || ev.Name == "message" {
+							events = append(events, ev.Name)
+						}
+					}
+				}
 			}
-			tg.waitFor(w, "1", want)
+			want, said := []string{"stop", "message"}, []string{"after"}
+			if text == "/stopwatch" {
+				want, said = []string{"message", "message"}, []string{"/stopwatch", "after"}
+			}
+			if !slices.Equal(events, want) || !slices.Equal(tg.texts("1"), said) {
+				t.Errorf("the conversations took %v, and alice was told %q", events, tg.texts("1"))
+			}
 		})
 	}
 }

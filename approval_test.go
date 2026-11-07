@@ -135,7 +135,7 @@ func TestHeldCallWaitsForItsApprovers(t *testing.T) {
 	agent := w.start("agents/assistant.yaml", asking("tell carol hello"))
 	question := w.question(map[string]bool{})
 	asked := w.did(question.ID, "ask")
-	if len(asked) != 1 || asked[0]["to"] != "1" || !slices.Equal(asked[0]["choices"].([]any), []any{"yes", "no"}) {
+	if len(asked) != 1 || asked[0]["in"] != "1" || !slices.Equal(asked[0]["choices"].([]any), []any{"yes", "no"}) {
 		t.Fatalf("the question was posted as %v", asked)
 	}
 	text := asked[0]["text"].(string)

@@ -1,10 +1,40 @@
-// The bot's script: input.do is hear, for listen.yaml, say, for say.yaml,
-// ask, tell and close, for chat/ask.yaml, status, for status.yaml,
-// attachments, for attachments.yaml, or send, for send.yaml. It speaks
-// Telegram's Bot API with the token of the secret input.token names, which it
-// holds only as a handle.
+// Telegram's script: input.do is hear, for listen.yaml, post, for
+// chat/post.yaml, ask, tell and close, for chat/ask.yaml, status, for
+// chat/status.yaml, get, for files/get.yaml, or send, for files/send.yaml. It
+// speaks Telegram's Bot API with the token of the secret input.token names,
+// which it holds only as a handle.
 const api = "https://api.telegram.org"
 const token = secrets.get(input.token)
+
+// The history the listener keeps of each chat: at most 20 entries and 8000
+// bytes a chat, though always its latest entry, and at most 64 KiB in all. The
+// history is both the listener's input and its output, and Corbie takes a job's
+// input and its result at 256 KiB each, sealed and base64-encoded, so about
+// 190 KB of JSON; a quarter of the 256 KiB leaves room for the rest of each.
+// Telegram takes at most 4096 characters a message, so a chat's latest entry
+// alone is far under the bound in all. Each is measured as the bytes of
+// its JSON in UTF-8, as Corbie sends it. A chat with no message for a day is
+// dropped.
+const mostEntries = 20
+const mostChat = 8000
+const mostKept = 64 << 10
+const quiet = 24 * 60 * 60
+
+// size gives the bytes of a value's JSON in UTF-8.
+function size(v) {
+  const s = JSON.stringify(v)
+  let n = 0
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i)
+    if (c < 0x80) n += 1
+    else if (c < 0x800) n += 2
+    else if (c >= 0xd800 && c < 0xdc00 && i + 1 < s.length) {
+      n += 4
+      i++
+    } else n += 3
+  }
+  return n
+}
 
 // call calls a method of the Bot API and gives its result, sending body as
 // JSON, or with upload as a form that holds a file, which may take four minutes. Telegram's refusal is
@@ -54,15 +84,31 @@ if (input.do === "hear") {
   // again from the same cursor. limit: 1 makes each job hear one update: a job
   // that ends with no output, such as at its timeout, has emitted at most the
   // update Telegram gives again, where a longer list would be given again whole.
+  //
+  // input.chats is the history of each chat, by its ID: { at, complete,
+  // entries }, at being the time of its latest message in seconds, and each
+  // entry { line, attachments } as shared/thread.js reads it. The Bot API
+  // keeps no history a bot can read, so the listener keeps what it heard, and
+  // a run that starts with no output has none. getUpdates never gives the
+  // bot's own messages, so a history holds the person's messages only, never
+  // the bot's replies. A chat's history is complete when the listener heard
+  // the /start that began the chat and dropped none of the person's messages
+  // since.
   const ask = { timeout: 50, limit: 1, allowed_updates: ["message", "callback_query"] }
   if (input.cursor !== null && input.cursor !== undefined) ask.offset = input.cursor
   let cursor = ask.offset === undefined ? null : ask.offset
-  // heard emits what one update holds. Its emit is the last thing it does,
-  // so an update it fails on was not emitted, and giving it again emits it once.
+  const chats = Object.assign({}, input.chats || {})
+  // heard emits what one update holds, and gives the chat's history as it is
+  // after the update, or null where the update changes none. Its emit is the
+  // last thing that can fail, so an update it fails on was not emitted, and
+  // giving it again emits it once.
   const heard = (u) => {
     const q = u.callback_query
     if (q) {
-      if (!q.id || !q.from || !q.data) return log("a tap with no id, sender or data is passed over")
+      if (!q.id || !q.from || !q.data) {
+        log("a tap with no id, sender or data is passed over")
+        return null
+      }
       const at = q.data.indexOf(" ")
       const question = q.data.slice(0, at), choice = q.data.slice(at + 1)
       // The question answers the tap, which Telegram takes once: with an
@@ -72,50 +118,98 @@ if (input.do === "hear") {
       // logged, answered here with nothing, and starts nothing. Telegram
       // refuses an answer to an old tap, and a refusal must not stop the
       // cursor passing this update.
-      if (at > 0 && /^\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{10}$/.test(question)) return emit("answer", { service: "telegram", run: question, user: String(q.from.id), choice: choice, tap: q.id })
+      if (at > 0 && /^\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{10}$/.test(question)) {
+        emit("answer", { service: "telegram", run: question, user: String(q.from.id), name: named(q.from), choice: choice, tap: q.id })
+        return null
+      }
       log("a tap names no question: " + q.data.slice(0, 100))
       try {
         call("answerCallbackQuery", { callback_query_id: q.id })
       } catch (e) {
         log(e.message)
       }
-      return
+      return null
     }
     const m = u.message
-    if (!m) return
-    if (!m.from || !m.chat) return log("a message with no sender or chat is passed over")
-    if (m.from.is_bot) return
-    if (m.chat.type !== "private") return log("a message in a " + m.chat.type + " is not heard: the Telegram bridge hears only direct messages")
+    if (!m || (m.from && m.from.is_bot)) return null
+    if (!m.from || !m.chat) {
+      log("a message with no sender or chat is passed over")
+      return null
+    }
+    if (m.chat.type !== "private") {
+      log("a message in a " + m.chat.type + " is not heard: the Telegram listener hears only direct messages")
+      return null
+    }
+    const chat = String(m.chat.id)
     const text = m.text || m.caption || ""
-    // Telegram sends /start when a person opens the bot.
-    if (text === "/start" || text.startsWith("/start ")) return log("a /start is not passed on")
-    if (/^\/stop(@\S+)?(\s|$)/.test(text)) return emit("stop", { service: "telegram", chat: String(m.chat.id), user: String(m.from.id), place: "dm", answers: m.chat.id + ":" + m.message_id })
+    const kept = chats[chat] && chats[chat].at > m.date - quiet ? chats[chat] : null
+    // Telegram sends /start when a person opens the bot, before anything else
+    // in the chat.
+    if (text === "/start" || text.startsWith("/start ")) {
+      log("a /start is not passed on")
+      return kept ? null : { at: m.date, complete: true, entries: [] }
+    }
+    const person = { service: "telegram", chat: chat, user: String(m.from.id), name: named(m.from), place: "dm", answers: chat + ":" + m.message_id }
+    if (/^\/stop(@\S+)?(\s|$)/.test(text)) {
+      emit("stop", person)
+      return null
+    }
     const file = attachment(m)
-    if (!text && !file) return
+    if (!text && !file) return null
     // Each item of an album comes as its own update, so it is a message of
     // its own, with its own caption.
-    const message = { service: "telegram", text: text, chat: String(m.chat.id), user: String(m.from.id), place: "dm",
-      answers: m.chat.id + ":" + m.message_id }
+    const before = kept || { at: m.date, complete: false, entries: [] }
+    const message = Object.assign({ text: text, history: blobs.make(before.entries), complete: before.complete }, person)
     if (file) message.attachments = [file]
     emit("message", message)
+    return added(before, { line: person.name + ": " + (text || "(" + file.name + ")"), attachments: file ? [file] : [] }, m.date)
+  }
+  // record keeps a chat's history after an update, dropping each chat quiet
+  // for a day before it and, past the bound in all, the chats quiet longest.
+  const record = (chat, history, now) => {
+    if (!history) return
+    for (const id of Object.keys(chats)) if (chats[id].at <= now - quiet) delete chats[id]
+    chats[chat] = history
+    while (size(chats) > mostKept) {
+      const oldest = Object.keys(chats).reduce((a, b) => (chats[b].at < chats[a].at ? b : a))
+      delete chats[oldest]
+    }
   }
   for (const u of call("getUpdates", ask)) {
     try {
-      heard(u)
+      const history = heard(u)
+      if (u.message && u.message.chat) record(String(u.message.chat.id), history, u.message.date)
     } catch (e) {
       const tries = input.failing && input.failing.update === u.update_id ? input.failing.tries + 1 : 1
       if (tries < 3) {
         log("an update failed, and is given again: " + e.message)
-        return { cursor: u.update_id, failing: { update: u.update_id, tries: tries } }
+        return { cursor: u.update_id, failing: { update: u.update_id, tries: tries }, chats: chats }
       }
       log("an update failed three times and is passed over: " + e.message)
     }
     cursor = u.update_id + 1
   }
-  return { cursor: cursor }
+  return { cursor: cursor, chats: chats }
 }
 
-if (input.do === "attachments") {
+// named gives a person's name as Telegram shows it, or their ID with none.
+function named(from) {
+  return [from.first_name, from.last_name].filter((n) => n).join(" ") || String(from.id)
+}
+
+// added gives a chat's history with one entry more, its oldest entries dropped
+// past the bound, which leaves it no longer complete.
+function added(history, entry, at) {
+  const entries = history.entries.concat([entry])
+  let complete = history.complete
+  while (entries.length > mostEntries || (entries.length > 1 && size(entries) > mostChat)) {
+    entries.shift()
+    complete = false
+  }
+  return { at: at, complete: complete, entries: entries }
+}
+
+if (input.do === "get") {
   // Each file's contents: getFile gives its path, downloaded with the token in
   // the address. A file over input.most bytes is left as it is.
   return input.attachments.map((a) => {
@@ -130,16 +224,16 @@ if (input.do === "attachments") {
 if (input.do === "send") {
   // A file in the chat, as a document, which Telegram shows an image of. A
   // photo is not used: Telegram refuses one past 10 MB or of an odd shape.
-  const m = call("sendDocument", { chat_id: String(input.to), document: { data: input.file, name: input.name } }, true)
-  return { sent: input.to + ":" + m.message_id }
+  const m = call("sendDocument", { chat_id: String(input.in), document: { data: input.file, name: input.name } }, true)
+  return { sent: input.in + ":" + m.message_id }
 }
 
 if (input.do === "ask") {
   // A question with a button for each choice. A button holds the question
   // and the choice, which a tap names; Telegram takes at most 64 bytes.
   const buttons = input.choices.map((c) => ({ text: c[0].toUpperCase() + c.slice(1), callback_data: input.question + " " + c }))
-  const m = call("sendMessage", { chat_id: input.to, text: input.text, reply_markup: { inline_keyboard: [buttons] } })
-  return { sent: [{ chat: input.to, id: m.message_id }] }
+  const m = call("sendMessage", { chat_id: input.in, text: input.text, reply_markup: { inline_keyboard: [buttons] } })
+  return { sent: [{ chat: input.in, id: m.message_id }] }
 }
 
 if (input.do === "tell") {
@@ -178,26 +272,26 @@ if (input.do === "close") {
 if (input.do === "status") {
   // Telegram shows "typing" for five seconds, or until the bot says something.
   // It has no text of its own, and nothing clears it.
-  if (input.text) call("sendChatAction", { chat_id: input.to, action: "typing" })
+  if (input.text) call("sendChatAction", { chat_id: input.in, action: "typing" })
   return {}
 }
 
-// say: the text in parts Telegram takes, of at most 4096 characters, cut
+// post: the text in parts Telegram takes, of at most 4096 characters, cut
 // at a line's end where one is near, the first in reply to what it answers.
 // Each chart is shown as its table.
-if (!input.text) throw new Error("there is nothing to say")
+if (!input.text) throw new Error("there is nothing to post")
 let text = require("../shared/rich.js").plain(String(input.text))
 const sent = []
 while (text.length) {
   let at = text.length <= 4096 ? text.length : text.lastIndexOf("\n", 4095) + 1
   if (at < 2048) at = Math.min(text.length, 4096)
-  const message = { chat_id: input.to, text: text.slice(0, at) }
+  const message = { chat_id: input.in, text: text.slice(0, at) }
   if (!sent.length && input.answers) {
     const [chat, id] = String(input.answers).split(":")
-    if (chat === String(input.to) && id) message.reply_parameters = { message_id: Number(id), allow_sending_without_reply: true }
+    if (chat === String(input.in) && id) message.reply_parameters = { message_id: Number(id), allow_sending_without_reply: true }
   }
   const result = call("sendMessage", message)
-  sent.push(input.to + ":" + result.message_id)
+  sent.push(input.in + ":" + result.message_id)
   text = text.slice(at)
 }
 return { sent: sent }

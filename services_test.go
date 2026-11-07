@@ -380,7 +380,6 @@ func TestSlackListenerLeavesAFailedEnvelopeForSlackToSendAgain(t *testing.T) {
 // once. A message with no chat, which lacks what the listener reads, is logged
 // and passed over.
 func TestTelegramListenerLosesNoMessageToAFailure(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
 	tg := newTelegram(t)
 	var mu sync.Mutex
 	asks, failed := 0, false
@@ -405,10 +404,7 @@ func TestTelegramListenerLosesNoMessageToAFailure(t *testing.T) {
 		return asks
 	}
 	w := newWorld(t)
-	dir := chatProject(t, w, tg, map[string]string{
-		"agents/helper.yaml": echoAgent("helper"),
-		"agents/turn.js":     turnJS,
-	})
+	dir := chatProject(t, w, tg, nil)
 	tg.update(map[string]any{"message": map[string]any{"message_id": 5, "from": map[string]any{"id": 1, "is_bot": false}, "text": "no chat"}})
 	tg.dm(1, "after it")
 	w.sync(dir)
@@ -430,7 +426,6 @@ func TestTelegramListenerLosesNoMessageToAFailure(t *testing.T) {
 // again, and answered once. The stand-in gives update 1 first as a photo with
 // no sizes, which the listener fails on, then as the message it holds.
 func TestTelegramUpdateTheListenerFailsOnIsGivenAgain(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
 	tg := newTelegram(t)
 	var mu sync.Mutex
 	broken := false
@@ -448,10 +443,7 @@ func TestTelegramUpdateTheListenerFailsOnIsGivenAgain(t *testing.T) {
 		return false
 	})
 	w := newWorld(t)
-	dir := chatProject(t, w, tg, map[string]string{
-		"agents/helper.yaml": echoAgent("helper"),
-		"agents/turn.js":     turnJS,
-	})
+	dir := chatProject(t, w, tg, nil)
 	tg.dm(1, "given again")
 	w.sync(dir)
 	w.until("the message answered", func() bool { return len(tg.texts("1")) > 0 })
@@ -466,13 +458,9 @@ func TestTelegramUpdateTheListenerFailsOnIsGivenAgain(t *testing.T) {
 // again, then logged and passed over after its third failure. The message
 // after it is answered once.
 func TestTelegramUpdateThatAlwaysFailsIsPassedOver(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
 	tg := newTelegram(t)
 	w := newWorld(t)
-	dir := chatProject(t, w, tg, map[string]string{
-		"agents/helper.yaml": echoAgent("helper"),
-		"agents/turn.js":     turnJS,
-	})
+	dir := chatProject(t, w, tg, nil)
 	tg.dm(1, "", map[string]any{"photo": []any{}})
 	tg.dm(1, "after it")
 	w.sync(dir)
@@ -490,6 +478,162 @@ func TestTelegramUpdateThatAlwaysFailsIsPassedOver(t *testing.T) {
 	if got := tg.texts("1"); again != 2 || passed != 1 || len(got) != 1 || !strings.Contains(got[0], "after it") {
 		t.Fatalf("the bad update was logged as given again %d times and as passed over %d times, and the bot said %q; logged: %q",
 			again, passed, got, logged(w, "telegram"))
+	}
+}
+
+// historyAgent stands in for the agent at agents/assistant: it replies with
+// the history its message carries, each entry's line and files, whether that
+// history is complete, and the message's text.
+var historyAgent = map[string]string{
+	"agents/assistant.yaml": `
+		flow: assistant
+		input: { messages: list, medium: string, asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
+		stages:
+		  turn: { job: { script: ./history.js, input: { message: "${input.messages[0]}" } } }
+		output: ${stages.turn.output}
+	`,
+	"agents/history.js": `
+		const m = input.message
+		const lines = Array.from(blobs.items(m.history)).map((e) => e.line + e.attachments.map((a) => " +" + a.name).join(""))
+		return { reply: (m.complete ? "complete" : "partial") + " [" + lines.join(" | ") + "] " + m.text }
+	`,
+}
+
+// Telegram's listener keeps what it heard in each chat, and sends it with each
+// message as its history: a blob of entries, oldest first, each with its files.
+// A chat whose /start the listener heard has a complete history; another
+// chat's, begun before the listener heard it, is not.
+func TestTelegramHistoryIsKeptForEachChat(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorld(t)
+	dir := chatProject(t, w, tg, historyAgent)
+	tg.files["P1"] = "a cat"
+	tg.dm(1, "/start")
+	tg.dm(1, "one")
+	tg.dm(2, "hello")
+	tg.dm(1, "", map[string]any{"caption": "this", "photo": photo("P1", 5)})
+	tg.dm(1, "two")
+	w.sync(dir)
+	tg.waitFor(w, "1", "] two")
+	tg.waitFor(w, "2", "] hello")
+	want := map[string][]string{
+		"1": {"complete [] one", "complete [Alice: one] this", "complete [Alice: one | Alice: this +photo.jpg] two"},
+		"2": {"partial [] hello"},
+	}
+	for chat, said := range want {
+		if got := tg.texts(chat); !slices.Equal(got, said) {
+			t.Errorf("chat %s was told %q", chat, got)
+		}
+	}
+}
+
+// A chat's history holds at most 20 entries and 8000 bytes: past either,
+// its oldest entries are dropped, and it is no longer complete.
+func TestTelegramHistoryIsBounded(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorld(t)
+	dir := chatProject(t, w, tg, historyAgent)
+	tg.dm(1, "/start")
+	var lines []string
+	for i := 1; i <= 22; i++ {
+		tg.dm(1, fmt.Sprintf("m%d", i))
+		lines = append(lines, fmt.Sprintf("Alice: m%d", i))
+	}
+	long := strings.Repeat("x", 4000)
+	tg.dm(2, "/start")
+	tg.dm(2, long)
+	tg.dm(2, long+"y")
+	tg.dm(2, "last")
+	w.sync(dir)
+	tg.waitFor(w, "1", "] m22")
+	tg.waitFor(w, "2", "] last")
+	said := tg.texts("1")
+	if want := "complete [" + strings.Join(lines[:20], " | ") + "] m21"; said[20] != want {
+		t.Errorf("the 21st message was given %q", said[20])
+	}
+	if want := "partial [" + strings.Join(lines[1:21], " | ") + "] m22"; said[21] != want {
+		t.Errorf("the 22nd message was given %q", said[21])
+	}
+	if got := tg.texts("2"); got[len(got)-1] != "partial [Bob: "+long+"y] last" {
+		t.Errorf("the message after two long ones was given %.80q", got[len(got)-1])
+	}
+}
+
+// A chat with no message for a day is dropped from the listener's history:
+// the next message in it has none, and it is not complete.
+func TestTelegramHistoryIsDroppedAfterADay(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorld(t)
+	dir := chatProject(t, w, tg, historyAgent)
+	tg.dm(1, "/start")
+	tg.dm(1, "one")
+	tg.dm(1, "two", map[string]any{"date": 1700000000 + 24*60*60})
+	w.sync(dir)
+	tg.waitFor(w, "1", "] two")
+	if got := tg.texts("1"); !slices.Equal(got, []string{"complete [] one", "partial [] two"}) {
+		t.Errorf("alice was told %q", got)
+	}
+}
+
+// The listener keeps at most 64 KiB of history in all, counted in UTF-8 bytes,
+// so its output stays well under the 256 KiB Corbie takes as a job's result:
+// past that, the chat quiet longest is dropped. Six chats of a 4096-character
+// message, as long as Telegram sends, of 3-byte characters pass the bound, and
+// the listener goes on hearing after it.
+func TestTelegramHistoryIsBoundedInAll(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorld(t)
+	dir := chatProject(t, w, tg, historyAgent)
+	long := strings.Repeat("字", 4096)
+	for chat := 100; chat < 106; chat++ {
+		tg.dm(chat, "/start", map[string]any{"date": 1700000000 + chat})
+		tg.dm(chat, long, map[string]any{"date": 1700000000 + chat})
+	}
+	tg.dm(100, "again", map[string]any{"date": 1700000200})
+	tg.dm(105, "again", map[string]any{"date": 1700000200})
+	tg.dm(103, "still", map[string]any{"date": 1700000300})
+	w.sync(dir)
+	tg.waitFor(w, "103", "] still")
+	if got := tg.texts("100"); got[len(got)-1] != "partial [] again" {
+		t.Errorf("the chat quiet longest was given %.80q", got[len(got)-1])
+	}
+	// A reply past 4096 characters is posted in parts.
+	for chat, last := range map[string]string{"105": "again", "103": "still"} {
+		if got := strings.Join(tg.texts(chat), ""); !strings.HasSuffix(got, "complete ["+chat+": "+long+"] "+last) {
+			t.Errorf("chat %s was given %.80q", chat, got[len(got)-80:])
+		}
+	}
+	for _, run := range listenerRuns(w, "telegram") {
+		for _, e := range w.record(run.ID) {
+			for _, ev := range e.Events {
+				if ev.Name == "failed" {
+					t.Errorf("the listener failed: %v", ev.Data)
+				}
+			}
+		}
+	}
+}
+
+// The Bot API keeps nothing a bot can read, so a new run of the listener, as a
+// changed router starts, has no history: the next message in a chat it had
+// heard in full has none, and it is not complete.
+func TestTelegramHistoryIsLostWithTheListener(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorld(t)
+	dir := chatProject(t, w, tg, historyAgent)
+	tg.dm(1, "/start")
+	tg.dm(1, "one")
+	w.sync(dir)
+	tg.waitFor(w, "1", "complete [] one")
+	setSite(t, dir, router("telegram"), "description: The router of gromit on Telegram.", "description: The router of gromit on Telegram, changed.")
+	w.sync(dir)
+	w.until("a new listener", func() bool {
+		return slices.ContainsFunc(listenerRuns(w, "telegram"), func(r *client.Run) bool { return r.HasEnded() })
+	})
+	tg.dm(1, "two")
+	tg.waitFor(w, "1", "] two")
+	if got := tg.texts("1"); !slices.Equal(got, []string{"complete [] one", "partial [] two"}) {
+		t.Errorf("alice was told %q", got)
 	}
 }
 
@@ -1247,32 +1391,24 @@ func TestJiraOverheardCommentGoesToAttend(t *testing.T) {
 	}
 }
 
-// A question whose bridge runs but fails is not asked on the person's next
-// bridge: it fails with the bridge's error, given once.
-func TestQuestionOnAFailingBridgeFailsWithItsError(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
+// A question whose post Telegram refuses fails with Telegram's error, given
+// once, and so does the machine that called it.
+func TestQuestionOnAFailingServiceFailsWithItsError(t *testing.T) {
 	w := newWorld(t)
 	dir := copyStarter(t)
 	write(t, dir, map[string]string{
 		".rook/telegram/telegram.js": `if (input.do === "ask") throw new Error("Telegram is down")
 			return {}`,
-		"people.yaml": "people:\n  alice: { telegram: \"1\", slack: U1 }\ngroups: {}\n",
-		"on/asker.yaml": `
-			flow: asker
-			allow: [send:.rook/blocks/ask]
-			stages:
-			  asking: { job: { call: { at: .rook/blocks/ask }, input: { people: [alice], text: "Well?", choices: ["yes", "no"] } } }
-			output: ${stages.asking.output.choice}
-		`,
+		"agents/asker.yaml": telegramAsker,
 	})
 	removeListener(t, dir)
 	w.sync(dir)
-	asker := w.start("on/asker.yaml", nil)
-	w.until("the asker ends", func() bool { return w.show(asker).HasEnded() })
-	if run := w.show(asker); run.Status != "failed" || !strings.Contains(run.Error, "Telegram is down") {
+	id := w.start("agents/asker.yaml", nil)
+	w.until("the asker ends", func() bool { return w.show(id).HasEnded() })
+	if run := w.show(id); run.Status != "failed" || !strings.Contains(run.Error, "Telegram is down") {
 		t.Fatalf("the asker is %s: %s", run.Status, run.Error)
 	}
-	if got := w.show(asker).Error; strings.Count(got, "Telegram is down") != 1 || strings.Count(got, " at line ") > 1 {
+	if got := w.show(id).Error; strings.Count(got, "Telegram is down") != 1 || strings.Count(got, " at line ") > 1 {
 		t.Errorf("the asker's error repeats what failed: %s", got)
 	}
 }

@@ -53,9 +53,9 @@ slack, telegram, gitlab or jira.
   stop      service, place, chat, user, name, email
 
 `user` is the sender's ID on the service, and `email` is given where the
-service gives one. `run` is the ID of the question's run without its client's
-name, which the button holds. `tap` is the id of Telegram's callback query,
-which the question answers.
+service gives one; Telegram gives none. `run` is the ID of the question's run
+without its client's name, which the button holds. `tap` is the id of
+Telegram's callback query, which the question answers.
 
 Every message, a change included, holds `history` and `complete`. `history`
 is a blob of a list of `{ line, attachments }`, oldest first: the thread before
@@ -67,6 +67,16 @@ conversations/replies reads what came before it. A Slack reaction is a message
 with `change: reaction`: its text is the emoji, such as `:eyes:`, its `at` the
 message reacted to, and its history the thread before the reaction, that
 message included.
+
+Telegram's Bot API keeps no history a bot can read, so Telegram's listener
+keeps the person's messages it heard, never the bot's replies, which the agent
+has in its kept conversation while that run lasts. `complete` says the
+listener heard the chat's /start and dropped none of the person's messages
+since. A new run of the listener starts with no history.
+
+  each chat                at most 20 entries and 8000 bytes, but always its latest entry
+  all chats                at most 64 KiB, a quarter of what Corbie takes as a job's input or result
+  a chat quiet for a day   dropped
 
 A router sends a message and a stop to the conversation keyed
 `<service>:<chat>:<user>:<agent>`, so each person in a thread has their own

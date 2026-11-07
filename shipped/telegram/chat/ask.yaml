@@ -18,7 +18,7 @@ states:
     defer: [answer]
     job:
       script: .rook/telegram/telegram.js
-      input: { do: ask, token: TELEGRAM_TOKEN, to: "${input.in}", text: "${input.text}", choices: "${input.choices}", question: "${run.id.slice(run.id.indexOf('/') + 1)}" }
+      input: { do: ask, token: TELEGRAM_TOKEN, in: "${input.in}", text: "${input.text}", choices: "${input.choices}", question: "${run.id.slice(run.id.indexOf('/') + 1)}" }
       allow: [net:api.telegram.org, "secret:TELEGRAM_TOKEN@net:api.telegram.org"]
       restart: { limit: 2 }
     on: { done: open }

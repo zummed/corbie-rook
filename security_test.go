@@ -738,16 +738,12 @@ func TestSlackPressOfALayoutButtonDoesNotStopTheListener(t *testing.T) {
 // A tap whose data names no question, as a changed client can send to the bot,
 // is skipped: the listener goes on, and the message after it is answered.
 func TestMalformedTapDoesNotStopTheListener(t *testing.T) {
-	t.Skip("R4 revives this: Telegram")
 	for name, data := range map[string]string{"empty": "", "word": "nonsense", "word and choice": "nonsense yes", "slashes": "a/b/c yes",
 		"dots": "../x yes", "long": strings.Repeat("x", 300) + " yes", "space": " ", "no choice": "20260101T000000.000Z-0123456789a"} {
 		t.Run(name, func(t *testing.T) {
 			tg := newTelegram(t)
 			w := newWorld(t)
-			dir := chatProject(t, w, tg, map[string]string{
-				"agents/helper.yaml": echoAgent("helper"),
-				"agents/turn.js":     turnJS,
-			})
+			dir := chatProject(t, w, tg, nil)
 			tg.tapData(1, data)
 			tg.dm(1, "after the tap")
 			w.sync(dir)

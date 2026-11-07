@@ -271,11 +271,15 @@ func (tg *telegram) group(chat, from int, text string) {
 	tg.message(from, map[string]any{"chat": map[string]any{"id": chat, "type": "group", "title": "Family"}, "text": text})
 }
 
+// message adds a message from a person, sent at 1700000000 unless it gives its
+// date.
 func (tg *telegram) message(from int, m map[string]any) {
 	tg.mu.Lock()
 	defer tg.mu.Unlock()
 	m["message_id"] = 10 + len(tg.updates)
-	m["date"] = 1700000000
+	if m["date"] == nil {
+		m["date"] = 1700000000
+	}
 	m["from"] = map[string]any{"id": from, "is_bot": false, "first_name": names[from]}
 	tg.updates = append(tg.updates, map[string]any{"message": m})
 }

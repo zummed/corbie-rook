@@ -1,7 +1,10 @@
 # Telegram's listener, run as a child of a router: it asks for each new update.
 # It sends its parent message for each direct message, stop for /stop, and
 # answer for a tap on a question's button. A button holds the question's run ID
-# without its client's name, since Telegram keeps 64 bytes of it.
+# without its client's name, since Telegram keeps 64 bytes of it. The Bot API
+# keeps no history a bot can read, so the listener keeps each chat's history in
+# its output, and a new run of it starts with none. getUpdates never gives the
+# bot's own messages, so a history holds the person's messages only.
 statechart: telegram-listen
 description: Sends its parent each Telegram message, button press and stop meant for the bot.
 title: Telegram listener
@@ -16,6 +19,7 @@ states:
         token: TELEGRAM_TOKEN
         cursor: "${states.hearing.output ? states.hearing.output.cursor : null}"
         failing: "${states.hearing.output ? states.hearing.output.failing : null}"
+        chats: "${states.hearing.output ? states.hearing.output.chats : null}"
       allow: [net:api.telegram.org, "secret:TELEGRAM_TOKEN@net:api.telegram.org"]
       timeout: 2m
     on:
