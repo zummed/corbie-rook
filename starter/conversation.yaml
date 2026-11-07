@@ -2,7 +2,9 @@
 # with the first message it sends to a key. Each message is answered in turn:
 # the lookup finds the person, the agent at agents/assistant answers with the
 # toolkits the person's scopes allow, and the reply is posted where the message
-# came from. A stop cancels the answer. A run with no message for a day ends.
+# came from. A stop cancels the answer. A stop that starts a run, since no
+# conversation was running, ends it at once. A run with no message for a day
+# ends.
 statechart: conversation
 description: Answers one person in one thread with the agent at agents/assistant.
 lifetime: keyed
@@ -12,7 +14,10 @@ initial: waiting
 states:
   waiting:
     timers: { quiet: 1d }
-    on: { message: answering, quiet: over }
+    on:
+      message: answering
+      quiet: over
+      stop: { when: "${!(states.answering || {}).output}", go: over }
   answering:
     defer: [message]
     job:

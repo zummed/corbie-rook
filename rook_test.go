@@ -20,6 +20,7 @@ import (
 	"github.com/zummed/corbie/client"
 	"github.com/zummed/corbie/instance"
 	llmstandin "github.com/zummed/corbie/plugin/llm/standin"
+	"go.yaml.in/yaml/v3"
 )
 
 // bot is the name of the bot in every test's project.
@@ -620,6 +621,47 @@ func TestProjectReads(t *testing.T) {
 	}
 	if !reflect.DeepEqual(tree.Listed, []string{".rook/", "people/scopes.yaml", "toolkits/"}) {
 		t.Errorf("the listed files are %q", tree.Listed)
+	}
+	for _, m := range tree.Machines {
+		if m.Path == "agents/assistant.yaml" && m.Problem == nil && !reflect.DeepEqual(m.Draft.Definition.Receive, map[string][]string{"": {"conversation"}}) {
+			t.Errorf("an agent that includes .rook/agent.yaml receives from %v", m.Draft.Definition.Receive)
+		}
+	}
+}
+
+// Each service's chat/ask takes what the approval gives it: no field the
+// approval does not give is required, and every field it gives is declared.
+func TestApprovalFitsEveryQuestion(t *testing.T) {
+	t.Skip("R2 revives this: the question statechart")
+	read := func(name string) map[string]any {
+		text, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var m map[string]any
+		if err := yaml.Unmarshal(text, &m); err != nil {
+			t.Fatal(err)
+		}
+		return m
+	}
+	approval := read("shipped/approval.yaml")
+	given := approval["stages"].(map[string]any)["question"].(map[string]any)["job"].(map[string]any)["input"].(map[string]any)
+	asks, _ := filepath.Glob("shipped/*/chat/ask.yaml")
+	if len(asks) < 2 {
+		t.Fatalf("Rook ships questions only at %v", asks)
+	}
+	for _, name := range asks {
+		input, _ := read(name)["input"].(map[string]any)
+		for field, shape := range input {
+			if s, _ := shape.(string); given[field] == nil && !strings.HasSuffix(s, "?") {
+				t.Errorf("%s requires %s, which the approval does not give", name, field)
+			}
+		}
+		for field := range given {
+			if input[field] == nil {
+				t.Errorf("%s does not take %s, which the approval gives", name, field)
+			}
+		}
 	}
 }
 

@@ -3,7 +3,6 @@
 agent: helper
 description: Helps the person who runs this computer.
 include: .rook/agent.yaml
-receive: [conversation]
 model: { name: test-model, service: anthropic, secret: TEST_KEY }
 system: |
   You help the person who runs this computer. What you write is read on a phone:

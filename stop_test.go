@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/zummed/corbie/client"
+	"github.com/zummed/corbie/instance"
 	llmstandin "github.com/zummed/corbie/plugin/llm/standin"
 )
 
@@ -323,5 +325,40 @@ func TestStopWithABotNameOrWords(t *testing.T) {
 			}
 			tg.waitFor(w, "1", want)
 		})
+	}
+}
+
+// A stop sent to a conversation that is not running starts a run, which ends
+// at once. A stop to a conversation that has answered, and waits for the next
+// message, is dropped, and the conversation keeps running.
+func TestStopStartsNoConversation(t *testing.T) {
+	w := newWorld(t)
+	dir := copyStarter(t)
+	removeListener(t, dir)
+	w.sync(dir)
+	stop := map[string]any{"service": "telegram", "place": "dm", "chat": "1", "user": "1", "name": "Alice"}
+	w.sendTo("conversation.yaml", "telegram:1:1:assistant", "stop", stop)
+	w.until("the stopped conversation ends", func() bool {
+		runs := keyed(w, "conversation.yaml")["telegram:1:1:assistant"]
+		return len(runs) == 1 && runs[0].Status == "done"
+	})
+	w.sendTo("conversation.yaml", "telegram:2:2:assistant", "message", from("2", "hello", 1))
+	var id string
+	w.until("the conversation answers", func() bool {
+		runs := keyed(w, "conversation.yaml")["telegram:2:2:assistant"]
+		if len(runs) != 1 {
+			return false
+		}
+		id = runs[0].ID
+		return slices.ContainsFunc(w.at("conversation.yaml"), func(r *client.Run) bool { return r.Parent == id && r.Status == "done" })
+	})
+	w.sendTo("conversation.yaml", "telegram:2:2:assistant", "stop", stop)
+	w.until("the conversation takes the stop", func() bool {
+		return slices.ContainsFunc(w.record(id), func(e client.Entry) bool {
+			return slices.ContainsFunc(e.Events, func(a instance.Arrived) bool { return a.Name == "stop" })
+		})
+	})
+	if run := w.show(id); run.Status != "running" {
+		t.Errorf("a stop ended a conversation that had answered: %s %s", run.Status, run.Error)
 	}
 }

@@ -9,7 +9,14 @@ the two differ.
 
 `.corbieignore` lists `.rook/` and `people/scopes.yaml`, so no file in them has
 a location. `corbie rook init <dir> --bot <bot> --services <names>` writes these
-files of the project, each only when it is not there:
+files of the project, and never one that is there. In a directory that is no
+project it writes them all, with AGENTS.md, CLAUDE.md and .mcp.json;
+conversation.yaml only with --bot, and the files under `<bot>/<service>/` only
+for each service --services names. In a project it writes again only these
+when they are missing: AGENTS.md and `.corbieignore`; conversation.yaml with
+--bot; and the files under `<bot>/<service>/` of each service --services names.
+A deleted people/find.yaml, people/scopes.yaml, CLAUDE.md or .mcp.json stays
+deleted.
 
   .corbieignore                      .rook/ and people/scopes.yaml
   conversation.yaml                  keyed: one thread, one person and one agent
@@ -32,7 +39,7 @@ files of the project, each only when it is not there:
   .rook/jira/                        chat/post, issue/comment/create, issue/comment/list, issue/attachments/create, attachment/get, api.js
   .rook/approval.yaml, approval.js   the ask a toolkit or a machine names
   .rook/people/file.yaml, file.js    the lookup that reads people/scopes.yaml by email
-  .rook/agent.yaml                   included by an agent: its input, prompt and conversation
+  .rook/agent.yaml                   included by an agent: its input, prompt, conversation and receive: [conversation]
   .rook/filters/model.yaml           included by an agent that says whether a message is meant for the bot
   .rook/shared/                      types.js, rich.js, thread.js, format.js, file.js
   .rook/AGENTS.md                    the page rook
@@ -52,6 +59,8 @@ A router sends a message and a stop to the conversation keyed
 `<service>:<chat>:<user>:<agent>`, so each person in a thread has their own
 run. It sends an answer to `{ at: <bot>/<service>/chat/ask, run: <its client's
 name>/<run> }`, which reaches only a question at that location.
+A stop that starts the conversation's run, because none was running, ends
+that run at once.
 
 Rook is ready-made Corbie machines in a project's `.rook/`. The project's own
 files fill five slots, and its own machines use Rook's blocks as jobs.
