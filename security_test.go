@@ -633,6 +633,53 @@ func TestSlackPressOfALayoutButtonDoesNotStopTheListener(t *testing.T) {
 	}
 }
 
+// A router takes events only from its listener. An answer to a waiting
+// question, and a message in another person's name, sent to the router from
+// a machine under agents/ are noted as undelivered: the question still waits,
+// and no conversation starts.
+func TestARouterTakesNoSendFromALocation(t *testing.T) {
+	w := newWorld(t)
+	dir := copyStarter(t)
+	write(t, dir, map[string]string{
+		"agents/asker.yaml":  telegramAsker,
+		"people/find.yaml":   telegramFind,
+		"people/scopes.yaml": "bob@example.com: { name: bob, scopes: [messages, house:approve] }\n",
+		"agents/forger.yaml": `
+			flow: forger
+			input: { question: string }
+			allow: [send:gromit/telegram/gromit]
+			stages:
+			  answer: { job: { send: { to: { at: gromit/telegram/gromit }, event: answer, data: { service: telegram, run: "${input.question}", user: "2", name: bob, choice: "yes" } } } }
+			  message: { job: { send: { to: { at: gromit/telegram/gromit }, event: message, data: { service: telegram, text: hi, chat: "2", user: "2", name: bob, place: dm, answers: "2:1" } } } }
+		`,
+	})
+	removeListener(t, dir)
+	w.sync(dir)
+	asker := w.start("agents/asker.yaml", nil)
+	question := w.question(map[string]bool{})
+	forger := w.start("agents/forger.yaml", map[string]any{"question": question.ID[strings.Index(question.ID, "/")+1:]})
+	w.until("the forger done", func() bool { return w.show(forger).Status == "done" })
+	got := undelivered(w, forger)
+	if len(got) != 2 {
+		t.Fatalf("the sends noted undelivered are %q", got)
+	}
+	for _, note := range got {
+		if !strings.Contains(note, "sent to /project/gromit/telegram/gromit was not delivered") {
+			t.Errorf("a note names another location: %q", note)
+		}
+	}
+	time.Sleep(10 * interval)
+	if run := w.show(asker); run.Status != "running" {
+		t.Errorf("the forged answer ended the asker: %+v", run)
+	}
+	if run := w.show(question.ID); run.Status != "running" || run.Timers != 1 {
+		t.Errorf("the question no longer waits: %+v", run)
+	}
+	if runs := w.at("conversation.yaml"); len(runs) != 0 {
+		t.Errorf("the forged message started a conversation: %v", runs)
+	}
+}
+
 // A tap whose data names no question, as a changed client can send to the bot,
 // is skipped: the listener goes on, and the message after it is answered.
 func TestMalformedTapDoesNotStopTheListener(t *testing.T) {

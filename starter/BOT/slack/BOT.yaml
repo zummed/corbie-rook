@@ -4,10 +4,12 @@
 # of a question's button to that question, and a stop to the conversation. The
 # tokens are set at /<project>/BOT/slack. Add `input: { overhear: true }` beside
 # `machine:` to hear every message in a channel outside a thread, marked
-# unaddressed, which this router drops.
+# unaddressed, which this router drops. It takes events only from its
+# listener: `receive: []` refuses a send from any location.
 statechart: BOT
 description: The router of BOT on Slack.
 lifetime: singleton
+receive: []
 allow: [send:conversation, send:BOT/slack/chat/ask]
 initial: listening
 states:

@@ -2,9 +2,12 @@
 # and sends each direct message to the conversation, keyed by the chat, the
 # person and the agent. It sends a tap on a question's button to that question,
 # and /stop to the conversation. The token is set at /<project>/BOT/telegram.
+# It takes events only from its listener: `receive: []` refuses a send from
+# any location.
 statechart: BOT
 description: The router of BOT on Telegram.
 lifetime: singleton
+receive: []
 allow: [send:conversation, send:BOT/telegram/chat/ask]
 initial: listening
 states:
