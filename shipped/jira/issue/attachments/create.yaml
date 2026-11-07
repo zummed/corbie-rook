@@ -1,13 +1,13 @@
-# `to` is the issue's key, such as OPS-12.
+# `issue` is the issue's key, such as OPS-12. It gives `sent`, the comment's ID.
 flow: jira-issue-attachments-create
 description: Attaches a file to a Jira issue and writes a comment that shows it.
-input: { to: string, name: string, file: blob }
+input: { issue: string, name: string, file: blob }
 stages:
   send:
     job:
       script: .rook/jira/jira.js
       files: [.rook/jira/api.js]
-      input: { do: send, to: "${input.to}", name: "${input.name}", file: "${input.file}", site: "${values.JIRA_SITE}", email: "${values.JIRA_EMAIL}" }
+      input: { do: send, issue: "${input.issue}", name: "${input.name}", file: "${input.file}", site: "${values.JIRA_SITE}", email: "${values.JIRA_EMAIL}" }
       allow: ["net:${values.JIRA_SITE}", "secret:JIRA_TOKEN@net:${values.JIRA_SITE}"]
       timeout: 5m
 output: ${stages.send.output}

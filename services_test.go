@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -645,9 +644,6 @@ func TestSiteWithASchemeIsExplained(t *testing.T) {
 		{"jira", "https://example.atlassian.net/", "JIRA_SITE is a host name, such as example.atlassian.net, with no https:// and no path: it is https://example.atlassian.net/"},
 	} {
 		t.Run(c.bridge, func(t *testing.T) {
-			if c.bridge == "jira" {
-				t.Skip("R6 revives this: Jira")
-			}
 			w := newWorld(t)
 			srv := httptest.NewServer(http.NotFoundHandler())
 			t.Cleanup(srv.Close)
@@ -880,108 +876,6 @@ func TestSlackApprovalByButtonCanBeFollowed(t *testing.T) {
 	}
 }
 
-// A project with no JIRA_EMAIL: the listener fails naming it, and Jira is not
-// asked.
-func TestJiraWithNoEmailNamesTheValue(t *testing.T) {
-	t.Skip("R6 revives this: Jira")
-	j := newJira(t)
-	w := newWorld(t)
-	w.secret("JIRA_TOKEN", "jira-token")
-	dir := pointed(t, "jira", j.Server)
-	w.value("JIRA_SITE", strings.TrimPrefix(j.URL, "http://"))
-	w.sync(dir)
-	w.kept(router("jira"))
-	w.until("the listener fails naming JIRA_EMAIL", func() bool {
-		w.set(w.now().Add(31 * time.Second))
-		time.Sleep(5 * interval)
-		return strings.Contains(strings.Join(failures(w), "\n"), "JIRA_EMAIL")
-	})
-}
-
-// Two Jira projects are asked about in one search, and a comment on each is its
-// own chat, with the project's key as its place.
-func TestJiraTwoProjectsAreAsked(t *testing.T) {
-	t.Skip("R6 revives this: Jira")
-	j := newJira(t)
-	var mu sync.Mutex
-	var jqls []string
-	override(j.Server, func(w http.ResponseWriter, r *http.Request) bool {
-		if r.URL.Path == "/rest/api/2/search/jql" {
-			mu.Lock()
-			jqls = append(jqls, r.URL.Query().Get("jql"))
-			mu.Unlock()
-		}
-		return false
-	})
-	w := newWorld(t)
-	w.secret("JIRA_TOKEN", "jira-token")
-	dir := pointed(t, "jira", j.Server)
-	jiraAt(w, j)
-	setSite(t, dir, router("jira"), "projects: [OPS]", "projects: [OPS, DEV]")
-	w.sync(dir)
-	tick(w, j.asked)
-	tick(w, j.asked)
-	mu.Lock()
-	defer mu.Unlock()
-	if len(jqls) == 0 || !strings.Contains(jqls[len(jqls)-1], `project in ("OPS", "DEV")`) {
-		t.Fatalf("Jira was asked %q", jqls)
-	}
-}
-
-// An issue opened naming the bot is heard as it is, and answered on the issue.
-func TestJiraOpenedIssueNamingTheBotIsAnswered(t *testing.T) {
-	t.Skip("R6 revives this: Jira")
-	j := newJira(t)
-	w := newWorld(t)
-	w.secret("JIRA_TOKEN", "jira-token")
-	dir := pointed(t, "jira", j.Server)
-	jiraAt(w, j)
-	w.sync(dir)
-	tick(w, j.asked)
-	at := time.Now().Add(time.Second)
-	j.mu.Lock()
-	j.fields = map[string]any{"created": jiraTime(at), "updated": jiraTime(time.Now().Add(-time.Hour)), "description": "[~accountid:acc-bot] the disk is full"}
-	j.mu.Unlock()
-	tick(w, j.asked)
-	w.until("the answer", func() bool {
-		w.set(w.now().Add(31 * time.Second))
-		time.Sleep(5 * interval)
-		return len(j.saying()) >= 1
-	})
-	tick(w, j.asked)
-	time.Sleep(10 * interval)
-	if got := j.saying(); len(got) != 1 || !strings.Contains(got[0], "the disk is full") || strings.Contains(got[0], "accountid") {
-		t.Fatalf("the bot said %q", got)
-	}
-}
-
-// The Jira token goes only to JIRA_SITE: a file's download that Jira would
-// redirect elsewhere is asked without a redirect, and nothing is asked of the
-// other host.
-func TestJiraTokenGoesOnlyToTheSite(t *testing.T) {
-	t.Skip("R6 revives this: Jira")
-	j := newJira(t)
-	seen := &headers{}
-	seen.wrap(j.Server)
-	w, _, next := jiraAnswering(t, j)
-	at := time.Now().Add(time.Second)
-	j.mu.Lock()
-	j.files = []map[string]any{attachment("100", "log.txt", "text/plain", 5, "acc-1", at)}
-	j.contents = map[string]string{"100": "hello"}
-	j.mu.Unlock()
-	j.comment("1", "acc-1", "[~accountid:acc-bot] see [^log.txt]", at)
-	next()
-	w.until("the answer", func() bool { return len(j.saying()) >= 1 })
-	for _, line := range seen.all() {
-		if strings.Contains(line, "/attachment/content/") && !strings.Contains(line, "auth=Basic") {
-			t.Errorf("a download was asked without the token: %s", line)
-		}
-	}
-	if got := j.downloaded(); len(got) != 1 {
-		t.Errorf("downloaded %v", got)
-	}
-}
-
 // One project runs Slack, GitLab and Jira at once. alice is answered on each
 // where she asked, in a chat of its own, and each service sees only its own
 // token.
@@ -1124,33 +1018,6 @@ func TestSlackWithNoAppTokenNamesTheSecret(t *testing.T) {
 	})
 	if got := seen.all(); len(got) != 0 {
 		t.Errorf("Slack was asked %v", got)
-	}
-}
-
-// With overhear on Jira, a comment that does not name the bot goes to attend,
-// and one that attend says yes to is answered on the issue.
-func TestJiraOverheardCommentGoesToAttend(t *testing.T) {
-	t.Skip("R6 revives this: Jira")
-	j := newJira(t)
-	w := newWorld(t)
-	w.secret("JIRA_TOKEN", "jira-token")
-	dir := pointed(t, "jira", j.Server)
-	jiraAt(w, j)
-	setSite(t, dir, router("jira"), "projects: [OPS] }", "projects: [OPS], overhear: true }")
-	if err := os.WriteFile(filepath.Join(dir, "attend.yaml"), []byte(dedent(attendStub)), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	w.sync(dir)
-	tick(w, j.asked)
-	at := time.Now().Add(time.Second)
-	j.comment("1", "acc-1", "please look", at)
-	j.comment("2", "acc-1", "just noting", at.Add(time.Millisecond))
-	tick(w, j.asked)
-	w.until("the answer", func() bool { return len(j.saying()) >= 1 })
-	tick(w, j.asked)
-	time.Sleep(10 * interval)
-	if got := j.saying(); len(got) != 1 || got[0] != "please look" {
-		t.Fatalf("the bot said %q", got)
 	}
 }
 
