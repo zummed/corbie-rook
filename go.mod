@@ -4,7 +4,7 @@ go 1.27.1
 
 require (
 	github.com/coder/websocket v1.8.15
-	github.com/zummed/corbie v0.19.1-0.20261107051717-5c6b5b5916c5
+	github.com/zummed/corbie v0.20.0
 	go.yaml.in/yaml/v3 v3.0.5
 )
 
