@@ -1,0 +1,2 @@
+# Rook's Slack status, which shows "Working on it." under a thread.
+include: .rook/slack/assistant/status.yaml

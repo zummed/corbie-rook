@@ -1,0 +1,3 @@
+# The people of the tests: alice may approve messages, and bob may only ask.
+alice@example.com: { name: alice, scopes: [messages, messages:approve] }
+bob@example.com: { name: bob, scopes: [messages] }

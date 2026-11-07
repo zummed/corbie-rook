@@ -1,0 +1,14 @@
+# `attachments` are a message's, each { name, type, size, id }. It gives each
+# with `file`, its contents as a blob; a file over 32 MiB is given without.
+flow: jira-attachment-get
+description: Downloads the files on a Jira issue that a message has, each at most 32 MiB.
+input: { attachments: list }
+stages:
+  download:
+    job:
+      script: .rook/jira/jira.js
+      files: [.rook/jira/api.js]
+      input: { do: attachments, attachments: "${input.attachments}", most: 33554432, site: "${values.JIRA_SITE}", email: "${values.JIRA_EMAIL}" }
+      allow: ["net:${values.JIRA_SITE}", "secret:JIRA_TOKEN@net:${values.JIRA_SITE}"]
+      timeout: 5m
+output: ${stages.download.output}

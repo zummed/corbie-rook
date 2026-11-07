@@ -1,0 +1,26 @@
+# What an agent that weighs a message which does not name the bot includes:
+# the system text, the prompt that puts the thread and the message to the
+# model, and the reply { answer }. It says no when unsure, so people talking to
+# each other get no reply. It names no model: the project's agent writes its
+# own, and says in its system text what the bot is for.
+#
+#   agent: interested
+#   include: .rook/filters/model.yaml
+#   model: { name: <a small model>, secret: <its key> }
+#   system:
+#     - { include: .rook/filters/model.yaml#system }
+#     - The bot answers questions about the build.
+input: { text: string, name: string, thread: "string?" }
+system: |
+  You are shown the newest message in a thread, and the thread before it, where
+  the bot is called you. Answer true when the newest message is meant for the
+  bot: it asks the bot for something, answers what the bot last said, or is the
+  kind of message the bot is for. Answer false when people are talking to each
+  other, and when you are unsure.
+prompt: "${input.thread ? 'The thread before the message, where the bot is called you:\\n<thread>\\n' + input.thread + '\\n</thread>' : 'The message starts the thread.'}\n\nThe newest message, from ${input.name}:\n<message>\n${input.text}\n</message>"
+reply:
+  type: object
+  required: [answer]
+  additionalProperties: false
+  properties:
+    answer: { type: boolean }

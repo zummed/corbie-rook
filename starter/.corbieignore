@@ -1,0 +1,5 @@
+# What in this project is no machine: nothing runs at a path listed here, and a
+# machine may still include it. corbie rook init adds .rook/ and
+# people/scopes.yaml when they are missing.
+.rook/
+people/scopes.yaml

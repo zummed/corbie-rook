@@ -1,0 +1,14 @@
+# Rook's lookup, which a project places as people/find.yaml. It reads the table
+# people/scopes.yaml at the project's top, where each row is an email with a
+# name and scopes, and matches the email given, ignoring case. An email the
+# table does not hold, or none, gives no scopes and the name the service gave.
+flow: people-file
+description: Gives a person's name, email and scopes, found by their email in people/scopes.yaml.
+input: { service: "string?", user: "string?", name: "string?", email: "string?" }
+stages:
+  find:
+    job:
+      script: ./file.js
+      files: [people/scopes.yaml]
+      input: { name: "${input.name || input.user || ''}", email: "${input.email || ''}" }
+output: ${stages.find.output}

@@ -1,0 +1,20 @@
+# It gives { markdown, url }, and with an issue `note`, the comment's ID.
+flow: gitlab-uploads-create
+description: Uploads a file to a GitLab project, and with an issue writes a comment there that links to it.
+input:
+  type: object
+  properties:
+    project: { type: string, description: "the project's path, as group/project" }
+    name: { type: string, description: "the file's name, as report.csv" }
+    file: { type: object, required: [$blob], description: the file }
+    iid: { type: number, description: the number of the issue to write the comment on }
+  required: [project, name, file]
+stages:
+  upload:
+    job:
+      script: .rook/gitlab/gitlab.js
+      files: [.rook/gitlab/api.js]
+      input: { do: upload, project: "${input.project}", name: "${input.name}", file: "${input.file}", iid: "${input.iid || 0}", site: "${values.GITLAB_SITE}" }
+      allow: ["net:${values.GITLAB_SITE}", "secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
+      timeout: 5m
+output: ${stages.upload.output}

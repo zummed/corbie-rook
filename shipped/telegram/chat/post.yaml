@@ -1,0 +1,15 @@
+# `in` is the chat. The text is Markdown, and each chart in it is posted as its
+# table. With `answers`, a message's chat and ID as a message gives them, the
+# first part answers that message.
+flow: telegram-chat-post
+description: Posts a text in a Telegram chat.
+input: { in: string, text: string, answers: "string?" }
+stages:
+  post:
+    job:
+      script: .rook/telegram/telegram.js
+      files: [.rook/shared/rich.js]
+      input: { do: post, token: TELEGRAM_TOKEN, in: "${input.in}", text: "${input.text}", answers: "${input.answers || ''}" }
+      allow: [net:api.telegram.org, "secret:TELEGRAM_TOKEN@net:api.telegram.org"]
+      restart: { limit: 2 }          # Telegram sometimes drops a connection; a resend can repeat a message, never lose one
+output: ${stages.post.output}

@@ -1,0 +1,2 @@
+# Rook's Telegram post, which the conversation calls with { in, text }.
+include: .rook/telegram/chat/post.yaml

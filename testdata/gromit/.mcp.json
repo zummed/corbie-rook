@@ -1,0 +1,5 @@
+{
+  "mcpServers": {
+    "corbie": { "command": "corbie", "args": ["mcp", "--allow", "test", "--allow", "rook init"] }
+  }
+}

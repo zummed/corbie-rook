@@ -1,0 +1,2 @@
+# Rook's GitLab download, which fetches the files a message names.
+include: .rook/gitlab/files/get.yaml

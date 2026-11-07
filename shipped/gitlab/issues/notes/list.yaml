@@ -1,0 +1,19 @@
+# Each comment is { id, user, name, username, text, created, attachments }.
+# Internal and confidential comments are left out.
+flow: gitlab-issues-notes-list
+description: Reads the latest hundred public comments on a GitLab issue, oldest first.
+input:
+  type: object
+  properties:
+    project: { type: string, description: "the project's path, as group/project" }
+    iid: { type: number, description: "the issue's number in its project" }
+  required: [project, iid]
+stages:
+  read:
+    job:
+      script: .rook/gitlab/gitlab.js
+      files: [.rook/gitlab/api.js, .rook/shared/types.js]
+      input: { do: notes, project: "${input.project}", iid: "${input.iid}", site: "${values.GITLAB_SITE}" }
+      allow: ["net:${values.GITLAB_SITE}", "secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
+      timeout: 20s
+output: ${stages.read.output}

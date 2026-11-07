@@ -1,0 +1,16 @@
+# `in` is a conversation, or conversation/thread, and `at` a message's time:
+# what came before it is given, by default everything. It gives `history`, a
+# blob of text of up to a thousand replies of a thread, or the latest 200
+# messages outside one, and `complete`, true when that is all of it.
+flow: slack-conversations-replies
+description: Reads what was said in a Slack thread or direct message before a message.
+input: { in: string, at: "string?" }
+stages:
+  read:
+    job:
+      script: .rook/slack/slack.js
+      files: [.rook/shared/thread.js]
+      input: { do: replies, in: "${input.in}", at: "${input.at || ''}" }
+      allow: [net:slack.com, "secret:SLACK_TOKEN@net:slack.com"]
+      timeout: 1m
+output: ${stages.read.output}

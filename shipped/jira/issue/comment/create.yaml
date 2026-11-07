@@ -1,0 +1,16 @@
+# `issue` is the issue's key, such as OPS-12. The text is Markdown, which is
+# written as Jira's wiki markup, with each chart as its table. A text longer
+# than Jira takes in one comment is written as several. It gives `sent`, the
+# last comment's ID.
+flow: jira-issue-comment-create
+description: Writes a comment in Markdown on a Jira issue.
+input: { issue: string, text: string }
+stages:
+  say:
+    job:
+      script: .rook/jira/jira.js
+      files: [.rook/jira/api.js, .rook/shared/rich.js]
+      input: { do: say, issue: "${input.issue}", text: "${input.text}", site: "${values.JIRA_SITE}", email: "${values.JIRA_EMAIL}" }
+      allow: ["net:${values.JIRA_SITE}", "secret:JIRA_TOKEN@net:${values.JIRA_SITE}"]
+      restart: { limit: 2 }
+output: ${stages.say.output}

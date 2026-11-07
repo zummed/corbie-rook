@@ -1,0 +1,2 @@
+# Rook's GitLab post, which the conversation calls with { in, text }.
+include: .rook/gitlab/chat/post.yaml

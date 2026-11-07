@@ -49,36 +49,40 @@ func toolModel(t *testing.T, text string, calls ...llmstandin.ToolCall) (*llmsta
 	return model, web.URL
 }
 
-// traceHelper is an agent with a model at an address, which opens the part
-// messages: the tool clock, a script with no approval, and tell, held for
-// alice.
+// traceHelper is the agent at agents/assistant with a model at an address,
+// which may open the toolkit messages: the tool clock, a script with no
+// approval, and tell, held for someone with messages:approve. Its ask names
+// no asker, so alice may approve what she asked for.
 func traceHelper(address, system string) map[string]string {
 	return map[string]string{
-		"agents/helper.yaml": `
-			agent: helper
-			include: .rook/agents/base.yaml
+		"agents/assistant.yaml": `
+			agent: assistant
+			include: .rook/agent.yaml
 			model: { name: test-model, service: anthropic, address: "` + address + `", secret: TEST_KEY }
-			system: |
-			  ` + system + `
-
-			  ${input.format}
-			open:
-			  messages: { include: parts/messages/part.yaml }
+			system: ` + system + `
+			toolkits:
+			  messages: { include: toolkits/messages.yaml }
 		`,
-		"parts/messages/part.yaml": `
-			does: Messages to the people this bot knows, and the time.
-			ask: { machine: .rook/blocks/approval.yaml, input: { part: messages, people: [alice], request: "${input.request}" } }
+		"toolkits/messages.yaml": `
+			description: Messages to the people this bot knows, and the time.
+			ask:
+			  machine: .rook/approval.yaml
+			  input: { ask: gromit/telegram/chat/ask, approvers: "messages:approve", in: "1" }
 			tools:
 			  clock:
-			    does: Give the time in a zone.
+			    description: Give the time in a zone.
 			    args: { zone: string }
 			    job: { script: ./clock.js, input: { zone: "${args.zone}" } }
 			  tell:
-			    does: Say a text to a person, by their name in people.yaml.
-			    args: { person: string, text: string }
-			    job: { machine: .rook/blocks/tell.yaml, input: { person: "${args.person}", text: "${args.text}" }, approve: true }
+			    description: Write a text in a person's Telegram chat, by the chat's ID.
+			    args: { chat: string, text: string }
+			    job:
+			      call: { at: gromit/telegram/chat/post }
+			      input: { in: "${args.chat}", text: "${args.text}" }
+			      allow: [send:gromit/telegram/chat/post]
+			      approve: true
 		`,
-		"parts/messages/clock.js": `return { zone: input.zone, time: "12:00" }`,
+		"toolkits/clock.js": `return { zone: input.zone, time: "12:00" }`,
 	}
 }
 
@@ -86,21 +90,23 @@ func traceHelper(address, system string) map[string]string {
 // clock and tells bob.
 func openClockTell() []llmstandin.ToolCall {
 	return []llmstandin.ToolCall{
-		{Name: "open", Args: `{"part": "messages"}`},
+		{Name: "open", Args: `{"toolkit": "messages"}`},
 		{Name: "clock", Args: `{"zone": "UTC"}`},
-		{Name: "tell", Args: `{"person": "bob", "text": "the build is green"}`},
+		{Name: "tell", Args: `{"chat": "2", "text": "the build is green"}`},
 	}
 }
 
 // traceProject is the starter with Telegram's stand-in, hearing these
-// messages, and the helper above asking a stand-in model.
+// messages, a lookup that knows the people by their Telegram IDs, and the
+// agent above asking a stand-in model.
 func traceProject(t *testing.T, w *world, messages ...map[string]any) (string, *llmstandin.Server) {
 	t.Helper()
 	w.secret("TEST_KEY", "sk-test")
 	dir := copyStarter(t)
 	model, address := toolModel(t, "done: told bob", openClockTell()...)
 	files := traceHelper(address, "You help alice.")
-	files[".rook/bridges/telegram/telegram.js"] = heard(messages...)
+	files[".rook/telegram/telegram.js"] = heard(messages...)
+	files["people/find.yaml"] = telegramFind
 	write(t, dir, files)
 	return dir, model
 }
@@ -181,10 +187,10 @@ func lastOf(t *testing.T, what string, runs []string) string {
 }
 
 // The trail of one message that leads to two tools and an approval: a person
-// can go from the listener to the chat, from the chat to the conversation, from
-// the conversation to the agent, and from the agent to each tool's name, input
-// and result, the held call, its approval and the question that approval asked,
-// and see who answered it. The chat's record says which rule chose the agent.
+// can go from the router to the conversation, from the conversation to its
+// turn, from the turn to the agent, and from the agent to each tool's name,
+// input and result, the held call, its approval and the question that
+// approval asked, and see who answered it.
 func TestTraceMessageToToolsAndApproval(t *testing.T) {
 	w := newWorld(t)
 	dir, _ := traceProject(t, w, from("1", "tell bob the build is green", 10))
@@ -193,44 +199,24 @@ func TestTraceMessageToToolsAndApproval(t *testing.T) {
 	w.tap(question.ID, "1", "yes")
 	w.until("the reply said", func() bool { return sayings(t, w)["done: told bob"] != nil })
 
-	bridge := w.kept("bridges/telegram.yaml")
-	listener := ""
-	for _, run := range w.at("bridges/telegram.yaml") {
-		if run.Parent == bridge {
-			listener = run.ID
-		}
-	}
-	// 1. listener -> chat
-	chat := lastOf(t, "chat", w.sentFrom(listener, instance.AskEvent, location(".rook/blocks/chat")))
-	if run := w.show(chat); run.StartedBy != listener || run.Key != "telegram:1" || run.Title != "dm: tell bob the build is green" {
-		t.Errorf("the chat is %+v", run)
-	}
-	// 2. chat -> who's rule, and the conversation
-	var rule any
-	for _, run := range stubs(t, w, "who") {
-		if out, ok := w.show(run.ID).Output.(map[string]any); ok {
-			rule = out["rule"]
-		}
-	}
-	if fmt.Sprint(rule) != "map[for:[alice] name:helper]" {
-		t.Errorf("who gives the rule %v", rule)
-	}
-	conversation := lastOf(t, "conversation", w.sentFrom(chat, instance.AskEvent, location(".rook/blocks/conversation")))
-	if run := w.show(conversation); run.StartedBy != chat || run.Key != "telegram:1:helper" || run.Title != "helper in dm: tell bob the build is green" {
+	router := w.kept(router("telegram"))
+	// 1. router -> conversation
+	conversation := lastOf(t, "conversation", w.sentFrom(router, instance.AskEvent, location("conversation")))
+	if run := w.show(conversation); run.StartedBy != router || run.Key != "telegram:1:1:assistant" || run.Title != "telegram dm: tell bob the build is green" {
 		t.Errorf("the conversation is %+v", run)
 	}
-	// 3. conversation -> agent, by the call its child message made
-	var message string
-	for _, run := range stubs(t, w, "message") {
+	// 2. conversation -> its turn, and the turn -> the agent, by its call
+	var turn string
+	for _, run := range stubs(t, w, "turn") {
 		if run.Parent == conversation {
-			message = run.ID
+			turn = run.ID
 		}
 	}
-	agent := lastOf(t, "agent", w.sentFrom(message, instance.AskCall, location("agents/helper")))
-	if run := w.show(agent); run.StartedBy != message || run.Location != location("agents/helper") || run.Title != "alice: tell bob the build is green" {
+	agent := lastOf(t, "agent", w.sentFrom(turn, instance.AskCall, location("agents/assistant")))
+	if run := w.show(agent); run.StartedBy != turn || run.Location != location("agents/assistant") || run.Title != "alice: tell bob the build is green" {
 		t.Errorf("the agent is %+v", run)
 	}
-	// 4. agent -> each tool: its name and input as asked, and its result
+	// 3. agent -> each tool: its name and input as asked, and its result
 	var names []string
 	for _, out := range w.arrived(agent, "done", "turn") {
 		for _, call := range out.(map[string]any)["calls"].([]any) {
@@ -238,7 +224,7 @@ func TestTraceMessageToToolsAndApproval(t *testing.T) {
 			names = append(names, fmt.Sprint(c["name"], c["args"]))
 		}
 	}
-	if want := []string{"openmap[part:messages]", "clockmap[zone:UTC]", "tellmap[person:bob text:the build is green]"}; !slices.Equal(names, want) {
+	if want := []string{"openmap[toolkit:messages]", "clockmap[zone:UTC]", "tellmap[chat:2 text:the build is green]"}; !slices.Equal(names, want) {
 		t.Errorf("the model's calls in the record are %q", names)
 	}
 	var clockInput any
@@ -257,51 +243,43 @@ func TestTraceMessageToToolsAndApproval(t *testing.T) {
 	if len(held) != 1 || held[0].Name != "tell" {
 		t.Errorf("the held calls are %+v", held)
 	}
-	children := map[string]string{}
+	told := lastOf(t, "tell's call", w.sentFrom(agent, instance.AskCall, location(bot+"/telegram/chat/post")))
+	if in := fmt.Sprint(w.show(told).Input); in != "map[in:2 text:the build is green]" {
+		t.Errorf("tell's call was given %s", in)
+	}
+	var approval string
 	for _, a := range w.ownAsks(agent, instance.AskChild) {
-		children[a.Name] = a.Child
+		if a.Name == "ask" {
+			approval = a.Child
+		}
 	}
-	if children["ask"] == "" || children["tell"] == "" {
-		t.Fatalf("the agent's children are %v", children)
-	}
-	if in := fmt.Sprint(w.show(children["tell"]).Input); in != "map[person:bob text:the build is green]" {
-		t.Errorf("tell's run was given %s", in)
-	}
-	if got := w.arrived(agent, "done", "ask"); len(got) != 1 || fmt.Sprint(got[0]) != "map[approve:[tell] note:alice said yes.]" {
+	if got := w.arrived(agent, "done", "ask"); len(got) != 1 || fmt.Sprint(got[0]) != "map[approved:[tell] note:alice said yes.]" {
 		t.Errorf("the approval gave the agent %v", got)
 	}
-	// 5. approval -> question, and who answered it
-	approval := children["ask"]
-	if run := w.show(approval); run.Machine != "approval" || run.Title != "Approve tell: alice: tell bob the build is green" {
+	// 4. approval -> question, and who answered it
+	if run := w.show(approval); run.Machine != "approval" || run.Title != "Approve tell" {
 		t.Errorf("the approval is %+v", run)
 	}
-	asked := lastOf(t, "question", w.sentFrom(approval, instance.AskCall, location(".rook/blocks/ask")))
+	asked := lastOf(t, "question", w.sentFrom(approval, instance.AskCall, location(bot+"/telegram/chat/ask")))
 	if asked != question.ID || w.show(asked).StartedBy != approval {
 		t.Errorf("the approval called %s, and the question is %s", asked, question.ID)
 	}
-	// 6. question -> the bridge's ask that posted it, by ask-on's call
-	var posted []string
-	for _, run := range stubs(t, w, "ask-on") {
-		posted = append(posted, w.sentFrom(run.ID, instance.AskCall, location(".rook/bridges/telegram/ask"))...)
-	}
-	ask := lastOf(t, "the bridge's ask", posted)
-	if w.show(ask).Machine != "telegram-ask" {
-		t.Errorf("the question's call went to %+v", w.show(ask))
-	}
 	var answer any
-	for _, run := range stubs(t, w, "tap") {
+	var press string
+	for _, run := range stubs(t, w, "press") {
 		if run.Parent == asked {
-			answer = w.show(run.ID).Output
+			answer, press = w.show(run.ID).Output, run.ID
 		}
 	}
-	if m, _ := answer.(map[string]any); m["person"] != "alice" || m["counts"] != true {
+	if m, _ := answer.(map[string]any); m["by"] != "alice" || m["counts"] != true {
 		t.Errorf("the question's record says it was answered by %v", answer)
 	}
-	// 7. the record lines rook-design shows are what corbie run show --record
+	// 5. the record lines rook-design shows are what corbie run show --record
 	// prints for these runs.
 	recordsAsThePageShows(t, w, map[string]string{
-		"chat": chat, "conversation": conversation, "agent": agent,
-		"approval": approval, "question": asked, "ask": ask,
+		"router": router, "conversation": conversation, "turn": turn, "agent": agent,
+		"approval": approval, "question": asked, "press": press, "tell": told,
+		"find": lastOf(t, "lookup", w.sentFrom(turn, instance.AskCall, location("people/find"))),
 	})
 }
 
@@ -360,58 +338,38 @@ func recordsAsThePageShows(t *testing.T, w *world, runs map[string]string) {
 	}
 }
 
-// An approval's result names who answered, so the agent's record says who
-// approved.
-func TestApprovalResultNamesTheApprover(t *testing.T) {
-	w := newWorld(t)
-	dir, _ := traceProject(t, w, from("1", "tell bob", 10))
-	w.sync(dir)
-	w.tap(w.question(map[string]bool{}).ID, "1", "yes")
-	w.until("the reply said", func() bool { return sayings(t, w)["done: told bob"] != nil })
-	agent := stubs(t, w, "helper")[0].ID
-	if got := fmt.Sprint(w.arrived(agent, "done", "ask")); got != "[map[approve:[tell] note:alice said yes.]]" {
-		t.Errorf("the approval gave %s", got)
-	}
-}
-
-// A project with no model: the agent is a flow. It says something at the
-// message's address, calls a question for alice, and replies with her answer.
-// The submit names no secret that is missing, and the trail goes from the
-// conversation to the flow and from the flow to the question.
+// A project with no model: the agent is a flow. It posts at the message's
+// chat, calls a question for alice, and replies with her answer. The submit
+// names no secret that is missing, and the trail goes from the turn to the
+// flow and from the flow to the question.
 func TestNoModelFlowAgentIsFollowed(t *testing.T) {
 	w := newWorld(t)
 	dir := copyStarter(t)
 	write(t, dir, map[string]string{
-		".rook/bridges/telegram/telegram.js": heard(from("2", "deploy now", 12)),
-		"rules.yaml": `
-			places:
-			  dm: { readers: [asker] }
-			agents:
-			  - { name: desk, for: [bob] }
-		`,
-		"agents/desk.yaml": `
+		".rook/telegram/telegram.js": heard(from("2", "deploy now", 12)),
+		"people/find.yaml":           telegramFind,
+		"agents/assistant.yaml": `
 			flow: desk
-			input: { said: string, asker: string, address: map }
-			allow: [send:.rook/blocks/ask]
+			input: { messages: list, medium: string, format: "any?", asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
+			allow: [send:gromit/telegram/chat/post, send:gromit/telegram/chat/ask]
 			stages:
 			  ack:
-			    job: { machine: .rook/blocks/say.yaml, input: { address: "${input.address}", text: "asking alice about ${input.said}" } }
+			    job: { call: { at: gromit/telegram/chat/post }, input: { in: "${input.messages[0].chat}", text: "asking alice about ${input.messages[0].text}" } }
 			  question:
 			    job:
-			      call: { at: .rook/blocks/ask }
-			      input: { people: [alice], text: "bob asks: ${input.said}. Allow?", choices: ["yes", "no"] }
+			      call: { at: gromit/telegram/chat/ask }
+			      input: { in: "1", text: "${input.asker.name} asks: ${input.messages[0].text}. Allow?", choices: ["yes", "no"], approvers: "messages:approve" }
 			output: { reply: "alice said ${stages.question.output.choice}" }
 		`,
 	})
-	for _, name := range []string{"agents/helper.yaml", "agents/team.yaml", "parts/messages/part.yaml"} {
-		os.Remove(filepath.Join(dir, name))
-	}
+	os.Remove(filepath.Join(dir, "agents/helper.yaml"))
+	os.Remove(filepath.Join(dir, "agents/team.yaml"))
 	receipt := w.syncAt(w.Client, dir, project)
 	if !receipt.Taken {
 		t.Fatalf("refused: %s", receipt.Refused)
 	}
-	// The harness's stand-in leaves TELEGRAM_TOKEN in the bridge's send and
-	// attachments; that is the bridge's own secret, and no model's.
+	// The harness's stand-in leaves TELEGRAM_TOKEN in the service's machines;
+	// that is the service's own secret, and no model's.
 	for _, missing := range receipt.Tree.Missing {
 		if !strings.Contains(missing, "TELEGRAM_TOKEN") {
 			t.Errorf("a project with no model is missing %v", missing)
@@ -420,44 +378,18 @@ func TestNoModelFlowAgentIsFollowed(t *testing.T) {
 	question := w.question(map[string]bool{})
 	w.tap(question.ID, "1", "yes")
 	w.until("the reply said", func() bool { return sayings(t, w)["alice said yes"] != nil })
-	if to := sayings(t, w)["asking alice about deploy now"]; to["id"] != "2" {
-		t.Errorf("the flow said at %v", to)
+	if to := sayings(t, w)["asking alice about deploy now"]; to["in"] != "2" {
+		t.Errorf("the flow posted in %v", to)
 	}
 	desk := stubs(t, w, "desk")
 	if len(desk) != 1 {
 		t.Fatalf("the desk ran %d times", len(desk))
 	}
-	if asked := lastOf(t, "question", w.sentFrom(desk[0].ID, instance.AskCall, location(".rook/blocks/ask"))); asked != question.ID || w.show(asked).StartedBy != desk[0].ID {
+	if asked := lastOf(t, "question", w.sentFrom(desk[0].ID, instance.AskCall, location(bot+"/telegram/chat/ask"))); asked != question.ID || w.show(asked).StartedBy != desk[0].ID {
 		t.Errorf("the desk called %s, the question is %s", asked, question.ID)
 	}
-	if w.show(w.show(desk[0].ID).StartedBy).Machine != "message" {
-		t.Errorf("the desk was not started by a conversation's message")
-	}
-}
-
-// A project with no agent and no model: alice, whom people.yaml names, is told
-// the bot does not answer her here, and the chat's record shows who gave no
-// agent and no rule.
-func TestNoAgentProjectRefusesAndSaysWhy(t *testing.T) {
-	w := newWorld(t)
-	dir := copyStarter(t)
-	write(t, dir, map[string]string{
-		".rook/bridges/telegram/telegram.js": heard(from("1", "hello", 10)),
-		"rules.yaml":                         "places:\n  dm: { readers: [asker] }\nagents: []\n",
-	})
-	for _, name := range []string{"agents/helper.yaml", "agents/team.yaml", "parts/messages/part.yaml"} {
-		os.Remove(filepath.Join(dir, name))
-	}
-	w.sync(dir)
-	w.until("the refusal", func() bool { return sayings(t, w)["This bot does not answer you here."] != nil })
-	for _, run := range stubs(t, w, "who") {
-		out := w.show(run.ID).Output.(map[string]any)
-		if out["person"] != "alice" || out["agent"] != nil || out["rule"] != nil {
-			t.Errorf("who gave %v", out)
-		}
-	}
-	if runs := stubs(t, w, "conversation"); len(runs) != 0 {
-		t.Errorf("a conversation started: %v", runs)
+	if w.show(w.show(desk[0].ID).StartedBy).Machine != "turn" {
+		t.Errorf("the desk was not started by a conversation's turn")
 	}
 }
 
@@ -469,9 +401,9 @@ func TestChangedAgentWhileApprovalWaits(t *testing.T) {
 	dir, model := traceProject(t, w, from("1", "tell bob", 10))
 	w.sync(dir)
 	question := w.question(map[string]bool{})
-	agent := stubs(t, w, "helper")[0].ID
-	address := strings.TrimSuffix(strings.SplitN(strings.Split(readFile(t, dir, "agents/helper.yaml"), "address: \"")[1], "\"", 2)[0], "/")
-	write(t, dir, map[string]string{"agents/helper.yaml": traceHelper(address, "You help alice, version two.")["agents/helper.yaml"]})
+	agent := stubs(t, w, "assistant")[0].ID
+	address := strings.TrimSuffix(strings.SplitN(strings.Split(readFile(t, dir, "agents/assistant.yaml"), "address: \"")[1], "\"", 2)[0], "/")
+	write(t, dir, map[string]string{"agents/assistant.yaml": traceHelper(address, "You help alice, version two.")["agents/assistant.yaml"]})
 	receipt := w.syncAt(w.Client, dir, project)
 	if len(receipt.Tree.Cancelled) > 0 {
 		t.Errorf("the submit cancelled %v", receipt.Tree.Cancelled)
@@ -486,7 +418,7 @@ func TestChangedAgentWhileApprovalWaits(t *testing.T) {
 	if run := w.show(agent); run.Status != "done" {
 		t.Errorf("the agent ended %s", run.Status)
 	}
-	w.sendTo(".rook/blocks/chat.yaml", "telegram:1", "message", from("1", "again", 11))
+	w.sendTo("conversation.yaml", key("1", "1"), "message", from("1", "again", 11))
 	w.until("a second question", func() bool { return len(questions(w)) == 1 })
 	if system := model.Calls[len(model.Calls)-1].System; !strings.Contains(system, "version two") {
 		t.Errorf("the next message's agent was told %q", system)
@@ -502,77 +434,31 @@ func readFile(t *testing.T, dir, name string) string {
 	return string(b)
 }
 
-// A changed rules.yaml, submitted while a conversation waits on an approval,
-// cancels the chat, as rook-project says, and leaves the conversation, the
-// agent and the question running. A yes finishes the answer at the message's
-// address, and the thread's next message starts a new chat whose record shows
-// the new rule.
-func TestChangedRulesWhileApprovalWaits(t *testing.T) {
-	w := newWorld(t)
-	dir, _ := traceProject(t, w, from("1", "tell bob", 10))
-	w.sync(dir)
-	question := w.question(map[string]bool{})
-	chat := keyed(w, ".rook/blocks/chat.yaml")["telegram:1"][0].ID
-	conversation := keyed(w, ".rook/blocks/conversation.yaml")["telegram:1:helper"][0].ID
-	write(t, dir, map[string]string{"rules.yaml": `
-		places:
-		  dm: { readers: [asker] }
-		agents:
-		  - { name: helper, for: [team] }
-	`})
-	w.sync(dir)
-	if run := w.show(chat); run.Status != "cancelled" {
-		t.Errorf("the chat is %s", run.Status)
-	}
-	if run := w.show(conversation); run.Status != "running" {
-		t.Errorf("the conversation is %s", run.Status)
-	}
-	w.tap(question.ID, "1", "yes")
-	w.until("the reply said", func() bool { return sayings(t, w)["done: told bob"] != nil })
-	if to := sayings(t, w)["done: told bob"]; to["id"] != "1" || to["answers"] != "1:10" {
-		t.Errorf("the reply went to %v", to)
-	}
-	w.sendTo(".rook/blocks/chat.yaml", "telegram:1", "message", from("1", "again", 11))
-	w.until("the new chat's route", func() bool {
-		for _, run := range stubs(t, w, "who") {
-			if out, ok := w.show(run.ID).Output.(map[string]any); ok && fmt.Sprint(out["rule"]) == "map[for:[team] name:helper]" {
-				return true
-			}
-		}
-		return false
-	})
-	chats := keyed(w, ".rook/blocks/chat.yaml")["telegram:1"]
-	if len(chats) != 2 {
-		t.Errorf("the thread had %d chats", len(chats))
-	}
-}
-
 // A flow agent deleted while its question waits: the submit cancels the agent
 // and, with it, the question it called. The asker is told the answer failed,
-// and so is a later message, since rules.yaml still names the agent, which has
-// no file. The message's record names the agent's location.
+// and a later message that the bot has no agent yet; the failed turn names the
+// agent's location.
 func TestDeletedAgentWhileQuestionWaits(t *testing.T) {
 	w := newWorld(t)
 	dir := copyStarter(t)
 	write(t, dir, map[string]string{
-		".rook/bridges/telegram/telegram.js": heard(from("2", "deploy now", 12)),
-		"rules.yaml":                         "places:\n  dm: { readers: [asker] }\nagents:\n  - { name: desk, for: [bob] }\n",
-		"agents/desk.yaml": `
+		".rook/telegram/telegram.js": heard(from("2", "deploy now", 12)),
+		"agents/assistant.yaml": `
 			flow: desk
-			input: { said: string, address: map }
-			allow: [send:.rook/blocks/ask]
+			input: { messages: list, medium: string, format: "any?", asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
+			allow: [send:gromit/telegram/chat/ask]
 			stages:
 			  question:
 			    job:
-			      call: { at: .rook/blocks/ask }
-			      input: { people: [alice], text: "bob asks: ${input.said}. Allow?", choices: ["yes", "no"] }
+			      call: { at: gromit/telegram/chat/ask }
+			      input: { in: "1", text: "bob asks: ${input.messages[0].text}. Allow?", choices: ["yes", "no"], approvers: "messages:approve" }
 			output: { reply: "alice said ${stages.question.output.choice}" }
 		`,
 	})
 	w.sync(dir)
 	question := w.question(map[string]bool{})
 	desk := stubs(t, w, "desk")[0].ID
-	if err := os.Remove(filepath.Join(dir, "agents/desk.yaml")); err != nil {
+	if err := os.Remove(filepath.Join(dir, "agents/assistant.yaml")); err != nil {
 		t.Fatal(err)
 	}
 	w.sync(dir)
@@ -583,34 +469,15 @@ func TestDeletedAgentWhileQuestionWaits(t *testing.T) {
 	if run := w.show(question.ID); run.Status != "cancelled" {
 		t.Errorf("the question is %s", run.Status)
 	}
-	sorry := "That could not be answered."
-	w.until("the asker told", func() bool { return sayings(t, w)[sorry] != nil })
-	w.sendTo(".rook/blocks/chat.yaml", "telegram:2", "message", from("2", "again", 13))
-	var failure string
-	w.until("the second failure", func() bool {
-		for _, run := range stubs(t, w, "message") {
-			for _, a := range w.ownAsks(run.ID, instance.AskFail) {
-				failure = a.Error.Error
-			}
-		}
-		return strings.Contains(failure, "agents/desk")
-	})
-}
-
-// A no is followed the same way: the agent's record shows the approval's no,
-// and tell never runs.
-func TestApprovalNoIsFollowed(t *testing.T) {
-	w := newWorld(t)
-	dir, _ := traceProject(t, w, from("1", "tell bob", 10))
-	w.sync(dir)
-	w.tap(w.question(map[string]bool{}).ID, "1", "no")
-	w.until("the reply said", func() bool { return sayings(t, w)["done: told bob"] != nil })
-	agent := stubs(t, w, "helper")[0].ID
-	if got := fmt.Sprint(w.arrived(agent, "done", "ask")); got != "[map[approve:[] note:alice said no.]]" {
-		t.Errorf("the approval gave %s", got)
+	w.until("the asker told", func() bool { return sayings(t, w)["That could not be answered."] != nil })
+	w.sendTo("conversation.yaml", key("2", "2"), "message", from("2", "again", 13))
+	w.until("the asker told there is no agent", func() bool { return sayings(t, w)["This bot has no agent yet."] != nil })
+	failed := false
+	for _, run := range stubs(t, w, "turn") {
+		failed = failed || strings.Contains(w.show(run.ID).Error, "agents/assistant")
 	}
-	if runs := stubs(t, w, "tell"); len(runs) != 0 {
-		t.Errorf("tell ran after a no")
+	if !failed {
+		t.Errorf("no failed turn names the agent's location")
 	}
 }
 
@@ -619,10 +486,10 @@ func TestApprovalNoIsFollowed(t *testing.T) {
 func TestFailedToolIsFollowed(t *testing.T) {
 	w := newWorld(t)
 	dir, model := traceProject(t, w, from("1", "what time is it", 10))
-	write(t, dir, map[string]string{"parts/messages/clock.js": `throw new Error("the clock is broken")`})
+	write(t, dir, map[string]string{"toolkits/clock.js": `throw new Error("the clock is broken")`})
 	w.sync(dir)
 	w.until("a question", func() bool { return len(questions(w)) == 1 })
-	agent := stubs(t, w, "helper")[0].ID
+	agent := stubs(t, w, "assistant")[0].ID
 	failed := fmt.Sprint(w.arrived(agent, "failed", "clock"))
 	if !strings.Contains(failed, "the clock is broken") {
 		t.Errorf("the record shows the clock's failure as %s", failed)
@@ -633,16 +500,18 @@ func TestFailedToolIsFollowed(t *testing.T) {
 	}
 }
 
-// A tap by someone the question does not name does not answer it, and the
-// question's record shows the tap, who it was from, and that it did not count.
+// A tap by someone whose scopes lack the approvers' does not answer a
+// question, and the question's record shows the tap, who it was from, and that
+// it did not count. Then alice's tap counts.
 func TestTapByAStrangerIsShownAndIgnored(t *testing.T) {
 	w := newWorld(t)
-	dir, _ := traceProject(t, w, from("1", "tell bob", 10))
+	dir, _ := traceProject(t, w, from("2", "tell bob", 10))
+	write(t, dir, map[string]string{"people/find.yaml": telegramFind})
 	w.sync(dir)
 	question := w.question(map[string]bool{})
-	w.tap(question.ID, "2", "yes")
+	w.tap(question.ID, "9", "yes")
 	w.until("the tap checked", func() bool {
-		for _, run := range stubs(t, w, "tap") {
+		for _, run := range stubs(t, w, "press") {
 			if run.Parent == question.ID && run.Status == "done" {
 				return true
 			}
@@ -650,13 +519,13 @@ func TestTapByAStrangerIsShownAndIgnored(t *testing.T) {
 		return false
 	})
 	if run := w.show(question.ID); run.Status != "running" {
-		t.Fatalf("bob's tap ended the question: %s", run.Status)
+		t.Fatalf("the stranger's tap ended the question: %s", run.Status)
 	}
 	var out any
-	for _, run := range stubs(t, w, "tap") {
+	for _, run := range stubs(t, w, "press") {
 		out = w.show(run.ID).Output
 	}
-	if m, _ := out.(map[string]any); m["person"] != "bob" || m["counts"] != false {
+	if m, _ := out.(map[string]any); m["by"] != "Stranger" || m["counts"] != false {
 		t.Errorf("the tap's record says %v", out)
 	}
 	w.tap(question.ID, "1", "yes")
@@ -664,60 +533,49 @@ func TestTapByAStrangerIsShownAndIgnored(t *testing.T) {
 }
 
 // A conversation's next message, sent while the approval waits, waits its
-// turn: the chat takes it, the conversation holds it, and once the yes is given
-// a second agent run answers it, given both messages as the request.
+// turn: the conversation keeps it, and once the yes is given a second agent
+// run answers it, given that message alone, with the first turn in its
+// conversation.
 func TestSecondMessageWaitsForTheApproval(t *testing.T) {
-	w := newWorld(t)
-	dir, model := traceProject(t, w, from("1", "tell bob", 10))
-	w.sync(dir)
-	question := w.question(map[string]bool{})
-	w.sendTo(".rook/blocks/chat.yaml", "telegram:1", "message", from("1", "and the time?", 11))
-	w.until("the chat to route it", func() bool {
-		n := 0
-		for _, run := range stubs(t, w, "route") {
-			if run.Status == "done" {
-				n++
-			}
-		}
-		return n == 2
-	})
-	if n := len(stubs(t, w, "helper")); n != 1 {
-		t.Errorf("%d agent runs while the first waits", n)
-	}
-	w.tap(question.ID, "1", "yes")
-	second := w.question(map[string]bool{question.ID: true})
-	agents := stubs(t, w, "helper")
-	if len(agents) != 2 {
-		t.Fatalf("%d agent runs", len(agents))
-	}
-	var request any
-	for _, run := range agents {
-		if in := w.show(run.ID).Input.(map[string]any); in["said"] == "and the time?" {
-			request = in["request"]
-		}
-	}
-	if request != "alice: tell bob\nalice: and the time?" {
-		t.Errorf("the second agent was given the request %q", request)
-	}
-	w.tap(second.ID, "1", "no")
-	_ = model
-}
-
-// The bridge's file removed and put back while a question waits: the bridge
-// stops and starts, the conversation, agent and question go on, and a tap
-// after it answers the question.
-func TestBridgeRestartedWhileApprovalWaits(t *testing.T) {
 	w := newWorld(t)
 	dir, _ := traceProject(t, w, from("1", "tell bob", 10))
 	w.sync(dir)
 	question := w.question(map[string]bool{})
-	bridge := readFile(t, dir, "bridges/telegram.yaml")
+	w.sendTo("conversation.yaml", key("1", "1"), "message", from("1", "and the time?", 11))
+	quiet()
+	if n := len(stubs(t, w, "assistant")); n != 1 {
+		t.Errorf("%d agent runs while the first waits", n)
+	}
+	w.tap(question.ID, "1", "yes")
+	second := w.question(map[string]bool{question.ID: true})
+	agents := agentRuns(w, "1", "1")
+	if len(agents) != 2 {
+		t.Fatalf("%d agent runs", len(agents))
+	}
+	if got := w.texts(agents[1]); !slices.Equal(got, []string{"and the time?"}) {
+		t.Errorf("the second agent was given %q", got)
+	}
+	if w.show(agents[1].ID).Input.(map[string]any)["conversation"] == nil {
+		t.Errorf("the second agent was given no conversation")
+	}
+	w.tap(second.ID, "1", "no")
+}
+
+// The router's file removed and put back while a question waits: the router
+// stops and starts, the conversation, agent and question go on, and a tap
+// after it answers the question.
+func TestRouterRestartedWhileApprovalWaits(t *testing.T) {
+	w := newWorld(t)
+	dir, _ := traceProject(t, w, from("1", "tell bob", 10))
+	w.sync(dir)
+	question := w.question(map[string]bool{})
+	routerFile := readFile(t, dir, router("telegram"))
 	removeListener(t, dir)
 	w.sync(dir)
 	if run := w.show(question.ID); run.Status != "running" {
 		t.Fatalf("the question is %s", run.Status)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "bridges/telegram.yaml"), []byte(bridge), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, router("telegram")), []byte(routerFile), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	w.sync(dir)
@@ -725,9 +583,9 @@ func TestBridgeRestartedWhileApprovalWaits(t *testing.T) {
 	w.until("the reply said", func() bool { return sayings(t, w)["done: told bob"] != nil })
 }
 
-// Every run a message led to is listed with its location, and each but the
-// listener's chat names the run that started it, so a person with only run ls
-// and run show can walk the trail backwards from the question to the message.
+// Every run a message led to is listed with its location, and each names the
+// run that started it, or is its child, so a person with only run ls and run
+// show can walk the trail backwards from the question to the router.
 func TestTrailWalksBackwardsFromTheQuestion(t *testing.T) {
 	w := newWorld(t)
 	dir, _ := traceProject(t, w, from("1", "tell bob", 10))
@@ -743,7 +601,7 @@ func TestTrailWalksBackwardsFromTheQuestion(t *testing.T) {
 		}
 		id = next
 	}
-	want := []string{"ask", "approval", "helper", "message", "conversation", "chat", "telegram-listen", "telegram-bridge"}
+	want := []string{"telegram-chat-ask", "approval", "assistant", "turn", "conversation", "gromit"}
 	if !slices.Equal(chain, want) {
 		t.Errorf("walking back from the question gives %v", chain)
 	}
@@ -756,14 +614,14 @@ func TestMissingModelSecretIsNamed(t *testing.T) {
 	dir := copyStarter(t)
 	_, address := toolModel(t, "hi", openClockTell()...)
 	files := traceHelper(address, "You help alice.")
-	files[".rook/bridges/telegram/telegram.js"] = heard(from("1", "hello", 10))
+	files[".rook/telegram/telegram.js"] = heard(from("1", "hello", 10))
 	write(t, dir, files)
 	receipt := w.syncAt(w.Client, dir, project)
 	if !strings.Contains(fmt.Sprint(receipt.Tree.Missing), "TEST_KEY") {
 		t.Errorf("the submit names as missing %v", receipt.Tree.Missing)
 	}
 	w.until("the asker told", func() bool { return sayings(t, w)["That could not be answered."] != nil })
-	agents := stubs(t, w, "helper")
+	agents := stubs(t, w, "assistant")
 	if len(agents) != 1 {
 		t.Fatalf("%d agent runs", len(agents))
 	}

@@ -1,23 +1,23 @@
 # Rook
 
-Rook is ready-made Corbie machines: bridges for Telegram, Slack, GitLab and Jira, and the blocks that answer what people ask on them. The program `corbie-rook` writes them into a project. `corbie run submit` brings a project's runs into line with its files, and `corbie ui` shows them.
+Rook is ready-made Corbie machines: the listeners and calls of Telegram, Slack, GitLab and Jira, a lookup, an approval and the question it asks, and the starting files of a project, its routers and conversation among them. The program `corbie-rook` writes them into a project. `corbie run submit` brings a project's runs into line with its files, and `corbie ui` shows them.
 
 ## Where to start
 
 - `pages/`: Rook's pages of the manual. `rook-design.txt` is the design, `rook-project.txt` how a person uses it, and `rook.txt` what a model is told when `corbie mcp` allows it `rook init`, which `init` also writes as `.rook/AGENTS.md`. `README.md` is the front page on GitHub.
-- `shipped/`: what is written into a project's `.rook/`. `starter/`: a project's first files, which hold no agent and no part. `testdata/`: the agents, part and people the tests add to them. `bridges/`: the file that starts each bridge.
+- `shipped/`: what is written into a project's `.rook/`. `starter/`: a project's first files, which hold no agent and no toolkit; `BOT` in a path or a text there is the bot's name, and `starter/BOT/<service>/` holds a service's router and placed calls. `testdata/`: the agents, toolkit and people the tests add to them, and `testdata/gromit/`, the worked example as a whole project without `.rook/`, which `gromit_test.go` runs.
 - `rook.go`: what writes them.
 
 ## What holds
 
-- **Two ideas**: machine and block. `people.yaml` and `rules.yaml` are data that machines read, and `.rook/agents/base.yaml` and the files in `parts/` are fields an agent includes. Add no other idea a person must learn.
-- **Five slots**: a project fills bridges, people, attend, rules and parts. Design a piece as one way of filling a slot, and never around one project. Rook's ready-made way to fill a slot is in `shipped/<slot>/`.
-- **A message is one mapping**, the same from every bridge, given in `pages/rook-design.txt`. A block takes it or a part of it, and gives data back. A bridge only translates between its service and that mapping.
-- **A project's files hold choices; `.rook/` holds what Rook does.** Rook never updates a project's file, so anything Rook may change goes in `.rook/`. The manual page `rook-starter` shows this version's starting files, and `init` names a project's files that differ from them.
+- **Two ideas**: machine and toolkit. Rook ships flows, statecharts and agents, and files an agent includes (`.rook/agent.yaml`, `.rook/filters/model.yaml`). `people/scopes.yaml` is the one table, and only the lookup reads it. Rook ships no file it reads as configuration. Add no other idea a person must learn.
+- **The project's machines say what happens.** A router routes on a message's fields, and the conversation is the project's own file, with its stages written in it. No location is passed in a message's data.
+- **A message is one mapping**, the same from every service, given in `pages/rook-design.txt`. A listener only translates between its service and that mapping, and a call takes the service's own input or the shared `{ in, text }`.
+- **A project's files hold choices; `.rook/` holds what Rook does.** Rook never updates a project's file, so anything Rook may change goes in `.rook/`. The one exception: `init` adds `.rook/` and `people/scopes.yaml` to `.corbieignore` when it lacks them. The manual page `rook-starter` shows this version's starting files, and `init` names a project's files that differ from them.
 - **Nothing personal lives here.** No real name, address, ID or host goes in this repository. A person's own machines live in their own directory.
 - **The program does one thing**: writes machines into a project. Everything else is written in machines, which the person can change.
 - **A person changes nothing in `.rook/`.** Rook rewrites it, and changes no other file.
-- **Rook holds no secret.** Every service is reached by a bridge's machines, whose secrets Corbie keeps.
+- **Rook holds no secret.** Every service is reached by the service's machines, whose secrets Corbie keeps at `<bot>/<service>`.
 - Corbie stays simple and generic, and gains nothing that serves Rook alone.
 
 ## What the code is for
@@ -52,6 +52,10 @@ Words:
   - **run**: one execution of a machine, which a client starts, lists and shows.
   - **directory**, never "folder". **computer**, never "machine".
   - **controller**, **runner**, **client**: the three kinds of process. **store**: the directory or bucket they share.
+- Rook's own words are settled too:
+  - **service**: Telegram, Slack, GitLab or Jira, and its directory `<bot>/<service>/`. Never "bridge".
+  - **router**, **listener**, **conversation**, **lookup**, **approval**, **question** (a bot's `chat/ask`), **scope**.
+  - **toolkit**, never "part"; **description**, never "does"; **listed file**, a file `.corbieignore` lists, never "piece".
 - A page does not use words that only the code needs: pass, wake, mark, head, receipt, party. It says what happens instead.
 
 Sentences:

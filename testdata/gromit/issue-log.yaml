@@ -1,0 +1,18 @@
+# One run for each orders issue, which the GitLab router sends each change to.
+# It writes the change in #orders-log. A change that comes while one is posted
+# is kept, and posted next. A day with no change ends the run.
+statechart: issue-log
+description: Writes each change to an orders issue in #orders-log.
+lifetime: keyed
+receive: [gromit/gitlab/gromit]
+allow: [send:gromit/slack/chat/post]
+initial: waiting
+states:
+  waiting:
+    timers: { quiet: 1d }
+    on: { change: posting, quiet: over }
+  posting:
+    defer: [change]
+    job: { call: { at: gromit/slack/chat/post }, input: { in: "#orders-log", text: "${event.data.chat + ': ' + event.data.text}" } }
+    on: { done: waiting, failed: waiting }
+  over: { end: done }
