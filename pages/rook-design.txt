@@ -24,7 +24,7 @@ deleted.
   people/scopes.yaml                 each email's name and scopes, which the lookup reads
   <bot>/<service>/<bot>.yaml         singleton: the router, and Rook's listener as its child
   <bot>/<service>/chat/post.yaml     include: .rook/<service>/chat/post.yaml
-  <bot>/<service>/chat/ask.yaml      include: .rook/<service>/chat/ask.yaml, on Slack and Telegram
+  <bot>/<service>/chat/ask.yaml      include: .rook/<service>/chat/ask.yaml, on Slack, Telegram and Jira
   <bot>/slack/assistant/status.yaml  include: .rook/slack/assistant/status.yaml
   <bot>/telegram/chat/status.yaml    include: .rook/telegram/chat/status.yaml
   <bot>/<service>/files/get.yaml     include: .rook/<service>/files/get.yaml; on Jira attachment/get.yaml
@@ -36,7 +36,7 @@ deleted.
   .rook/slack/                       chat/post, chat/ask, assistant/status, files/get, files/upload, conversations/replies
   .rook/telegram/                    chat/post, chat/ask, chat/status, files/get, files/send
   .rook/gitlab/                      chat/post, issues/notes/create, issues/notes/list, uploads/create, files/get, api.js
-  .rook/jira/                        chat/post, issue/comment/create, issue/comment/list, issue/attachments/create, attachment/get, api.js
+  .rook/jira/                        chat/post, chat/ask, issue/comment/create, issue/comment/list, issue/attachments/create, attachment/get, api.js
   .rook/approval.yaml, approval.js   the ask a toolkit or a machine names
   .rook/people/file.yaml, file.js    the lookup that reads people/scopes.yaml by email
   .rook/agent.yaml                   included by an agent: its input, prompt, conversation and receive: [conversation]
@@ -52,8 +52,12 @@ slack, telegram, gitlab or jira.
   stop      service, place, chat, user, name, email
 
 `user` is the sender's ID on the service, and `email` is given where the
-service gives one. `run` is the ID of the question's run without its client's
-name, which the button holds.
+service gives one. `history` is a blob of a list of `{ line, attachments }`,
+oldest first: the thread before the message, and `complete` is true when it is
+the whole thread. `run` is the ID of the question's run without its client's
+name, which the button holds. Jira has no buttons: a question's comment shows
+a line for each choice, `<choice> <run>`, and a comment that holds only such a
+line is the answer.
 
 A router sends a message and a stop to the conversation keyed
 `<service>:<chat>:<user>:<agent>`, so each person in a thread has their own

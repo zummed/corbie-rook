@@ -1101,7 +1101,11 @@ func (j *jira) serve(w http.ResponseWriter, r *http.Request) {
 		j.reads++
 		comments := append([]map[string]any{}, j.comments...)
 		slices.Reverse(comments)
-		json.NewEncoder(w).Encode(map[string]any{"comments": comments})
+		total := len(comments)
+		if most, err := strconv.Atoi(r.URL.Query().Get("maxResults")); err == nil && most < total {
+			comments = comments[:most]
+		}
+		json.NewEncoder(w).Encode(map[string]any{"comments": comments, "total": total, "startAt": 0})
 	case r.Method == "POST" && r.URL.Path == "/rest/api/2/issue/OPS-12/attachments":
 		if r.Header.Get("X-Atlassian-Token") != "no-check" {
 			w.WriteHeader(403)
@@ -1172,118 +1176,6 @@ func (j *jira) asked() int {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	return j.asks
-}
-
-// A comment naming the bot on an issue is answered there, once, and the bot's own
-// words and one that names nobody are left alone.
-func TestJiraIssuesAreAnswered(t *testing.T) {
-	t.Skip("R6 revives this: Jira")
-	j := newJira(t)
-	w := newWorld(t)
-	w.secret("JIRA_TOKEN", "jira-token")
-	dir := pointed(t, "jira", j.Server)
-	jiraAt(w, j)
-	w.sync(dir)
-	w.kept(router("jira"))
-	// The first ask marks the time, and the next is the first to read.
-	next := func() {
-		before := j.asked()
-		w.until("Jira asked again", func() bool {
-			w.set(w.now().Add(31 * time.Second))
-			time.Sleep(5 * interval)
-			return j.asked() > before
-		})
-	}
-	next()
-	at := time.Now().Add(time.Second)
-	j.comment("1", "acc-1", "no name at all", at)
-	j.comment("2", "acc-bot", "[~accountid:acc-bot] my own words", at)
-	j.comment("3", "acc-1", "[~accountid:acc-bot] the build fails", at)
-	j.comment("4", "acc-9", "[~accountid:acc-bot] hello", at.Add(time.Millisecond))
-	next()
-	w.until("two comments", func() bool { return len(j.saying()) >= 2 })
-	next()
-	next()
-	got := strings.Join(j.saying(), " | ")
-	if !strings.Contains(got, "the build fails") || !strings.Contains(got, "only the people") || len(j.saying()) != 2 {
-		t.Fatalf("the bot said %s", got)
-	}
-}
-
-// An opened issue that does not name the bot, with a comment that does made
-// while it waits, is answered once it settles: the comment is heard.
-func TestJiraHearsACommentMadeWhileItsIssueWaits(t *testing.T) {
-	t.Skip("R6 revives this: Jira")
-	j := newJira(t)
-	w := newWorld(t)
-	w.secret("JIRA_TOKEN", "jira-token")
-	dir := pointed(t, "jira", j.Server)
-	jiraAt(w, j)
-	setSite(t, dir, router("jira"), "projects: [OPS] }", "projects: [OPS], settle: 2m }")
-	w.sync(dir)
-	next := func() {
-		before := j.asked()
-		w.until("Jira asked again", func() bool {
-			w.set(w.now().Add(31 * time.Second))
-			time.Sleep(5 * interval)
-			return j.asked() > before
-		})
-	}
-	next()
-	at := time.Now().Add(time.Second)
-	j.mu.Lock()
-	j.fields = map[string]any{"created": jiraTime(at), "updated": jiraTime(time.Now()), "description": "It fails."}
-	j.mu.Unlock()
-	j.comment("1", "acc-1", "[~accountid:acc-bot] can you look?", at.Add(time.Second))
-	next()
-	next()
-	time.Sleep(10 * interval)
-	if got := j.saying(); len(got) != 0 {
-		t.Fatalf("the bot said %v before the issue settled", got)
-	}
-	j.mu.Lock()
-	j.fields["updated"] = jiraTime(time.Now().Add(-10 * time.Minute))
-	j.mu.Unlock()
-	next()
-	w.until("the answer", func() bool { return len(j.saying()) >= 1 })
-	next()
-	time.Sleep(10 * interval)
-	if got := j.saying(); len(got) != 1 || !strings.Contains(got[0], "can you look?") {
-		t.Fatalf("the bot said %v", got)
-	}
-}
-
-// A comment made at the same moment as the last one heard is heard, and the one
-// before it is not heard twice.
-func TestJiraHearsTwoCommentsAtOneMoment(t *testing.T) {
-	t.Skip("R6 revives this: Jira")
-	j := newJira(t)
-	w := newWorld(t)
-	w.secret("JIRA_TOKEN", "jira-token")
-	dir := pointed(t, "jira", j.Server)
-	jiraAt(w, j)
-	w.sync(dir)
-	next := func() {
-		before := j.asked()
-		w.until("Jira asked again", func() bool {
-			w.set(w.now().Add(31 * time.Second))
-			time.Sleep(5 * interval)
-			return j.asked() > before
-		})
-	}
-	next()
-	at := time.Now().Add(time.Second)
-	j.comment("1", "acc-1", "[~accountid:acc-bot] first", at)
-	next()
-	w.until("the first comment", func() bool { return len(j.saying()) >= 1 })
-	j.comment("2", "acc-1", "[~accountid:acc-bot] second", at)
-	next()
-	w.until("the second comment", func() bool { return len(j.saying()) >= 2 })
-	next()
-	time.Sleep(20 * interval)
-	if got := j.saying(); len(got) != 2 || !strings.Contains(got[0], "first") || !strings.Contains(got[1], "second") {
-		t.Fatalf("the bot said %v", got)
-	}
 }
 
 // A slack stands in for Slack's Web API and Socket Mode.
@@ -1809,85 +1701,6 @@ func TestRestrictedCommentIsNotHeard(t *testing.T) {
 	if got := gl.said(); len(got) != 1 || !strings.Contains(got[0], "public") {
 		t.Fatalf("the bot said %v", got)
 	}
-}
-
-// A restricted comment on Jira is not heard either.
-func TestRestrictedJiraCommentIsNotHeard(t *testing.T) {
-	t.Skip("R6 revives this: Jira")
-	j := newJira(t)
-	w := newWorld(t)
-	w.secret("JIRA_TOKEN", "jira-token")
-	dir := pointed(t, "jira", j.Server)
-	jiraAt(w, j)
-	w.sync(dir)
-	w.kept(router("jira"))
-	ask := func() {
-		before := j.asked()
-		w.until("Jira asked", func() bool {
-			w.set(w.now().Add(31 * time.Second))
-			time.Sleep(5 * interval)
-			return j.asked() > before
-		})
-	}
-	ask()
-	at := time.Now().Add(time.Second)
-	j.comment("1", "acc-1", "[~accountid:acc-bot] restricted", at)
-	j.comment("2", "acc-1", "[~accountid:acc-bot] internal", at)
-	j.comment("3", "acc-1", "[~accountid:acc-bot] open to all", at.Add(time.Second))
-	j.mu.Lock()
-	j.comments[0]["visibility"] = map[string]any{"type": "role", "value": "Administrators"}
-	j.comments[1]["jsdPublic"] = false
-	j.mu.Unlock()
-	ask()
-	w.until("the bot to answer", func() bool { return len(j.saying()) >= 1 })
-	time.Sleep(20 * interval)
-	if got := j.saying(); len(got) != 1 || !strings.Contains(got[0], "open to all") {
-		t.Fatalf("the bot said %v", got)
-	}
-}
-
-// Jira's issue and its earlier comments are read, by the comment that named the bot.
-func TestJiraChatReadsItsIssue(t *testing.T) {
-	t.Skip("R6 revives this: Jira")
-	j := newJira(t)
-	w := newWorld(t)
-	w.secret("JIRA_TOKEN", "jira-token")
-	dir := pointed(t, "jira", j.Server)
-	jiraAt(w, j)
-	echoing(t, dir)
-	w.sync(dir)
-	w.kept(router("jira"))
-	ask := func() {
-		before := j.asked()
-		w.until("Jira asked", func() bool {
-			w.set(w.now().Add(31 * time.Second))
-			time.Sleep(5 * interval)
-			return j.asked() > before
-		})
-	}
-	ask()
-	at := time.Now().Add(time.Second)
-	j.comment("1", "acc-1", "an earlier word", at)
-	j.comment("2", "acc-bot", "my earlier reply", at)
-	j.comment("3", "acc-1", "a restricted word", at)
-	j.mu.Lock()
-	j.comments[2]["visibility"] = map[string]any{"type": "role", "value": "Administrators"}
-	j.mu.Unlock()
-	j.comment("4", "acc-1", "[~accountid:acc-bot] go on", at.Add(time.Second))
-	j.comment("5", "acc-bot", "written later", at)
-	ask()
-	w.until("the bot to answer", func() bool { return len(j.saying()) >= 1 })
-	got := j.saying()[0]
-	if !strings.Contains(got, "Al: Broken") || !strings.Contains(got, "acc-1: an earlier word") || !strings.Contains(got, "you: my earlier reply") ||
-		strings.Contains(got, "written later") || strings.Contains(got, "a restricted word") {
-		t.Fatalf("the bot said %q", got)
-	}
-	w.titled(map[string][]string{
-		"jira-bridge": {"Jira bridge"},
-		"jira-listen": {"Jira listener"},
-		"chat":        {"OPS-12 go on"},
-		"message":     {"go on"},
-	})
 }
 
 // A person with no agent reads nothing of a thread, and Slack's thread is read to

@@ -1,4 +1,5 @@
-# A larger file is given without its contents.
+# `attachments` are a message's, each { name, type, size, id }. It gives each
+# with `file`, its contents as a blob; a file over 32 MiB is given without.
 flow: jira-attachment-get
 description: Downloads the files on a Jira issue that a message has, each at most 32 MiB.
 input: { attachments: list }

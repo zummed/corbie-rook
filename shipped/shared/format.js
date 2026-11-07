@@ -22,7 +22,7 @@ const ways = {
   slack: "Your reply is shown on Slack, in Markdown.\n\n" + chart + " Slack draws at most two charts in a message, and shows any other as a table.\n\n" + layout,
   telegram: "Your reply is shown on Telegram as plain text: write no Markdown, and no tables.",
   gitlab: "Your reply is a comment on a GitLab issue, in GitLab Flavored Markdown. GitLab draws a fenced block marked mermaid as a diagram.\n\n" + chart + " GitLab shows a chart as a table.",
-  jira: "Your reply is a comment on a Jira issue, in Jira's wiki markup, not Markdown.\n\n" + chart + " Jira shows a chart as a table.",
+  jira: "Your reply is a comment on a Jira issue, in Markdown, which Rook writes as Jira's wiki markup.\n\n" + chart + " Jira shows a chart as a table.",
 }
 // Only an agent's last text is its reply, so text written beside a tool call is lost.
 const last = "Only what you write after your last tool call is shown, so write the whole reply there."

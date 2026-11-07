@@ -1,0 +1,98 @@
+# Rook's question on Jira, which an approval calls. It writes `text` as a
+# comment on the issue `in`, such as OPS-12, with a line for each of `choices`
+# that holds the choice and this run's ID. The listener sends a comment that
+# holds only such a line to the router as answer, and the router sends it here.
+#
+# An answer counts when its choice is one of `choices`, the person's scopes, by
+# the lookup at `lookup`, hold `approvers`, and their email is not `asker`. Any
+# other is refused in a comment that names the person, and the question waits
+# on. The first answer that counts ends the question with { choice, by }, and
+# no answer that counts within `within`, by default a week, ends it with
+# { choice: no }. Either way a last comment says so.
+statechart: jira-chat-ask
+description: Asks a question in a comment on a Jira issue, and waits for a comment that answers it.
+title: "${String(input.text).split('\\n')[0]}"
+input:
+  in: string
+  text: string
+  choices: list
+  lookup: string
+  approvers: string
+  asker: "string?"
+  within: "string?"
+initial: asking
+states:
+  asking:
+    job:
+      script: .rook/jira/jira.js
+      files: [.rook/jira/api.js, .rook/shared/rich.js]
+      input: { do: ask, issue: "${input.in}", text: "${input.text}", choices: "${input.choices}", question: "${run.id.slice(run.id.indexOf('/') + 1)}", site: "${values.JIRA_SITE}", email: "${values.JIRA_EMAIL}" }
+      allow: ["net:${values.JIRA_SITE}", "secret:JIRA_TOKEN@net:${values.JIRA_SITE}"]
+      restart: { limit: 2 }
+    on: { done: waiting }
+  waiting:
+    initial: open
+    timers: { within: "${input.within || '7d'}" }
+    on: { within: unanswered }
+    states:
+      open:
+        on: { answer: checking }
+      checking:
+        defer: [answer]
+        job:
+          input: { answer: "${event.data}", lookup: "${input.lookup}" }
+          machine:
+            flow: jira-chat-ask-check
+            input: { answer: map, lookup: string }
+            allow: ["send:${input.lookup}"]
+            stages:
+              person:
+                job:
+                  call: { at: "${input.lookup}" }
+                  input: { service: "${input.answer.service}", user: "${input.answer.user}", name: "${input.answer.name || ''}", email: "${input.answer.email || ''}" }
+            output: { answer: "${input.answer}", person: "${stages.person.output}" }
+        on:
+          done:
+            - go: answered
+              when: >-
+                ${input.choices.some((c) => c.toLowerCase() === String(event.data.answer.choice).toLowerCase())
+                  && !(input.asker && String(event.data.person.email).toLowerCase() === input.asker.toLowerCase())
+                  && (event.data.person.scopes || []).includes(input.approvers)}
+            - refusing
+      refusing:
+        defer: [answer]
+        job:
+          script: .rook/jira/jira.js
+          files: [.rook/jira/api.js, .rook/shared/rich.js]
+          input:
+            do: say
+            issue: "${input.in}"
+            text: >-
+              ${'[~accountid:' + event.data.answer.user + '], ' + (
+                !input.choices.some((c) => c.toLowerCase() === String(event.data.answer.choice).toLowerCase()) ? event.data.answer.choice + ' is not one of: ' + input.choices.join(', ') + '.'
+                : input.asker && String(event.data.person.email).toLowerCase() === input.asker.toLowerCase() ? 'you asked for this, so someone else must answer.'
+                : 'only someone with the scope ' + input.approvers + ' can answer this.')}
+            site: "${values.JIRA_SITE}"
+            email: "${values.JIRA_EMAIL}"
+          allow: ["net:${values.JIRA_SITE}", "secret:JIRA_TOKEN@net:${values.JIRA_SITE}"]
+        on: { done: open, failed: open }
+  answered:
+    job:
+      script: .rook/jira/jira.js
+      files: [.rook/jira/api.js, .rook/shared/rich.js]
+      input: { do: say, issue: "${input.in}", text: "${states.checking.output.person.name + ' answered ' + input.choices.find((c) => c.toLowerCase() === String(states.checking.output.answer.choice).toLowerCase()) + '.'}", site: "${values.JIRA_SITE}", email: "${values.JIRA_EMAIL}" }
+      allow: ["net:${values.JIRA_SITE}", "secret:JIRA_TOKEN@net:${values.JIRA_SITE}"]
+    on: { done: over, failed: over }
+  unanswered:
+    job:
+      script: .rook/jira/jira.js
+      files: [.rook/jira/api.js, .rook/shared/rich.js]
+      input: { do: say, issue: "${input.in}", text: "No one answered in time, so the answer is no.", site: "${values.JIRA_SITE}", email: "${values.JIRA_EMAIL}" }
+      allow: ["net:${values.JIRA_SITE}", "secret:JIRA_TOKEN@net:${values.JIRA_SITE}"]
+    on: { done: expired, failed: expired }
+  over:
+    end: done
+    output:
+      choice: "${input.choices.find((c) => c.toLowerCase() === String(states.checking.output.answer.choice).toLowerCase())}"
+      by: "${states.checking.output.person.name}"
+  expired: { end: done, output: { choice: "no" } }

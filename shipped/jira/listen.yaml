@@ -1,12 +1,20 @@
 # Jira's listener, run as a child of a router: it asks each project what
-# changed, every thirty seconds. It sends its parent message for an issue opened
-# or a comment that names the bot, and with overhear for every other one, marked
-# unaddressed. An opened issue is sent once nobody has changed it for settle.
-# Its first ask marks the time, and hears nothing. It signs in at the value
-# JIRA_SITE as the value JIRA_EMAIL, with the API token that is the secret
-# JIRA_TOKEN.
+# changed, every thirty seconds. It signs in at the value JIRA_SITE as the
+# value JIRA_EMAIL, with the API token that is the secret JIRA_TOKEN. Its
+# first ask marks the time, and hears nothing. It sends its parent:
+#
+#   message   an opened issue or a comment that names the bot; with overhear,
+#             every other one, marked unaddressed
+#   answer    a comment that holds only a line a question showed: a choice and
+#             the question's run ID
+#
+# A message holds the person's name and email, as Jira gives them, and the
+# issue before it as history, a blob of { line, attachments } entries, oldest
+# first: the issue itself and the public comments before it, of the latest 50.
+# complete is true when those were every comment. An opened issue is sent once
+# nobody has changed it for settle.
 statechart: jira-listen
-description: Sends its parent each Jira issue and comment meant for the bot.
+description: Sends its parent each Jira issue and comment meant for the bot, and each answer to a question.
 title: Jira listener
 input:
   projects: list
@@ -23,6 +31,7 @@ states:
       timeout: 2m
     on:
       message: { send: { to: parent, event: message, data: "${event.data}" } }
+      answer: { send: { to: parent, event: answer, data: "${event.data}" } }
       done: resting
       failed: resting
   resting:
