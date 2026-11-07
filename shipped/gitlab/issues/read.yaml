@@ -1,0 +1,19 @@
+# It gives { iid, title, description, state, labels, milestone, assignees,
+# author, created, updated, url, attachments }.
+flow: gitlab-issues-read
+description: Reads a GitLab issue, its title, description, state, labels, milestone and assignees.
+input:
+  type: object
+  properties:
+    project: { type: string, description: "the project's path, as group/project" }
+    iid: { type: number, description: "the issue's number in its project" }
+  required: [project, iid]
+stages:
+  read:
+    job:
+      script: .rook/gitlab/gitlab.js
+      files: [.rook/gitlab/api.js, .rook/shared/types.js]
+      input: { do: issue, project: "${input.project}", iid: "${input.iid}", site: "${values.GITLAB_SITE}" }
+      allow: ["net:${values.GITLAB_SITE}", "secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
+      timeout: 20s
+output: ${stages.read.output}

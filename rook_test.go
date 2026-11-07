@@ -691,7 +691,7 @@ func TestInitWritesTheTree(t *testing.T) {
 	}
 	want := []string{
 		".corbieignore", ".mcp.json", "AGENTS.md", "CLAUDE.md", "conversation.yaml",
-		"gromit/gitlab/chat/post.yaml", "gromit/gitlab/files/get.yaml", "gromit/gitlab/gromit.yaml",
+		"gromit/gitlab/chat/ask.yaml", "gromit/gitlab/chat/post.yaml", "gromit/gitlab/files/get.yaml", "gromit/gitlab/gromit.yaml",
 		"gromit/slack/assistant/status.yaml", "gromit/slack/chat/ask.yaml", "gromit/slack/chat/post.yaml", "gromit/slack/files/get.yaml", "gromit/slack/gromit.yaml",
 		"people/find.yaml", "people/scopes.yaml",
 	}

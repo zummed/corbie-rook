@@ -1,12 +1,28 @@
-// GitLab's script: input.do is hear, for listen.yaml, say, for say.yaml,
-// history, for history.yaml, attachments, for attachments.yaml, or send, for
-// send.yaml. It speaks the REST API of the GitLab at input.site through api.js.
+// GitLab's script. Each machine runs it with its own input.do:
+//
+//   hear          listen.yaml
+//   ask, closed   chat/ask.yaml: the question, and the comment that closes it
+//   note          issues/notes/create.yaml, and chat/ask.yaml's other comments
+//   notes         issues/notes/list.yaml
+//   issue         issues/read.yaml
+//   upload        uploads/create.yaml
+//   file          repository/files/read.yaml
+//   commit        repository/commits/create.yaml
+//   pipeline      pipeline/create.yaml
+//   attachments   files/get.yaml
+//
+// It speaks the REST API of the GitLab at input.site through api.js. A chat is
+// an issue, written <project's path>#<issue's IID>.
 const call = require("./api.js").api(input.site)
-const project = (chat) => chat.slice(0, chat.lastIndexOf("#"))
-const issuePath = (chat) => "/projects/" + encodeURIComponent(project(chat)) + "/issues/" + chat.slice(chat.lastIndexOf("#") + 1)
+const projectPath = (project) => "/projects/" + encodeURIComponent(project)
+const issuePath = (project, iid) => projectPath(project) + "/issues/" + iid
 
-// GitLab records an issue made in its web UI as a work item.
-const issues = ["Issue", "WorkItem"]
+// chatOf splits a chat into its project and its issue's IID.
+function chatOf(chat) {
+  const at = String(chat).lastIndexOf("#")
+  if (at <= 0 || !/^\d+$/.test(String(chat).slice(at + 1))) throw new Error("GitLab has no issue " + chat + ": a chat is a project's path, #, and an issue's number, as group/project#7")
+  return { project: String(chat).slice(0, at), iid: Number(String(chat).slice(at + 1)) }
+}
 
 // The files a text links to. GitLab writes an upload as ![alt](/uploads/<secret>/<name>)
 // or [name](/uploads/<secret>/<name>), a path in the issue's own project; a link
@@ -16,115 +32,97 @@ const issues = ["Issue", "WorkItem"]
 function attachments(text, project) {
   const type = require("../shared/types.js").of
   const found = new Map()
-  for (const m of text.matchAll(/\]\(\/uploads\/([0-9a-f]{32})\/([^\/\\()\s?#]+)\)/g)) {
+  for (const m of String(text).matchAll(/\]\(\/uploads\/([0-9a-f]{32})\/([^\/\\()\s?#]+)\)/g)) {
     const name = m[2]
     if (/^\.+$/.test(name) || /%2e|%2f|%5c/i.test(name)) continue
-    const id = "/projects/" + encodeURIComponent(project) + "/uploads/" + m[1] + "/" + name
+    const id = projectPath(project) + "/uploads/" + m[1] + "/" + name
     found.set(id, { name: name, type: type(name, "application/octet-stream"), id: id })
   }
   return [...found.values()]
 }
 
-// seconds reads a length of time: a number with s, m or h.
-function seconds(text) {
-  const m = /^(\d+)(s|m|h)$/.exec(String(text))
-  if (!m) throw new Error("settle is a number with s, m or h, as 2m, and not " + text)
-  return Number(m[1]) * { s: 1, m: 60, h: 3600 }[m[2]]
+// A question is a comment of the bot's that ends with a line GitLab does not
+// show: <!-- rook question <run> <choice> ... --> while it waits, each choice
+// URL-encoded, and a later comment of the bot's that holds <!-- rook answered
+// <run> --> closes it. The listener reads these lines only in the bot's own
+// comments.
+const askedLine = /<!-- rook question (\S+)((?: \S+)+) -->/
+const closedLine = /<!-- rook answered (\S+) -->/
+
+// public says whether everyone who can read the issue can read a note: an
+// answer is public, so an internal note is not heard nor given as history.
+const isPublic = (note) => !note.system && !note.internal && !note.confidential
+
+// overlap is how far before the last ask's start a listener's ask reads.
+const overlap = 120 * 1000
+
+if (input.do === "hear") return hear()
+
+if (input.do === "ask") {
+  const { project, iid } = chatOf(input.in)
+  const choices = input.choices.map(String)
+  const line = "<!-- rook question " + input.question + " " + choices.map(encodeURIComponent).join(" ") + " -->"
+  const body = input.text + "\n\nAnswer with a comment that says " + choices.map((c) => "`" + c + "`").join(" or ") + ".\n\n" + line
+  return { id: call("POST", issuePath(project, iid) + "/notes", { json: { body: body } }).id }
 }
 
-if (input.do === "hear") {
-  // The cursor holds the latest event read of each project, and the issues
-  // opened and not yet heard.
-  const at = Object.assign({}, (input.cursor || {}).at)
-  const waiting = ((input.cursor || {}).waiting || []).slice()
-  const settle = seconds(input.settle)
-  const heard = []
-  const me = call("GET", "/user")
-  const mention = new RegExp("(^|[^\\w@])@" + me.username.replace(/[.\-]/g, "\\$&") + "(?![\\w-]|\\.[\\w-])", "g")
-  // hear keeps a message that names the bot, and with overhear one that does
-  // not, marked unaddressed.
-  const hear = (message) => {
-    const named = message.text.search(mention) >= 0
-    message.text = message.text.replace(mention, "$1").trim()
-    const files = attachments(message.text, message.place)
-    if (files.length) message.attachments = files
-    if (named) heard.push(message)
-    else if (input.overhear) heard.push(Object.assign(message, { unaddressed: true }))
-  }
-  for (const p of input.projects) {
-    const id = "/projects/" + encodeURIComponent(p)
-    if (at[p] === undefined) {
-      const latest = call("GET", id + "/events", { query: { per_page: "1" } })
-      at[p] = latest.length ? latest[0].id : 0
-      continue
-    }
-    // Events come newest first: read back to the cursor, then take them in the
-    // order they happened.
-    const events = []
-    for (let page = 1; page <= 10; page++) {
-      const some = call("GET", id + "/events", { query: { per_page: "100", page: String(page) } })
-      const newer = some.filter((e) => e.id > at[p])
-      events.push(...newer)
-      if (newer.length < some.length || some.length < 100) break
-    }
-    events.reverse()
-    for (const e of events) {
-      at[p] = Math.max(at[p], e.id)
-      if (e.author_id === me.id || !e.author_username) continue
-      // An answer is a public note, so what only members can read is not heard.
-      // A note on an issue still waiting is read with it, as its history, and
-      // the latest that names the bot is kept for when the issue is heard.
-      if (e.note && issues.includes(e.note.noteable_type) && !e.note.system && !e.note.internal && !e.note.confidential) {
-        const chat = p + "#" + e.note.noteable_iid
-        const message = { service: "gitlab", text: String(e.note.body || "").trim(), chat: chat, user: String(e.author_username), place: p, at: e.note.id }
-        const w = waiting.find((w) => w.chat === chat)
-        if (!w) hear(message)
-        else if (message.text.search(mention) >= 0) w.note = message
-      } else if (!e.note && issues.includes(e.target_type) && e.action_name === "opened") {
-        waiting.push({ chat: p + "#" + e.target_iid, from: String(e.author_username) })
-      }
-    }
-  }
-  // An opened issue is heard once nobody has changed it for settle, as it is then.
-  // When it does not name the bot and a note made while it waited does, that
-  // note is heard in its place.
-  const still = []
-  for (const w of waiting) {
-    const issue = call("GET", issuePath(w.chat), { maybe: true })
-    if (!issue) continue
-    if (Date.now() - Date.parse(issue.updated_at) < settle * 1000) {
-      still.push(w)
-      continue
-    }
-    const text = ((issue.title || "") + "\n\n" + (issue.description || "")).trim()
-    hear(w.note && text.search(mention) < 0 ? w.note : { service: "gitlab", text: text, chat: w.chat, user: w.from, place: project(w.chat) })
-  }
-  // Said only now, when nothing is left to fail: a job that fails keeps the old
-  // cursor, and its next ask hears the same again.
-  for (const message of heard) emit("message", message)
-  return { cursor: { at: at, waiting: still } }
+if (input.do === "closed") {
+  const { project, iid } = chatOf(input.in)
+  const body = input.text + "\n\n<!-- rook answered " + input.question + " -->"
+  return { id: call("POST", issuePath(project, iid) + "/notes", { json: { body: body } }).id }
 }
 
-if (input.do === "history") {
-  // The issue and its comments before this one, with the files each links to.
-  // A message that opens an issue holds the issue itself, and has only the
-  // comments made while it waited.
-  const me = call("GET", "/user").username
-  const name = (author) => (author.username === me ? "you" : author.username)
-  const entries = []
-  const entry = (author, text) => entries.push({ line: name(author || {}) + ": " + text, attachments: attachments(text, project(String(input.to))) })
-  if (input.at) {
-    const opened = call("GET", issuePath(String(input.to)), { maybe: true })
-    if (opened) entry(opened.author, opened.title + "\n\n" + (opened.description || ""))
+if (input.do === "note") {
+  if (!input.body) throw new Error("the comment is empty")
+  const note = call("POST", issuePath(input.project, input.iid) + "/notes", { json: { body: require("../shared/rich.js").plain(String(input.body)) } })
+  return { id: note.id }
+}
+
+if (input.do === "notes") {
+  // The latest hundred public comments, oldest first.
+  const notes = call("GET", issuePath(input.project, input.iid) + "/notes", { query: { sort: "desc", order_by: "created_at", per_page: "100" } })
+  return notes.filter(isPublic).reverse().map((n) => ({
+    id: n.id, user: String(n.author.id), name: n.author.name, username: n.author.username, text: n.body, created: n.created_at,
+    attachments: attachments(n.body, input.project),
+  }))
+}
+
+if (input.do === "issue") {
+  const is = call("GET", issuePath(input.project, input.iid))
+  return {
+    iid: is.iid, title: is.title, description: is.description || "", state: is.state, labels: is.labels || [],
+    milestone: is.milestone ? is.milestone.title : null, assignees: (is.assignees || []).map((a) => a.username),
+    author: is.author.username, created: is.created_at, updated: is.updated_at, url: is.web_url,
+    attachments: attachments(is.description || "", input.project),
   }
-  const notes = call("GET", issuePath(String(input.to)) + "/notes", { query: { sort: "desc", per_page: "30" }, maybe: true }) || []
-  // An internal note is left out: the token may read it, and whoever reads the
-  // answer may not.
-  for (const note of notes.reverse()) {
-    if (note.system || note.internal || note.confidential || (input.at && note.id >= input.at)) continue
-    entry(note.author, note.body)
-  }
-  return require("../shared/thread.js").history(entries)
+}
+
+if (input.do === "upload") {
+  // The file is uploaded to the project, and with an issue a comment there is
+  // the link GitLab gives for it.
+  const file = call("POST", projectPath(input.project) + "/uploads", { upload: { file: { data: input.file, name: input.name } }, timeout: 120 })
+  const out = { markdown: file.markdown, url: file.url }
+  if (input.iid) out.note = call("POST", issuePath(input.project, input.iid) + "/notes", { json: { body: file.markdown } }).id
+  return out
+}
+
+if (input.do === "file") {
+  const ref = input.ref || "HEAD"
+  const text = call("GET", projectPath(input.project) + "/repository/files/" + encodeURIComponent(input.path) + "/raw", { query: { ref: ref }, raw: true })
+  return { project: input.project, path: input.path, ref: ref, text: text }
+}
+
+if (input.do === "commit") {
+  const body = { branch: input.branch, commit_message: input.message, actions: input.actions }
+  if (input.start_branch) body.start_branch = input.start_branch
+  const c = call("POST", projectPath(input.project) + "/repository/commits", { json: body })
+  return { id: c.id, short_id: c.short_id, title: c.title, url: c.web_url || null }
+}
+
+if (input.do === "pipeline") {
+  const variables = Object.entries(input.variables || {}).map(([key, value]) => ({ key: key, value: String(value) }))
+  const p = call("POST", projectPath(input.project) + "/pipeline", { json: { ref: input.ref, variables: variables } })
+  return { id: p.id, status: p.status, ref: p.ref, url: p.web_url }
 }
 
 if (input.do === "attachments") {
@@ -148,19 +146,302 @@ if (input.do === "attachments") {
   })
 }
 
-// say and send: a comment on the issue.
-const to = String(input.to)
-if (to.lastIndexOf("#") < 0) throw new Error("GitLab has no issue " + to)
+throw new Error("gitlab.js has no do: " + input.do)
 
-if (input.do === "send") {
-  // The file is uploaded to the issue's project, and the comment is the link
-  // GitLab gives for it.
-  const file = call("POST", "/projects/" + encodeURIComponent(project(to)) + "/uploads", { upload: { file: { data: input.file, name: input.name } }, timeout: 120 })
-  const note = call("POST", issuePath(to) + "/notes", { json: { body: file.markdown } })
-  return { sent: "note:" + note.id }
+// seconds reads a length of time: a number with s, m or h.
+function seconds(text) {
+  const m = /^(\d+)(s|m|h)$/.exec(String(text))
+  if (!m) throw new Error("settle is a number with s, m or h, as 2m, and not " + text)
+  return Number(m[1]) * { s: 1, m: 60, h: 3600 }[m[2]]
 }
 
-// say: the text as a comment, each chart as its table.
-if (!input.text) throw new Error("there is nothing to say")
-const note = call("POST", issuePath(to) + "/notes", { json: { body: require("../shared/rich.js").plain(String(input.text)) } })
-return { sent: "note:" + note.id }
+// newest keeps the n entries of a map with the latest at.
+function newest(map, n) {
+  return Object.fromEntries(Object.entries(map).sort((a, b) => b[1].at - a[1].at).slice(0, n))
+}
+
+// hear asks GitLab what changed on the issues of input.projects and
+// input.group since its last ask, and emits message and answer for each, in
+// the order they happened. The cursor holds where it stands:
+//
+//   since      GitLab's time, by its Date header, when the last ask started
+//   start      two minutes before the first ask started; nothing before it is read
+//   iids       the highest issue IID seen, by project: a higher one is opened;
+//              in a project not here, an issue made since the last ask is
+//   seen       the notes and events already heard that a next ask reads again
+//   issues     each issue's labels, milestone and state when last read
+//   people     each person's email, by user ID, kept a day
+//   waiting    the opened issues not heard until nobody has changed them for settle
+//   questions  the question waiting on each issue, from the bot's own comments
+//
+// A first ask reads as any other and emits nothing, so that what it read is
+// not heard again. Each ask reads the issues changed since two minutes before
+// the last one started, since GitLab moves an issue's updated_at at most once a
+// minute for a comment, then their notes made since then, leaving out those in
+// seen. Changes are read from the resource events of a field that differs
+// from the issue as last read, made since it was read; a field changed and
+// changed back between two asks is not heard. Every list in the cursor is
+// bounded, so that it stays far below the 256 KiB a job's output may hold.
+function hear() {
+  const before = input.cursor
+  try {
+    const me = call("GET", "/user", { whole: true })
+    const now = Date.parse(me.headers["date"])
+    if (!now) throw new Error("GitLab gave no Date header to tell its time by")
+    if (!before) return poll({ since: now, start: now - overlap }, me.body, now, true)
+    return poll(before, me.body, now, false)
+  } catch (e) {
+    // GitLab asked to wait: the next ask comes once it has, from the same cursor.
+    if (!e.retry) throw e
+    log(e.message + "; asking again in " + e.retry + "s")
+    return { cursor: before, rest: Math.min(Math.max(e.retry, 30), 3600) + "s" }
+  }
+}
+
+// poll asks once. A quiet one emits nothing.
+function poll(before, bot, now, quiet) {
+  const from = Math.max(before.since - overlap, before.start)
+  const next = Math.max(now - overlap, before.start)
+  const settle = seconds(input.settle) * 1000
+  const seen = new Set(before.seen || [])
+  const seenNext = []
+  const iids = Object.assign({}, before.iids)
+  const issues = Object.assign({}, before.issues)
+  const people = Object.fromEntries(Object.entries(before.people || {}).filter(([, p]) => now - p.at < 86400000))
+  const questions = Object.assign({}, before.questions)
+  const waiting = (before.waiting || []).slice()
+  const heard = []
+  const mention = new RegExp("(^|[^\\w@])@" + bot.username.replace(/[.\-]/g, "\\$&") + "(?![\\w-]|\\.[\\w-]) ?", "g")
+  const names = (text) => String(text).search(mention) >= 0
+  const unnamed = (text) => String(text).replace(mention, "$1").trim()
+
+  // fresh says whether a note or an event is new to this ask, by its key, and
+  // keeps the key for the next ask when that one reads it again.
+  const fresh = (key, at) => {
+    if (at >= next) seenNext.push(key)
+    return !seen.has(key)
+  }
+
+  // person gives what a message holds of who wrote it: the email is GitLab's
+  // public one, or any one with an administrator's token, kept a day.
+  const person = (author) => {
+    const id = String(author.id)
+    if (!people[id]) {
+      const u = call("GET", "/users/" + author.id, { maybe: true }) || {}
+      people[id] = { email: u.email || u.public_email || "", at: now }
+    }
+    const out = { user: id, name: author.name || author.username, email: people[id].email }
+    if (author.id === bot.id) out.own = true
+    return out
+  }
+
+  // The issues changed since from, newest first, each once; a list GitLab
+  // pages as it changes can give one twice, never miss one.
+  const changed = new Map()
+  const sources = (input.projects || []).map((p) => ({ path: projectPath(p), project: p }))
+  if (input.group) sources.push({ path: "/groups/" + encodeURIComponent(input.group) })
+  if (!sources.length) throw new Error("the GitLab listener reads nothing: give it projects:, a list of projects' paths, or group:, a group's path")
+  for (const source of sources) {
+    for (let page = 1; ; page++) {
+      const query = { updated_after: new Date(from).toISOString(), order_by: "updated_at", sort: "desc", state: "all", per_page: "100", page: String(page) }
+      const got = call("GET", source.path + "/issues", { query: query })
+      const inside = got.filter((is) => Date.parse(is.updated_at) >= from)
+      for (const is of inside) {
+        const project = source.project || is.references.full.slice(0, is.references.full.lastIndexOf("#"))
+        changed.set(project + "#" + is.iid, Object.assign({ project: project }, is))
+      }
+      if (got.length < 100 || inside.length < got.length) break
+    }
+  }
+
+  // An issue's notes are read newest first, a page at a time, only as far as
+  // needed.
+  const readers = new Map()
+  const notesOf = (project, iid) => {
+    const chat = project + "#" + iid
+    if (!readers.has(chat)) {
+      const r = { list: [], page: 0, end: false }
+      r.more = () => {
+        r.page++
+        const got = call("GET", issuePath(project, iid) + "/notes", { query: { sort: "desc", order_by: "created_at", per_page: "100", page: String(r.page) } })
+        r.list.push(...got)
+        if (got.length < 100) r.end = true
+      }
+      readers.set(chat, r)
+    }
+    return readers.get(chat)
+  }
+
+  // thread gives the history of a message, as a blob, and whether it is
+  // complete: the issue, for a comment, and the public comments before it. The
+  // bot's own are said by "you".
+  const thread = (issue, note) => {
+    const r = notesOf(issue.project, issue.iid)
+    const earlier = (n) => !note || Date.parse(n.created_at) < Date.parse(note.created_at) || (n.created_at === note.created_at && n.id < note.id)
+    while (!r.end && r.page < 5 && r.list.filter((n) => isPublic(n) && earlier(n)).length < 21) r.more()
+    const name = (author) => (author.id === bot.id ? "you" : author.username)
+    const entry = (author, text) => ({ line: name(author || {}) + ": " + text, attachments: attachments(text, issue.project) })
+    const entries = note ? [entry(issue.author, issue.title + "\n\n" + (issue.description || ""))] : []
+    for (const n of r.list.filter((n) => isPublic(n) && earlier(n)).reverse()) entries.push(entry(n.author, n.body))
+    const h = require("../shared/thread.js").history(entries) || { text: "", attachments: [], complete: true }
+    return { history: blobs.make({ text: h.text, attachments: h.attachments }), complete: r.end && h.complete }
+  }
+
+  // say keeps a message or an answer, to be emitted in the order things
+  // happened.
+  const say = (at, event, data) => heard.push({ at: at, event: event, data: Object.assign({ service: "gitlab" }, data) })
+
+  // comment keeps a message for a comment, or for an opened issue with no
+  // note: one that names the bot, the bot's own, and with overhear any other,
+  // marked unaddressed.
+  const comment = (issue, note) => {
+    if (quiet) return
+    const author = note ? note.author : issue.author
+    const said = note ? note.body.replace(askedLine, "").replace(closedLine, "") : issue.title + "\n\n" + (issue.description || "")
+    const who = person(author)
+    if (!who.own && !names(said) && !input.overhear) return
+    const text = unnamed(said)
+    const m = Object.assign({ place: issue.project, chat: issue.project + "#" + issue.iid }, who, { text: text }, thread(issue, note))
+    const files = attachments(text, issue.project)
+    if (files.length) m.attachments = files
+    if (!who.own && !names(said)) m.unaddressed = true
+    say(Date.parse(note ? note.created_at : issue.created_at), "message", m)
+  }
+
+  // change keeps a message for a change to an issue.
+  const change = (issue, at, author, kind, text) => {
+    if (quiet) return
+    say(at, "message", Object.assign({ place: issue.project, chat: issue.project + "#" + issue.iid }, person(author), { text: text, change: kind }))
+  }
+
+  // events gives an issue's resource events of a kind made since from, and
+  // since the issue was last read. GitLab gives them oldest first, so the last
+  // pages are read.
+  const events = (issue, kind, was) => {
+    const since = Math.max(from, was ? was.at : 0)
+    const path = issuePath(issue.project, issue.iid) + "/resource_" + kind + "_events"
+    const get = (page) => call("GET", path, { query: { per_page: "100", page: String(page) }, whole: true })
+    const first = get(1)
+    let page = Number(first.headers["x-total-pages"]) || 1
+    let found = page === 1 ? first.body : get(page).body
+    while (page > 1 && found.length && Date.parse(found[0].created_at) >= since) {
+      page--
+      found = (page === 1 ? first.body : get(page).body).concat(found)
+    }
+    return found.filter((e) => Date.parse(e.created_at) >= since && fresh(kind + e.id, Date.parse(e.created_at)))
+  }
+
+  for (const issue of [...changed.values()].reverse()) {
+    const chat = issue.project + "#" + issue.iid
+    const known = iids[issue.project]
+    const opened = known !== undefined ? issue.iid > known : Date.parse(issue.created_at) >= from
+    delete iids[issue.project]
+    iids[issue.project] = Math.max(known || 0, issue.iid)
+    if (opened && !quiet) waiting.push({ chat: chat })
+    const wait = waiting.find((w) => w.chat === chat)
+
+    // The comments made since from, oldest first.
+    const r = notesOf(issue.project, issue.iid)
+    while (!r.end && (!r.list.length || Date.parse(r.list[r.list.length - 1].created_at) >= from)) r.more()
+    const notes = r.list.filter((n) => Date.parse(n.created_at) >= from && fresh("note" + n.id, Date.parse(n.created_at))).reverse()
+    let assigned = null
+    for (const n of notes) {
+      // GitLab gives no event for a change of assignees, only a system note.
+      if (n.system && /^(assigned to|unassigned|removed assignee)/.test(n.body)) assigned = n
+      if (!isPublic(n)) continue
+      if (n.author.id === bot.id) {
+        const q = askedLine.exec(n.body)
+        if (q) questions[chat] = { run: q[1], choices: q[2].trim().split(" ").map(decodeURIComponent), at: now }
+        const c = closedLine.exec(n.body)
+        if (c && questions[chat] && questions[chat].run === c[1]) delete questions[chat]
+      }
+      // A comment that is only a choice, while a question waits on the issue,
+      // is an answer to it.
+      const q = questions[chat]
+      const choice = unnamed(n.body).replace(/[.!]+$/, "").toLowerCase()
+      if (q && n.author.id !== bot.id && q.choices.includes(choice)) {
+        if (quiet) continue
+        say(Date.parse(n.created_at), "answer", Object.assign({ run: q.run }, person(n.author), { choice: choice }))
+        continue
+      }
+      // A comment on an issue still waiting is read with it, as its history,
+      // and the latest that names the bot is kept for when the issue is heard.
+      if (wait) {
+        if (names(n.body) && n.author.id !== bot.id) wait.note = n.id
+        continue
+      }
+      comment(issue, n)
+    }
+
+    // Changes, from the resource events of each field that differs from the
+    // issue as last read, or of every field of an issue not read before. A
+    // burst of changes to one field is one message.
+    //
+    // UNVERIFIED: that adding or removing a label, or setting a milestone,
+    // moves the issue's updated_at, so that the issue is listed at all. GitLab's
+    // documentation does not say, and it is not yet checked on a GitLab.
+    const was = issues[chat]
+    const is = { labels: (issue.labels || []).slice().sort(), milestone: issue.milestone ? issue.milestone.id : null, state: issue.state }
+    issues[chat] = Object.assign({ at: now }, is)
+    if (opened) continue
+    if (!was || JSON.stringify(was.labels) !== JSON.stringify(is.labels)) {
+      const e = events(issue, "label", was)
+      if (e.length) change(issue, Date.parse(e[e.length - 1].created_at), e[e.length - 1].user, "labels", "labels " + e.map((x) => (x.action === "add" ? "+" : "-") + (x.label ? x.label.name : "?")).join(" "))
+    }
+    if (!was || was.milestone !== is.milestone) {
+      const e = events(issue, "milestone", was)
+      const last = e[e.length - 1]
+      if (last) change(issue, Date.parse(last.created_at), last.user, "milestone", "milestone " + (last.action === "add" ? "+" : "-") + (last.milestone ? last.milestone.title : "?"))
+    }
+    if (!was || was.state !== is.state) {
+      const e = events(issue, "state", was).filter((x) => x.state === "closed" || x.state === "reopened")
+      const last = e[e.length - 1]
+      if (last) change(issue, Date.parse(last.created_at), last.user, last.state, last.state)
+    }
+    if (assigned) {
+      const assignees = (issue.assignees || []).map((a) => "@" + a.username)
+      change(issue, Date.parse(assigned.created_at), assigned.author, "assignees", "assignees " + (assignees.length ? assignees.join(" ") : "none"))
+    }
+  }
+
+  // An opened issue is heard once nobody has changed it for settle, as it is
+  // then. When it does not name the bot and a comment made while it waited
+  // does, that comment is heard in its place, with the issue as its history.
+  const still = []
+  for (const w of waiting) {
+    const { project, iid } = chatOf(w.chat)
+    const listed = changed.get(w.chat)
+    const issue = listed || Object.assign({ project: project }, call("GET", issuePath(project, iid), { maybe: true }))
+    if (!issue.iid) continue
+    // GitLab's Date is to the second, so an issue changed in that second has
+    // waited none.
+    if (now + 1000 - Date.parse(issue.updated_at) <= settle) {
+      still.push(w)
+      continue
+    }
+    const r = notesOf(project, iid)
+    while (w.note && !r.end && !r.list.some((n) => n.id === w.note)) r.more()
+    const note = r.list.find((n) => n.id === w.note)
+    if (note && !names(issue.title + "\n\n" + (issue.description || ""))) comment(issue, note)
+    else comment(issue, null)
+  }
+
+  // GitLab says how many more asks it takes before it refuses: when few are
+  // left, the next ask waits until it takes more.
+  let rest = 30
+  const l = call.limit
+  if (l.remaining !== undefined && l.remaining < Math.max(10, l.limit / 10)) {
+    rest = Math.min(Math.max(Math.ceil(l.reset - now / 1000), 30), 3600)
+    log("GitLab takes " + l.remaining + " more asks until " + new Date(l.reset * 1000).toISOString() + "; asking again in " + rest + "s")
+  }
+
+  // Said only now, when nothing is left to fail: a job that fails keeps the old
+  // cursor, and its next ask hears the same again.
+  heard.sort((a, b) => a.at - b.at)
+  for (const h of heard) emit(h.event, h.data)
+  const cursor = {
+    since: now, start: before.start, iids: Object.fromEntries(Object.entries(iids).slice(-500)), seen: seenNext,
+    issues: newest(issues, 300), people: newest(people, 200), waiting: still.slice(-100), questions: newest(questions, 100),
+  }
+  return { cursor: cursor, rest: rest + "s" }
+}

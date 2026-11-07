@@ -1,15 +1,22 @@
-# GitLab's listener, run as a child of a router: it asks each project what
-# happened, every thirty seconds, since GitLab cannot be asked to wait. It sends
-# its parent message for an issue opened or a comment that names the bot, and
-# with overhear for every other one, marked unaddressed. An opened issue is sent
-# once nobody has changed it for settle. Its first ask marks where each project
-# stands, and hears nothing. The host is the value GITLAB_SITE, and the token
-# the secret GITLAB_TOKEN.
+# GitLab's listener, run as a child of a router. Every thirty seconds it asks
+# GitLab which issues of `projects` and `group` changed, then reads their new
+# comments and changes, and sends its parent:
+#
+#   message   a comment that names the bot; the bot's own, marked own
+#   message   with overhear, any other public comment, marked unaddressed
+#   message   an opened issue, once nobody has changed it for settle
+#   message   a change: closed, reopened, labels, milestone or assignees
+#   answer    a comment that is only a choice, while a question waits on the issue
+#
+# Its first ask hears nothing. When GitLab asks it to wait, or takes few more
+# asks, it waits as long. The host is the value GITLAB_SITE, and the token the
+# secret GITLAB_TOKEN.
 statechart: gitlab-listen
-description: Sends its parent each GitLab issue and comment meant for the bot.
+description: Sends its parent each GitLab comment, opened issue and change, and each answer to a question.
 title: GitLab listener
 input:
-  projects: list
+  projects: "list?"
+  group: "string?"
   overhear: "boolean?"
   settle: "string?"
 initial: hearing
@@ -17,14 +24,22 @@ states:
   hearing:
     job:
       script: ./gitlab.js
-      files: [./api.js, .rook/shared/types.js]
-      input: { do: hear, site: "${values.GITLAB_SITE}", projects: "${input.projects}", overhear: "${input.overhear || false}", settle: "${input.settle || '0s'}", cursor: "${states.hearing.output ? states.hearing.output.cursor : null}" }
+      files: [./api.js, .rook/shared/types.js, .rook/shared/thread.js]
+      input:
+        do: hear
+        site: "${values.GITLAB_SITE}"
+        projects: "${input.projects || []}"
+        group: "${input.group || ''}"
+        overhear: "${input.overhear || false}"
+        settle: "${input.settle || '0s'}"
+        cursor: "${states.hearing.output ? states.hearing.output.cursor : null}"
       allow: ["net:${values.GITLAB_SITE}", "secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
       timeout: 2m
     on:
       message: { send: { to: parent, event: message, data: "${event.data}" } }
+      answer: { send: { to: parent, event: answer, data: "${event.data}" } }
       done: resting
       failed: resting
   resting:
-    timers: { again: 30s }
+    timers: { again: "${states.hearing.output ? states.hearing.output.rest : '30s'}" }
     on: { again: hearing }

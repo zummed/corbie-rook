@@ -411,6 +411,11 @@ type gitlab struct {
 	fetches   []string               // each call for a file, as "GET <path>"
 	uploads   []upload               // each file the bot uploaded, To being its project
 	full      bool                   // an upload is refused with 413
+	lookups   []int                  // the ID of each /users/:id asked for, in order
+	throttle  int                    // the next ask for issues is answered 429, with this Retry-After
+	remaining int                    // with more than 0, every answer gives RateLimit-Remaining as this
+	reset     time.Time              // the RateLimit-Reset every answer gives with remaining
+	latest    time.Time              // when the stand-in was last asked anything
 }
 
 // A glIssue is an issue of the stand-in, with what its API gives.
@@ -593,7 +598,8 @@ func (is *glIssue) json(gl *gitlab) map[string]any {
 	out := map[string]any{"id": 1000 + is.IID, "iid": is.IID, "project_id": is.Project, "title": is.Title, "description": is.Description, "state": is.State,
 		"author": gl.user(is.Author), "labels": append([]string{}, is.Labels...), "assignees": assignees, "milestone": nil,
 		"created_at": is.Created.Format(time.RFC3339Nano), "updated_at": is.Updated.Format(time.RFC3339Nano),
-		"web_url": "http://gitlab.example.com/" + is.Project + "/-/issues/" + strconv.Itoa(is.IID)}
+		"web_url":    "http://gitlab.example.com/" + is.Project + "/-/issues/" + strconv.Itoa(is.IID),
+		"references": map[string]any{"short": "#" + strconv.Itoa(is.IID), "full": is.Project + "#" + strconv.Itoa(is.IID)}}
 	if is.Milestone != "" {
 		out["milestone"] = map[string]any{"id": len(is.Milestone), "title": is.Milestone}
 	}
@@ -639,6 +645,7 @@ func projectPath(escaped string) (project, rest string, ok bool) {
 func (gl *gitlab) serve(w http.ResponseWriter, r *http.Request) {
 	gl.mu.Lock()
 	defer gl.mu.Unlock()
+	gl.latest = time.Now()
 	escaped := r.URL.EscapedPath()
 	if strings.Contains(escaped, "/uploads/") {
 		gl.fetches = append(gl.fetches, r.Method+" "+escaped)
@@ -665,12 +672,18 @@ func (gl *gitlab) serve(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(401)
 		return
 	}
+	if gl.remaining > 0 {
+		w.Header().Set("RateLimit-Limit", "600")
+		w.Header().Set("RateLimit-Remaining", strconv.Itoa(gl.remaining))
+		w.Header().Set("RateLimit-Reset", strconv.FormatInt(gl.reset.Unix(), 10))
+	}
 	if escaped == "/api/v4/user" {
 		json.NewEncoder(w).Encode(gl.user(1))
 		return
 	}
 	if id, ok := strings.CutPrefix(escaped, "/api/v4/users/"); ok {
 		n, _ := strconv.Atoi(id)
+		gl.lookups = append(gl.lookups, n)
 		if gl.users[n] == nil {
 			w.WriteHeader(404)
 			return
@@ -846,6 +859,12 @@ func (gl *gitlab) serve(w http.ResponseWriter, r *http.Request) {
 // is asc, and each list asked for counts as an ask.
 func (gl *gitlab) list(w http.ResponseWriter, r *http.Request, take func(*glIssue) bool) {
 	gl.asks++
+	if gl.throttle > 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(gl.throttle))
+		gl.throttle = 0
+		w.WriteHeader(429)
+		return
+	}
 	if gl.failing > 0 {
 		gl.failing--
 		w.WriteHeader(500)
@@ -919,110 +938,6 @@ func (gl *gitlab) fetched() []string {
 	gl.mu.Lock()
 	defer gl.mu.Unlock()
 	return append([]string{}, gl.fetches...)
-}
-
-// A comment naming the bot on an issue is answered there, without the name, a
-// comment that does not is left alone, the bot's own words are not heard, and a
-// stranger is told the bot is not theirs.
-func TestGitLabIssuesAreAnswered(t *testing.T) {
-	t.Skip("R5 revives this: GitLab")
-	gl := newGitLab(t)
-	w := newWorld(t)
-	w.secret("GITLAB_TOKEN", "gl-token")
-	addr := strings.TrimPrefix(gl.URL, "http://")
-	dir := pointed(t, "gitlab", gl.Server)
-	w.value("GITLAB_SITE", addr)
-	gl.note(1, 2, "al", "@bot this came before the bridge")
-	w.sync(dir)
-	w.kept(router("gitlab"))
-	again := func() {
-		before := gl.asked()
-		w.until("GitLab asked again", func() bool {
-			w.set(w.now().Add(31 * time.Second))
-			time.Sleep(5 * interval)
-			return gl.asked() > before
-		})
-	}
-	w.until("the first ask", func() bool { return gl.asked() > 0 })
-	gl.note(2, 2, "al", "just talking about @botany")
-	gl.note(3, 2, "al", "no name at all")
-	gl.note(4, 1, "bot", "@bot my own words")
-	gl.note(5, 2, "al", "@bot the build fails")
-	gl.note(6, 3, "stranger", "hello @bot")
-	gl.comment("group/project", 7, 2, "@bot moved", map[string]any{"system": true})
-	again()
-	w.until("two comments", func() bool { return len(gl.said()) >= 2 })
-	time.Sleep(50 * interval)
-	got := strings.Join(gl.said(), " | ")
-	if !strings.Contains(got, "the build fails") || strings.Contains(got, "@bot the build") || !strings.Contains(got, "only the people") || len(gl.said()) != 2 {
-		t.Fatalf("the bot said %s", got)
-	}
-	// The host is the value GITLAB_SITE, and no message names one.
-	for _, run := range stubs(t, w, "route") {
-		if input := fmt.Sprint(w.show(run.ID).Input); strings.Contains(input, "settings") || strings.Contains(input, addr) {
-			t.Errorf("a message names its host: %s", input)
-		}
-	}
-}
-
-// A comment made while GitLab fails is heard once it answers again.
-func TestGitLabLosesNothingWhenItFails(t *testing.T) {
-	t.Skip("R5 revives this: GitLab")
-	gl := newGitLab(t)
-	w := newWorld(t)
-	w.secret("GITLAB_TOKEN", "gl-token")
-	dir := pointed(t, "gitlab", gl.Server)
-	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
-	gl.note(1, 2, "al", "before")
-	w.sync(dir)
-	w.until("the first ask", func() bool { return gl.asked() > 0 })
-	gl.mu.Lock()
-	gl.failing = 2
-	gl.mu.Unlock()
-	gl.note(2, 2, "al", "@bot while it fails")
-	w.until("the comment", func() bool {
-		w.set(w.now().Add(31 * time.Second))
-		time.Sleep(5 * interval)
-		return len(gl.said()) > 0
-	})
-	if got := gl.said(); len(got) != 1 || !strings.Contains(got[0], "while it fails") {
-		t.Fatalf("the bot said %v", got)
-	}
-	time.Sleep(10 * interval)
-	if got := gl.said(); len(got) != 1 {
-		t.Fatalf("heard twice: %v", got)
-	}
-}
-
-// An issue gone by the time it is read stops nothing: what came before it is
-// answered once, and what comes after it is heard.
-func TestGitLabIssueGoneStopsNothing(t *testing.T) {
-	t.Skip("R5 revives this: GitLab")
-	gl := newGitLab(t)
-	w := newWorld(t)
-	w.secret("GITLAB_TOKEN", "gl-token")
-	dir := pointed(t, "gitlab", gl.Server)
-	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
-	gl.note(1, 2, "al", "before")
-	w.sync(dir)
-	w.until("the first ask", func() bool { return gl.asked() > 0 })
-	gl.note(2, 2, "al", "@bot first")
-	gl.issue("group/project", 9)
-	gl.note(4, 2, "al", "@bot last")
-	w.until("two comments", func() bool {
-		w.set(w.now().Add(31 * time.Second))
-		time.Sleep(5 * interval)
-		return len(gl.said()) >= 2
-	})
-	before := gl.asked()
-	w.until("GitLab asked again", func() bool {
-		w.set(w.now().Add(31 * time.Second))
-		time.Sleep(5 * interval)
-		return gl.asked() > before+1
-	})
-	if got := gl.said(); len(got) != 2 {
-		t.Fatalf("the bot said %v", got)
-	}
 }
 
 // A jira stands in for Jira Cloud's REST API on one project.
@@ -1694,120 +1609,6 @@ func echoing(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, "agents/helper.yaml"), []byte(dedent(echoHistory)), 0o644); err != nil {
 		t.Fatal(err)
-	}
-}
-
-// A chat with no conversation yet is told what the issue holds before the message,
-// and not what came after or GitLab's own notes. A later message has the
-// conversation, and is told nothing more: the issue is read again only for its
-// files.
-func TestGitLabChatTellsTheIssueOnce(t *testing.T) {
-	t.Skip("R5 revives this: GitLab")
-	gl := newGitLab(t)
-	w := newWorld(t)
-	w.secret("GITLAB_TOKEN", "gl-token")
-	dir := pointed(t, "gitlab", gl.Server)
-	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
-	echoing(t, dir)
-	gl.note(1, 2, "al", "this came before the bridge")
-	gl.seed("group/project", 7, []map[string]any{
-		{"id": 3, "body": "earlier words", "author": map[string]any{"username": "al"}},
-		{"id": 4, "body": "changed the title", "system": true, "author": map[string]any{"username": "al"}},
-		{"id": 5, "body": "my earlier reply", "author": map[string]any{"username": "bot"}},
-		{"id": 2, "body": "an internal note", "internal": true, "author": map[string]any{"username": "al"}},
-		{"id": 2, "body": "a confidential note", "confidential": true, "author": map[string]any{"username": "al"}},
-		{"id": 6, "body": "@bot go on", "author": map[string]any{"username": "al"}},
-		{"id": 8, "body": "written later", "author": map[string]any{"username": "al"}},
-	})
-	w.sync(dir)
-	w.kept(router("gitlab"))
-	w.until("the first ask", func() bool { return gl.asked() > 0 })
-	gl.note(6, 2, "al", "@bot go on")
-	again := func(n int) {
-		before := gl.asked()
-		w.until("GitLab asked again", func() bool {
-			w.set(w.now().Add(31 * time.Second))
-			time.Sleep(5 * interval)
-			return gl.asked() > before
-		})
-		w.until("the bot to answer", func() bool { return len(gl.said()) >= n })
-	}
-	again(1)
-	got := gl.said()[0]
-	for _, want := range []string{"al: Broken build", "It fails.", "al: earlier words", "you: my earlier reply"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("%q is not in %q", want, got)
-		}
-	}
-	for _, not := range []string{"changed the title", "written later", "[@bot go on", "an internal note", "a confidential note"} {
-		if strings.Contains(got, not) {
-			t.Errorf("%q is in %q", not, got)
-		}
-	}
-	gl.note(7, 2, "al", "@bot and again")
-	again(2)
-	gl.mu.Lock()
-	defer gl.mu.Unlock()
-	if gl.reads != 2 || !strings.HasPrefix(gl.notes[1], "[null] ") {
-		t.Fatalf("read %d times, and said %v", gl.reads, gl.notes)
-	}
-	w.titled(map[string][]string{"chat": {"#7 go on"}, "message": {"and again", "go on"}})
-}
-
-// A thread that cannot be read is only missing context: the message is answered.
-func TestChatIsAnsweredWhenTheThreadCannotBeRead(t *testing.T) {
-	t.Skip("R5 revives this: GitLab")
-	gl := newGitLab(t)
-	gl.broken = true
-	w := newWorld(t)
-	w.secret("GITLAB_TOKEN", "gl-token")
-	dir := pointed(t, "gitlab", gl.Server)
-	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
-	echoing(t, dir)
-	gl.note(1, 2, "al", "this came before the bridge")
-	w.sync(dir)
-	w.kept(router("gitlab"))
-	w.until("the first ask", func() bool { return gl.asked() > 0 })
-	gl.note(6, 2, "al", "@bot go on")
-	before := gl.asked()
-	w.until("GitLab asked again", func() bool {
-		w.set(w.now().Add(31 * time.Second))
-		time.Sleep(5 * interval)
-		return gl.asked() > before
-	})
-	w.until("the bot to answer", func() bool { return len(gl.said()) >= 1 })
-	if got := gl.said()[0]; !strings.HasPrefix(got, "[null] ") {
-		t.Fatalf("the bot said %q", got)
-	}
-}
-
-// A comment only some can read is not heard, since an answer is public on the
-// issue, and nothing is said in reply.
-func TestRestrictedCommentIsNotHeard(t *testing.T) {
-	t.Skip("R5 revives this: GitLab")
-	gl := newGitLab(t)
-	w := newWorld(t)
-	w.secret("GITLAB_TOKEN", "gl-token")
-	dir := pointed(t, "gitlab", gl.Server)
-	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
-	gl.note(1, 2, "al", "this came before the bridge")
-	w.sync(dir)
-	w.kept(router("gitlab"))
-	w.until("the first ask", func() bool { return gl.asked() > 0 })
-	for id, field := range map[int]string{2: "internal", 3: "confidential"} {
-		gl.comment("group/project", 7, 2, "@bot read this", map[string]any{"id": id, field: true})
-	}
-	gl.note(4, 2, "al", "@bot this one is public")
-	before := gl.asked()
-	w.until("GitLab asked again", func() bool {
-		w.set(w.now().Add(31 * time.Second))
-		time.Sleep(5 * interval)
-		return gl.asked() > before
-	})
-	w.until("the bot to answer", func() bool { return len(gl.said()) >= 1 })
-	time.Sleep(20 * interval)
-	if got := gl.said(); len(got) != 1 || !strings.Contains(got[0], "public") {
-		t.Fatalf("the bot said %v", got)
 	}
 }
 

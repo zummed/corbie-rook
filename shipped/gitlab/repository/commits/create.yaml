@@ -1,0 +1,32 @@
+# It gives { id, short_id, title, url }. An action is GitLab's: create, update,
+# delete or move, with file_path, and content for create and update.
+flow: gitlab-repository-commits-create
+description: Commits changes to files to a branch of a GitLab project's repository.
+input:
+  type: object
+  properties:
+    project: { type: string, description: "the project's path, as group/project" }
+    branch: { type: string, description: the branch to commit to }
+    message: { type: string, description: the commit message }
+    actions:
+      type: array
+      description: "the changes, each { action: create, update, delete or move, file_path, content, previous_path }"
+      items:
+        type: object
+        properties:
+          action: { type: string, enum: [create, update, delete, move] }
+          file_path: { type: string }
+          content: { type: string }
+          previous_path: { type: string }
+        required: [action, file_path]
+    start_branch: { type: string, description: "the branch to start a new branch from" }
+  required: [project, branch, message, actions]
+stages:
+  commit:
+    job:
+      script: .rook/gitlab/gitlab.js
+      files: [.rook/gitlab/api.js]
+      input: { do: commit, project: "${input.project}", branch: "${input.branch}", message: "${input.message}", actions: "${input.actions}", start_branch: "${input.start_branch || ''}", site: "${values.GITLAB_SITE}" }
+      allow: ["net:${values.GITLAB_SITE}", "secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
+      timeout: 1m
+output: ${stages.commit.output}

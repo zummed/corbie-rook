@@ -24,7 +24,7 @@ deleted.
   people/scopes.yaml                 each email's name and scopes, which the lookup reads
   <bot>/<service>/<bot>.yaml         singleton: the router, and Rook's listener as its child
   <bot>/<service>/chat/post.yaml     include: .rook/<service>/chat/post.yaml
-  <bot>/<service>/chat/ask.yaml      include: .rook/<service>/chat/ask.yaml, on Slack and Telegram
+  <bot>/<service>/chat/ask.yaml      include: .rook/<service>/chat/ask.yaml, on Slack, Telegram and GitLab
   <bot>/slack/assistant/status.yaml  include: .rook/slack/assistant/status.yaml
   <bot>/telegram/chat/status.yaml    include: .rook/telegram/chat/status.yaml
   <bot>/<service>/files/get.yaml     include: .rook/<service>/files/get.yaml; on Jira attachment/get.yaml
@@ -35,7 +35,7 @@ deleted.
   .rook/<service>/<service>.js       the service's script; each machine runs it with its own do:
   .rook/slack/                       chat/post, chat/ask, assistant/status, files/get, files/upload, conversations/replies
   .rook/telegram/                    chat/post, chat/ask, chat/status, files/get, files/send
-  .rook/gitlab/                      chat/post, issues/notes/create, issues/notes/list, uploads/create, files/get, api.js
+  .rook/gitlab/                      chat/post, chat/ask, issues/*, uploads/create, files/get, repository/*, pipeline/create, api.js
   .rook/jira/                        chat/post, issue/comment/create, issue/comment/list, issue/attachments/create, attachment/get, api.js
   .rook/approval.yaml, approval.js   the ask a toolkit or a machine names
   .rook/people/file.yaml, file.js    the lookup that reads people/scopes.yaml by email

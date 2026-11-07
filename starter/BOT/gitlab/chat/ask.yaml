@@ -1,0 +1,4 @@
+# Rook's question on GitLab, which an approval calls. It takes an answer only
+# when the router sends it.
+include: .rook/gitlab/chat/ask.yaml
+receive: [BOT/gitlab/BOT, agents/*]

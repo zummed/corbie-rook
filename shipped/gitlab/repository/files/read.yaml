@@ -1,0 +1,19 @@
+# It gives { project, path, ref, text }.
+flow: gitlab-repository-files-read
+description: Reads a file of a GitLab project's repository as text.
+input:
+  type: object
+  properties:
+    project: { type: string, description: "the project's path, as group/project" }
+    path: { type: string, description: "the file's path in the repository, as config/app.yaml" }
+    ref: { type: string, description: "a branch, tag or commit; by default the project's default branch" }
+  required: [project, path]
+stages:
+  read:
+    job:
+      script: .rook/gitlab/gitlab.js
+      files: [.rook/gitlab/api.js]
+      input: { do: file, project: "${input.project}", path: "${input.path}", ref: "${input.ref || ''}", site: "${values.GITLAB_SITE}" }
+      allow: ["net:${values.GITLAB_SITE}", "secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
+      timeout: 30s
+output: ${stages.read.output}
