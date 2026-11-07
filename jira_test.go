@@ -664,7 +664,7 @@ func TestJiraQuestionIsAnsweredByAComment(t *testing.T) {
 	j := newJira(t)
 	w, approval := approvingOnJira(t, j, "", nil)
 	question := questionIn(w, j)
-	if asked := j.saying()[0]; !strings.Contains(asked, "A machine wants to run restart.") || !strings.Contains(asked, "bq. please restart web-1") ||
+	if asked := j.saying()[0]; !strings.Contains(asked, "A machine wants to run restart.") || !strings.Contains(asked, "Asked by bob@example.com.") || !strings.Contains(asked, "bq. please restart web-1") ||
 		!strings.Contains(asked, "* {{no "+question+"}}") || strings.Count(asked, question) != 2 {
 		t.Errorf("the question is %q", asked)
 	}

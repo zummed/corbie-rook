@@ -1,10 +1,11 @@
-// What the approvers are shown of the jobs an approval holds: what was asked,
-// then for each job the tool, its description, its arguments and what the
-// agent said as it asked. What was asked and what the agent said are quoted,
-// each line after "> ", so that no line of them reads as Rook's own.
+// What the approvers are shown of the jobs an approval holds: who asked, by
+// their email, what was asked, then for each job the tool, its description,
+// its arguments and what the agent said as it asked. What was asked and what
+// the agent said are quoted, each line after "> ", so that no line of them
+// reads as Rook's own.
 const quoted = (text) => String(text).split("\n").map((line) => "> " + line).join("\n")
 const jobs = input.jobs || []
-const lines = []
+const lines = [input.asker ? "Asked by " + input.asker + "." : "The asker's email is not given.", ""]
 if (input.request) lines.push("Request, the latest message last:", quoted(input.request), "")
 for (const j of jobs) {
   const asked = j.asked || {}

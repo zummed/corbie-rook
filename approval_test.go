@@ -139,7 +139,7 @@ func TestHeldCallWaitsForItsApprovers(t *testing.T) {
 		t.Fatalf("the question was posted as %v", asked)
 	}
 	text := asked[0]["text"].(string)
-	for _, want := range []string{"assistant wants to run tell.", "Request, the latest message last:\n> tell carol hello", "Tool: tell (Write a text", `"chat": "3"`} {
+	for _, want := range []string{"assistant wants to run tell.\n\nAsked by bob@example.com.\n\nRequest, the latest message last:\n> tell carol hello", "Tool: tell (Write a text", `"chat": "3"`} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the question %q lacks %q", text, want)
 		}
@@ -434,7 +434,7 @@ func TestStatechartAsksForApproval(t *testing.T) {
 	message := map[string]any{"service": "telegram", "chat": "2", "user": "2", "email": "bob@example.com", "text": "deploy orders"}
 	w.sendTo("deploys.yaml", "c1", "message", message)
 	question := w.question(map[string]bool{})
-	if text := w.did(question.ID, "ask")[0]["text"].(string); !strings.HasPrefix(text, "deploys wants to run deploying.") || !strings.Contains(text, "> deploy orders") || !strings.Contains(text, `"project": "group/orders"`) {
+	if text := w.did(question.ID, "ask")[0]["text"].(string); !strings.HasPrefix(text, "deploys wants to run deploying.\n\nAsked by bob@example.com.") || !strings.Contains(text, "> deploy orders") || !strings.Contains(text, `"project": "group/orders"`) {
 		t.Errorf("the question is %q", text)
 	}
 	if runs := stubs(t, w, "pipeline"); len(runs) != 0 {
@@ -449,6 +449,23 @@ func TestStatechartAsksForApproval(t *testing.T) {
 	}
 	if got := w.told(question.ID); !slices.Equal(got, []string{"2: You asked for this, so someone else must answer it."}) {
 		t.Errorf("the pressers were told %q", got)
+	}
+}
+
+// An approval whose ask gives no asker says so in its question, so the
+// approvers know nobody is refused as the asker.
+func TestApprovalWithNoAskerSaysSo(t *testing.T) {
+	w := newWorld(t)
+	dir := approvalProject(t, w, noModel)
+	write(t, dir, map[string]string{"agents/approve.yaml": "include: .rook/approval.yaml"})
+	w.sync(dir)
+	w.start("agents/approve.yaml", map[string]any{
+		"asking": map[string]any{"machine": "deploys"}, "jobs": []any{map[string]any{"name": "restart", "input": map[string]any{"vm": "web-1"}}},
+		"ask": bot + "/telegram/chat/ask", "approvers": "messages:approve", "in": "1", "request": "restart web-1",
+	})
+	question := w.question(map[string]bool{})
+	if text := w.did(question.ID, "ask")[0]["text"].(string); !strings.HasPrefix(text, "deploys wants to run restart.\n\nThe asker's email is not given.\n\nRequest, the latest message last:\n> restart web-1") {
+		t.Errorf("the question is %q", text)
 	}
 }
 

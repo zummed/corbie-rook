@@ -1,13 +1,13 @@
 # Rook's approval, which a toolkit or a machine names as its ask. It calls the
 # question at `ask`, a bot's placed chat/ask, with yes and no, naming the
-# machine that asks, each held job and what was asked. Corbie gives it
+# machine that asks, who asked, each held job and what was asked. Corbie gives it
 # `asking` and `jobs`; the ask's input gives the rest:
 #
 #   ask        the location of the question, such as gromit/slack/chat/ask
 #   approvers  the scope a press needs to count
 #   in         where the question is posted: a channel, a thread or a chat
 #   within     how long it waits, by default 7d; no press in time is no
-#   asker      the email of the person who asked, whose own press is refused
+#   asker      the email of the person who asked, shown, and whose own press is refused
 #   request    what was asked, shown quoted
 flow: approval
 description: Asks people whether held jobs may run, and gives the jobs approved.
@@ -24,7 +24,7 @@ input:
 allow: ["send:${input.ask}"]
 stages:
   brief:
-    job: { script: ./approval.js, input: { jobs: "${input.jobs}", request: "${input.request}" } }
+    job: { script: ./approval.js, input: { jobs: "${input.jobs}", asker: "${input.asker || ''}", request: "${input.request}" } }
   question:
     job:
       call: { at: "${input.ask}" }

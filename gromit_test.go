@@ -379,7 +379,7 @@ func TestGromitOneQuestionRunByRun(t *testing.T) {
 	g.say("UCY", "CSUP", "10.0", "", "<@UBOT> orders-2 is stuck, can you restart it?")
 	question := g.question("CINF", 1)
 	text := fmt.Sprint(question["text"])
-	if !strings.Contains(text, "wants to run restart") || !strings.Contains(text, "> orders-2 is stuck, can you restart it?") || !strings.Contains(text, `"name": "orders-2"`) {
+	if !strings.Contains(text, "wants to run restart") || !strings.Contains(text, "Asked by cy@acme.example.") || !strings.Contains(text, "> orders-2 is stuck, can you restart it?") || !strings.Contains(text, `"name": "orders-2"`) {
 		t.Errorf("the question asks %q", text)
 	}
 	if got := g.hv.restarted(); len(got) != 0 {
