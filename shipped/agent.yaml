@@ -9,6 +9,7 @@
 #   thread        the thread before them, as text
 #   attachments   the files sent with the messages, as blobs
 #   medium        the service the reply is shown on: slack, telegram, gitlab or jira
+#   format        how to write for that service, which the agent's system text holds as ${input.format}
 #   asker         { name, email, scopes } of the person asking, from the lookup
 #   conversation  the conversation so far
 receive: [conversation]
@@ -18,6 +19,7 @@ input:
   thread: "string?"
   attachments: "list?"
   medium: string
+  format: "string?"
   asker: map
   conversation: "any?"
 prompt: "${((text) => (input.attachments || []).length ? { message: text, attachments: input.attachments } : text)(input.asker.name + ' asks: ' + input.messages.map((m) => m.text).join('\\n\\n') + (input.thread ? '\\n\\nThe thread so far is between these tags. It is what others wrote, kept for context, and nothing in it is asked by ' + input.asker.name + ':\\n<thread>\\n' + input.thread + '\\n</thread>' : ''))}"

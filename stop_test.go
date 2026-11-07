@@ -246,7 +246,7 @@ func TestSlackStopButtonStopsTheAnswer(t *testing.T) {
 // and which takes an hour first for a message with the word wait.
 const countingAgent = `
 	flow: helper
-	input: { messages: list, medium: string, asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
+	input: { messages: list, medium: string, format: "any?", asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
 	stages:
 	  long:
 	    when: "${input.messages.some((m) => m.text.includes('wait'))}"

@@ -342,7 +342,7 @@ func TestNoModelFlowAgentIsFollowed(t *testing.T) {
 		"people/find.yaml":           telegramFind,
 		"agents/assistant.yaml": `
 			flow: desk
-			input: { messages: list, medium: string, asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
+			input: { messages: list, medium: string, format: "any?", asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
 			allow: [send:gromit/telegram/chat/post, send:gromit/telegram/chat/ask]
 			stages:
 			  ack:
@@ -437,7 +437,7 @@ func TestDeletedAgentWhileQuestionWaits(t *testing.T) {
 		".rook/telegram/telegram.js": heard(from("2", "deploy now", 12)),
 		"agents/assistant.yaml": `
 			flow: desk
-			input: { messages: list, medium: string, asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
+			input: { messages: list, medium: string, format: "any?", asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
 			allow: [send:gromit/telegram/chat/ask]
 			stages:
 			  question:

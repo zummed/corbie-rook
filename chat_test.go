@@ -55,7 +55,7 @@ func chatProject(t *testing.T, w *world, tg *telegram, files map[string]string) 
 // and what, and counts the turns of its conversation.
 const echoFlow = `
 	flow: NAME
-	input: { messages: list, medium: string, asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
+	input: { messages: list, medium: string, format: "any?", asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
 	stages:
 	  turn: { job: { script: ./turn.js, input: { name: NAME, said: "${input.messages.map((m) => m.text).join(' ')}", asker: "${input.asker.name}", conversation: "${input.conversation}" } } }
 	output: ${stages.turn.output}
@@ -632,21 +632,6 @@ func TestNonMessagesAreSkipped(t *testing.T) {
 		t.Errorf("alice was told %q", got)
 	}
 }
-
-// overheard is a message that does not name the bot, as a listener with
-// overhear sends it, in alice's Telegram chat.
-func overheard(from, text string) map[string]any {
-	return map[string]any{"bridge": "telegram", "text": text, "chat": "1", "from": from, "place": "dm", "answers": "1:20", "unaddressed": true}
-}
-
-// attendFlow answers a message holding "bot".
-const attendFlow = `
-	flow: attend
-	input: { said: string, asker: string, address: map, history: "any?" }
-	stages:
-	  judge: { job: { script: ./judge.js, input: { said: "${input.said}" } } }
-	output: { reply: { answer: "${stages.judge.output}" } }
-`
 
 // The model fails (status 500): alice is told it could not be answered, and her
 // next message starts afresh and is answered.

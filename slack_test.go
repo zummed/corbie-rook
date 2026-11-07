@@ -62,7 +62,7 @@ func value(t *testing.T, post map[string]any, choice string) string {
 // was given of the last message's sender and the asker, as JSON.
 const telling = `
 	statechart: assistant
-	input: { messages: list, medium: string, asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
+	input: { messages: list, medium: string, format: "any?", asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
 	initial: e
 	states:
 	  e:

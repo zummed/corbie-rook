@@ -22,7 +22,7 @@ import (
 // " + ", and counts the turns of its conversation.
 const waitingAgent = `
 	statechart: assistant
-	input: { messages: list, medium: string, asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
+	input: { messages: list, medium: string, format: "any?", asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
 	initial: waiting
 	states:
 	  waiting: { on: { go: answered } }
@@ -168,7 +168,7 @@ func TestFailedTurnIsToldAndStartsAfresh(t *testing.T) {
 	w := newWorld(t)
 	conversationProject(t, w, `
 		flow: assistant
-		input: { messages: list, medium: string, asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
+		input: { messages: list, medium: string, format: "any?", asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
 		stages:
 		  work: { job: { script: ./boom.js, input: { said: "${input.messages.map((m) => m.text).join(' ')}" } } }
 		output: { reply: "${input.messages.map((m) => m.text).join(' ')}", conversation: "${(input.conversation || 0) + 1}" }
@@ -276,7 +276,7 @@ func TestAgentPostsAsItWorksAndGivesNoReply(t *testing.T) {
 			w := newWorld(t)
 			conversationProject(t, w, `
 				flow: assistant
-				input: { messages: list, medium: string, asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
+				input: { messages: list, medium: string, format: "any?", asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
 				allow: [send:gromit/telegram/chat/post]
 				stages:
 				  progress:

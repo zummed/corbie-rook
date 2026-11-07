@@ -5,7 +5,8 @@
 #    answers are added to the list too.
 # 2. The turn answers the whole list: the lookup gives the person's name,
 #    email and scopes, the status shows, the files are downloaded, and the
-#    agent at agents/assistant answers with the toolkits those scopes allow.
+#    agent at agents/assistant answers with the toolkits those scopes allow,
+#    told how to write for the service.
 # 3. The reply is posted where the messages came from, and Slack's status is
 #    cleared. A failed turn posts "That could not be answered.", or "This bot
 #    has no agent yet." when agents/assistant.yaml is missing, and the next
@@ -77,6 +78,8 @@ states:
               script: .rook/shared/history.js
               files: [.rook/shared/thread.js]
               input: { history: "${input.messages[0].history || null}" }
+          format:
+            job: { script: .rook/shared/format.js, input: { service: "${input.messages[0].service}" } }
           slack_status:
             when: "${input.messages[0].service === 'slack' && input.messages[0].chat.includes('/')}"
             job: { call: { at: BOT/slack/assistant/status }, input: { in: "${input.messages[0].chat}", text: Working on it. } }
@@ -103,6 +106,7 @@ states:
                 thread: "${stages.thread.output}"
                 attachments: "${stages.files.output || []}"
                 medium: "${input.messages[0].service}"
+                format: "${stages.format.output}"
                 asker: "${stages.asker.output}"
                 conversation: "${input.conversation}"
           # A redactor, which cleans the reply of what may not be posted outside

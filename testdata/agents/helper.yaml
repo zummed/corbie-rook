@@ -11,5 +11,7 @@ system: |
   Your tools are in toolkits, which you open with `open` when a question needs
   one. Open only what you need. A tool that changes something waits for a yes
   before it runs.
+
+  ${input.format}
 toolkits:
   messages: { include: toolkits/messages.yaml, when: "${input.asker.scopes.includes('messages')}" }

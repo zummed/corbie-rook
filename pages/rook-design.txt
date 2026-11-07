@@ -43,6 +43,7 @@ deleted.
   .rook/filters/model.yaml           included by an agent that says whether a message is meant for the bot
   .rook/filters/words.yaml, words.js a flow that says whether a text holds one of the words given
   .rook/shared/                      types.js, rich.js, thread.js, format.js, file.js, and press.yaml, press.js: whether a press counts
+  .rook/shared/fold.js, gathered.js, history.js   the conversation's scripts
   .rook/AGENTS.md                    the page rook
 
 A listener sends its parent, the router, three events. Each holds `service`:
@@ -86,6 +87,11 @@ run. It sends an answer to `{ at: <bot>/<service>/chat/ask, run: <its client's
 name>/<run> }`, which reaches only a question at that location.
 A stop that starts the conversation's run, because none was running, ends
 that run at once.
+
+The conversation answers in turns. Messages that come during a turn are kept,
+and the next turn answers all of them, oldest first; a chart keeps at most 100,
+so the 101st is dropped. Its agent is given `{ messages, thread, attachments,
+medium, format, asker, conversation }`.
 
 The lookup takes `{ service, user, name, email }` and gives `{ name, email,
 scopes }`. Rook's matches the email only, ignoring case, so a Telegram user,

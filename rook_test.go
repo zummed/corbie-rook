@@ -49,7 +49,7 @@ const telegramScript = `
 // its conversation.
 const helperStub = `
 	statechart: assistant
-	input: { messages: list, medium: string, asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
+	input: { messages: list, medium: string, format: "any?", asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
 	initial: e
 	states:
 	  e: { end: done, output: { reply: "${input.messages.map((m) => m.text).join('\\n')}", conversation: "${(input.conversation || 0) + 1}" } }
