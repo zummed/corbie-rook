@@ -3,12 +3,12 @@
 # message and a message naming the bot, and with overhear, for a channel's
 # message outside a thread and a reply in a thread the bot has said something
 # in, marked unaddressed. Each message carries the sender's name and email,
-# which Slack gives with the scopes users:read and users:read.email, and what
-# its thread held before it. An emoji a person adds to a message is sent as
-# message with change: reaction. A press of Slack's stop button under a thread
-# is sent as stop, and a press of a question's button as answer. A job ends
-# after four minutes, and the next connects again. An event Slack sends again
-# is sent once.
+# which Slack gives with the scopes users:read and users:read.email, what its
+# thread held before it as history, and complete. An emoji a person adds to a
+# message is sent as message with change: reaction. A press of Slack's stop
+# button under a thread is sent as stop, and a press of a question's button as
+# answer. A job ends after four minutes, and the next connects again. An event
+# Slack sends again is sent once.
 statechart: slack-listen
 description: Sends its parent each Slack message, reaction, button press and stop meant for the bot.
 title: Slack listener
@@ -18,7 +18,6 @@ states:
   hearing:
     job:
       script: ./slack.js
-      files: [.rook/shared/thread.js]
       input: { do: hear, overhear: "${input.overhear || false}", cursor: "${states.hearing.output ? states.hearing.output.cursor : null}" }
       allow: [net:slack.com, net:wss-primary.slack.com, net:wss-backup.slack.com, "secret:SLACK_TOKEN@net:slack.com", "secret:SLACK_APP_TOKEN@net:slack.com"]
       timeout: 5m

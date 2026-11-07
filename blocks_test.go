@@ -7,6 +7,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -188,7 +189,7 @@ const attendStub = `
 
 // With overhear, the listener sends a reply in a thread the bot has said
 // something in, with what the thread held before it, and a channel's message
-// outside a thread, each marked unaddressed; a reply in another thread is not
+// outside a thread, with an empty history, each marked unaddressed; a reply in another thread is not
 // sent. The starter's router answers none of them.
 func TestSlackOverhearsAChannelAndAThreadItSpokeIn(t *testing.T) {
 	s := newSlack(t)
@@ -211,9 +212,12 @@ func TestSlackOverhearsAChannelAndAThreadItSpokeIn(t *testing.T) {
 	w.until("every envelope received", func() bool { return s.acked() == 3 })
 	time.Sleep(20 * interval)
 	sent := emitted(w, "slack", "message")
-	if len(sent) != 2 || sent[0]["text"] != "please help" || sent[0]["chat"] != "C1/1.0" || sent[0]["unaddressed"] != true || sent[0]["history"] == nil ||
-		sent[1]["text"] != "please, not in a thread" || sent[1]["chat"] != "C1/8.0" || sent[1]["unaddressed"] != true || sent[1]["history"] != nil {
+	if len(sent) != 2 || sent[0]["text"] != "please help" || sent[0]["chat"] != "C1/1.0" || sent[0]["unaddressed"] != true ||
+		sent[1]["text"] != "please, not in a thread" || sent[1]["chat"] != "C1/8.0" || sent[1]["unaddressed"] != true {
 		t.Fatalf("the listener sent %v", sent)
+	}
+	if got := [][]string{heardLines(t, w, sent[0]), heardLines(t, w, sent[1])}; !reflect.DeepEqual(got, [][]string{{"Alice: you start", "you: my earlier reply"}, {}}) {
+		t.Errorf("the histories are %q", got)
 	}
 	if got := s.posted(); len(got) != 0 || len(w.at("conversation.yaml")) != 0 {
 		t.Errorf("the bot posted %v", got)

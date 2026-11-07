@@ -9,12 +9,12 @@ import (
 	"io"
 	"io/fs"
 	"maps"
-	"reflect"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -1402,6 +1402,14 @@ func (s *slack) serve(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/conversations.history" {
 			slices.Reverse(messages)
 		}
+		// Slack gives a reply's ts that reply alone, which names its thread.
+		if at := r.URL.Query().Get("ts"); r.URL.Path == "/api/conversations.replies" {
+			for _, m := range s.thread {
+				if m["ts"] == at && m["thread_ts"] != nil && m["thread_ts"] != at {
+					messages = []map[string]any{m}
+				}
+			}
+		}
 		from, _ := strconv.Atoi(r.URL.Query().Get("cursor"))
 		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 		messages = messages[from:]
@@ -1668,8 +1676,8 @@ func TestSlackQuestionIsAnsweredByAPress(t *testing.T) {
 }
 
 // echoHistory stands in for the agent at agents/assistant: it replies with the
-// history its last message carries, in brackets, then that message's text, and
-// counts the turns of its conversation.
+// history its last message carries, each entry's line and files, in brackets,
+// then that message's text, and counts the turns of its conversation.
 const echoHistory = `
 	flow: assistant
 	input: { messages: list, medium: string, asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
@@ -1678,7 +1686,10 @@ const echoHistory = `
 	output: { reply: "${stages.echo.output}", conversation: "${(input.conversation || 0) + 1}" }
 `
 
-const echoJS = `return "[" + (input.message.history ? blobs.read(input.message.history) : "") + "] " + input.message.text`
+const echoJS = `
+	const line = (e) => e.line + (e.attachments.length ? " (files: " + e.attachments.map((a) => a.name).join(", ") + ")" : "")
+	return "[" + (input.message.history ? Array.from(blobs.items(input.message.history)).map(line).join("\n\n") : "") + "] " + input.message.text
+`
 
 func echoing(t *testing.T, dir string) {
 	t.Helper()
@@ -1879,7 +1890,7 @@ func TestJiraChatReadsItsIssue(t *testing.T) {
 }
 
 // A message outside a thread in a channel starts its thread, so nothing is read
-// and it carries no history. A message in a thread carries what the thread
+// and its history is empty. A message in a thread carries what the thread
 // held before it and no further, each person by their name, and whether that
 // is the whole thread.
 func TestSlackMessageCarriesItsThread(t *testing.T) {

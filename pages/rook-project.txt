@@ -198,6 +198,7 @@ so nothing on the internet connects to this computer.
             "im:write",
             "channels:read",
             "groups:read",
+            "im:read",
             "channels:history",
             "groups:history",
             "im:history",
@@ -230,6 +231,7 @@ so nothing on the internet connects to this computer.
   chat:write                                        posts, tells a person why their press does not count, and changes a question once it is answered
   im:write                                          opens a direct message to post to a person by their member ID
   channels:read, groups:read                        reads a channel's name, which a message gives as its place
+  im:read                                           reads whether a conversation is a direct message, for a stop or a reaction there
   channels:history, groups:history, im:history      hears messages, and reads a thread's history
   users:read, users:read.email                      reads a sender's name and email, which the lookup finds them by
   reactions:read                                    hears an emoji added to a message, with the event reaction_added

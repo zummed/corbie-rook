@@ -56,13 +56,16 @@ slack, telegram, gitlab or jira.
 service gives one. `run` is the ID of the question's run without its client's
 name, which the button holds.
 
-`history` is a blob of text: what the thread held before the message, no more
-than a model needs. It is left out when nothing came before, as for a Slack
-message outside a thread in a channel, which starts its thread. `complete` is
-true when `history` holds the whole thread. On Slack a message also carries
-`at`, its time, by which conversations/replies reads what came before it. A
-Slack reaction is a message with `change: reaction` and no history: its text
-is the emoji, such as `:eyes:`, and its `at` the message reacted to.
+Every message, a change included, holds `history` and `complete`. `history`
+is a blob of a list of `{ line, attachments }`, oldest first: the thread before
+the message, bounded by entries and characters. It is an empty list when
+nothing came before, as for a Slack message outside a thread in a channel,
+which starts its thread. `complete` is true when `history` holds the whole
+thread. On Slack a message also carries `at`, its time, by which
+conversations/replies reads what came before it. A Slack reaction is a message
+with `change: reaction`: its text is the emoji, such as `:eyes:`, its `at` the
+message reacted to, and its history the thread before the reaction, that
+message included.
 
 A router sends a message and a stop to the conversation keyed
 `<service>:<chat>:<user>:<agent>`, so each person in a thread has their own

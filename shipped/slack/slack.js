@@ -20,6 +20,9 @@ const longest = 12000
 // question is the form of a question's run ID without its client's name, which
 // a button holds.
 const question = /^\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{10}$/
+// A message's history holds at most 20 entries and 8000 characters.
+const mostLines = 20
+const mostChars = 8000
 // A person's name and email are kept for a day, for at most 500 people.
 const day = 24 * 60 * 60 * 1000
 const mostPeople = 500
@@ -108,7 +111,6 @@ function lines(messages, me, who) {
 if (input.do === "hear") {
   const me = call("auth.test").user_id
   const mention = "<@" + me + ">"
-  const thread = require("../shared/thread.js")
 
   // people holds each person's name and email by member ID, as users.info gave
   // them, with when it did, from this job and the ones before it. A person
@@ -133,15 +135,21 @@ if (input.do === "hear") {
   }
 
   // before gives the history and complete of a message: what its thread held
-  // before it, as a blob of text with no more than a model needs, and whether
-  // that is the whole of it. A message outside a thread in a channel starts its
+  // before the time `ts`, as a blob of a list of { line, attachments }, oldest
+  // first, its latest 20 entries and 8000 characters at most, and whether that
+  // is the whole of it. A message outside a thread in a channel starts its
   // thread, so nothing came before it.
   const before = (channel, threadTs, ts, direct) => {
-    if (!threadTs && !direct) return { complete: true }
+    if (!threadTs && !direct) return { history: blobs.make([]), complete: true }
     const found = said(channel, threadTs, ts, 30)
-    const h = thread.history(lines(found.messages, me, (id) => person(id).name))
-    if (!h) return { complete: found.complete }
-    return { history: blobs.make(h.text), complete: found.complete && h.complete }
+    const entries = lines(found.messages, me, (id) => person(id).name)
+    let kept = 0
+    let size = 0
+    while (kept < Math.min(entries.length, mostLines) && size + entries[entries.length - 1 - kept].line.length <= mostChars) {
+      size += entries[entries.length - 1 - kept].line.length
+      kept++
+    }
+    return { history: blobs.make(entries.slice(entries.length - kept)), complete: found.complete && kept === entries.length }
   }
 
   // placeOf gives a message's place: dm, or the channel's #name.
@@ -207,21 +215,24 @@ if (input.do === "hear") {
   }
 
   // reacted emits an emoji a person added to a message, as a message with
-  // change: reaction in that message's thread, whose text is the emoji, such as
-  // :eyes:, and whose at is the message reacted to. It carries no history.
+  // change: reaction in the chat of the message reacted to, whose text is the
+  // emoji, such as :eyes:, and whose at is the message reacted to. Its history
+  // is what that chat held before the reaction, the message reacted to
+  // included.
   const reacted = (e) => {
     if (e.type !== "reaction_added") return
     const item = e.item || {}
     if (item.type !== "message" || !item.channel || !item.ts || !e.user || !e.reaction || !e.event_ts) return log("a reaction names no message, person or emoji")
     if (e.user === me || heard.includes(item.channel + "/" + e.event_ts)) return
     const info = call("conversations.info", null, { channel: item.channel }).channel
-    // Slack gives a reply's thread from its first message, and a message
-    // outside a thread on its own.
-    const top = (call("conversations.replies", null, { channel: item.channel, ts: item.ts, limit: "1" }).messages || [])[0] || { ts: item.ts }
-    const chat = item.channel + (info.is_im && top.ts === item.ts ? "" : "/" + top.ts)
+    // The message reacted to names its thread in thread_ts: a reply its parent,
+    // and a parent itself. A message with no replies names none, and is outside
+    // a thread, which in a channel it starts.
+    const target = (call("conversations.replies", null, { channel: item.channel, ts: item.ts, limit: "1" }).messages || [])[0] || {}
+    const threadTs = target.thread_ts && target.thread_ts !== item.ts ? target.thread_ts : info.is_im ? undefined : item.ts
     heard.push(item.channel + "/" + e.event_ts)
-    emit("message", Object.assign({ service: "slack", place: info.is_im ? "dm" : "#" + info.name, chat: chat, user: e.user }, person(e.user),
-      { text: ":" + e.reaction + ":", at: item.ts, change: "reaction" }))
+    emit("message", Object.assign({ service: "slack", place: info.is_im ? "dm" : "#" + info.name, chat: item.channel + (threadTs ? "/" + threadTs : ""), user: e.user }, person(e.user),
+      { text: ":" + e.reaction + ":", at: item.ts, change: "reaction" }, before(item.channel, threadTs, e.event_ts, info.is_im)))
   }
 
   // stopped emits a press of the stop button Slack shows under a thread while

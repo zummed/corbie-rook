@@ -4,8 +4,10 @@ package rook_test
 // thread held, reactions, stops, and the question with its buttons.
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -107,8 +109,11 @@ func TestSlackMessageCarriesItsPerson(t *testing.T) {
 }
 
 // An emoji a person adds to a message is sent as a message with change:
-// reaction, in the thread of the message reacted to, and the bot's own is not.
-// The starter's router sends no change to the conversation.
+// reaction, in the chat of the message reacted to: a reply's thread, and a
+// direct message itself for a message there outside a thread. Its history is
+// that chat before the reaction, the message reacted to included. The bot's
+// own reaction is not sent, and the starter's router sends no change to the
+// conversation.
 func TestSlackReactionIsAChange(t *testing.T) {
 	s := newSlack(t)
 	w := newWorld(t)
@@ -116,20 +121,58 @@ func TestSlackReactionIsAChange(t *testing.T) {
 	s.thread = []map[string]any{
 		{"ts": "4.0", "thread_ts": "4.0", "user": "U1", "text": "<@UBOT> start"},
 		{"ts": "5.0", "thread_ts": "4.0", "user": "U2", "text": "a reply"},
+		{"ts": "6.0", "thread_ts": "4.0", "user": "U1", "text": "written after"},
 	}
 	w.sync(dir)
 	w.until("Slack connected", s.connected)
 	s.reacts("a", "UBOT", "robot_face", "C1", "5.0")
 	s.reacts("b", "U2", "eyes", "C1", "5.0")
 	w.until("the reaction", func() bool { return len(emitted(w, "slack", "message")) == 1 })
+	s.reacts("c", "U1", "tada", "D1", "4.0")
+	w.until("the second reaction", func() bool { return len(emitted(w, "slack", "message")) == 2 })
 	time.Sleep(10 * interval)
-	got, _ := json.Marshal(emitted(w, "slack", "message"))
-	if want := `[{"at":"5.0","change":"reaction","chat":"C1/4.0","email":"bob@example.com","name":"Bob","place":"#help","service":"slack","text":":eyes:","user":"U2"}]`; string(got) != want {
+	sent := emitted(w, "slack", "message")
+	var histories [][]string
+	for _, m := range sent {
+		histories = append(histories, heardLines(t, w, m))
+		delete(m, "history")
+	}
+	got, _ := json.Marshal(sent)
+	if want := `[{"at":"5.0","change":"reaction","chat":"C1/4.0","complete":true,"email":"bob@example.com","name":"Bob","place":"#help","service":"slack","text":":eyes:","user":"U2"},` +
+		`{"at":"4.0","change":"reaction","chat":"D1","complete":true,"email":"alice@example.com","name":"Alice","place":"dm","service":"slack","text":":tada:","user":"U1"}]`; string(got) != want {
 		t.Fatalf("the listener sent %s", got)
 	}
-	if runs := w.at("conversation.yaml"); len(runs) != 0 || s.acked() != 2 {
-		t.Errorf("the reaction started %d conversations, and %d envelopes were received", len(runs), s.acked())
+	if want := [][]string{{"Alice: you start", "Bob: a reply"}, {"Alice: you start"}}; !reflect.DeepEqual(histories, want) {
+		t.Errorf("the histories are %q", histories)
 	}
+	if runs := w.at("conversation.yaml"); len(runs) != 0 || s.acked() != 3 {
+		t.Errorf("the reactions started %d conversations, and %d envelopes were received", len(runs), s.acked())
+	}
+}
+
+// heardLines gives the line of each entry of the history a listener's message
+// holds, read from its blob.
+func heardLines(t *testing.T, w *world, m map[string]any) []string {
+	t.Helper()
+	ref, _ := m["history"].(map[string]any)
+	path, _ := ref["$blob"].(string)
+	for _, run := range listenerRuns(w, "slack") {
+		r, _, err := w.Fetch(context.Background(), run.ID, path)
+		if err != nil {
+			continue
+		}
+		var entries []struct{ Line string }
+		if err := json.NewDecoder(r).Decode(&entries); err != nil {
+			t.Fatal(err)
+		}
+		out := []string{}
+		for _, e := range entries {
+			out = append(out, e.Line)
+		}
+		return out
+	}
+	t.Fatalf("no listener holds the history %v", m["history"])
+	return nil
 }
 
 // A press of Slack's stop button under a thread is sent as stop, with who
