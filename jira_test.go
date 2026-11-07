@@ -631,23 +631,21 @@ func questionIn(w *world, j *jira) string {
 }
 
 // approvingOnJira makes a project whose agents/approve is Rook's approval,
-// starts it for a held call, asking on the issue OPS-12, and gives its run.
-// Jira's people include alice, who may approve, and bob, who asked. The
-// project holds the files given as well.
-func approvingOnJira(t *testing.T, j *jira, within string, files map[string]string) (*world, string) {
+// starts it for a held call, asking on the issue in, and gives its run.
+// Jira's people include alice, who may approve, and bob, who asked.
+func approvingOnJira(t *testing.T, j *jira, in, within string) (*world, string) {
 	t.Helper()
 	j.mu.Lock()
 	j.people["acc-a"] = map[string]any{"accountId": "acc-a", "displayName": "Alice A.", "emailAddress": "Alice@Example.com"}
 	j.people["acc-b"] = map[string]any{"accountId": "acc-b", "displayName": "Bob B.", "emailAddress": "bob@example.com"}
 	j.mu.Unlock()
 	w, dir := jiraWorld(t, j, map[string]string{"agents/approve.yaml": "include: .rook/approval.yaml"})
-	write(t, dir, files)
 	w.sync(dir)
 	w.kept(router("jira"))
 	tick(w, j.asked)
 	input := map[string]any{
 		"asking": map[string]any{}, "jobs": []any{map[string]any{"name": "restart", "asked": map[string]any{"description": "Restarts a VM.", "args": map[string]any{"vm": "web-1"}, "said": "Restarting it."}}},
-		"ask": bot + "/jira/chat/ask", "approvers": "messages:approve", "in": "OPS-12", "asker": "bob@example.com", "request": "please restart web-1",
+		"ask": bot + "/jira/chat/ask", "approvers": "messages:approve", "in": in, "asker": "bob@example.com", "request": "please restart web-1",
 	}
 	if within != "" {
 		input["within"] = within
@@ -662,7 +660,7 @@ func approvingOnJira(t *testing.T, j *jira, within string, files map[string]stri
 // written in. No answer starts a conversation.
 func TestJiraQuestionIsAnsweredByAComment(t *testing.T) {
 	j := newJira(t)
-	w, approval := approvingOnJira(t, j, "", nil)
+	w, approval := approvingOnJira(t, j, "OPS-12", "")
 	question := questionIn(w, j)
 	if asked := j.saying()[0]; !strings.Contains(asked, "A machine wants to run restart.") || !strings.Contains(asked, "Asked by bob@example.com.") || !strings.Contains(asked, "bq. please restart web-1") ||
 		!strings.Contains(asked, "* {{no "+question+"}}") || strings.Count(asked, question) != 2 {
@@ -715,7 +713,7 @@ func TestJiraQuestionIsAnsweredByAComment(t *testing.T) {
 // answer on OPS-12 ends it.
 func TestJiraAnswerOnAnotherIssueDoesNotCount(t *testing.T) {
 	j := newJira(t)
-	w, approval := approvingOnJira(t, j, "", nil)
+	w, approval := approvingOnJira(t, j, "OPS-12", "")
 	question := questionIn(w, j)
 	at := time.Now().Add(time.Second)
 	j.commentOn("OPS-99", "901", "acc-9", "Close the duplicate OPS-99?\n\nTo answer, write a comment that holds only one of these lines:\n\n- `yes "+question+"`\n- `no "+question+"`", at)
@@ -741,10 +739,32 @@ func TestJiraAnswerOnAnotherIssueDoesNotCount(t *testing.T) {
 	}
 }
 
+// A question asked on an issue by its key in another case, or by its ID, is
+// asked on the issue's key, and a comment there answers it.
+func TestJiraQuestionInAnyCaseOrByIDIsAnswered(t *testing.T) {
+	for _, in := range []string{"ops-12", "10"} {
+		t.Run(in, func(t *testing.T) {
+			j := newJira(t)
+			w, approval := approvingOnJira(t, j, in, "")
+			question := questionIn(w, j)
+			said := len(j.saying())
+			j.comment("11", "acc-a", "yes "+question, time.Now().Add(time.Second))
+			tick(w, j.asked)
+			w.until("the question closed", func() bool { return len(j.saying()) > said })
+			if got := j.saying()[said]; got != "alice answered yes." {
+				t.Errorf("the bot said %q", got)
+			}
+			if out := ended(w, approval).(map[string]any); !slices.Equal(out["approved"].([]any), []any{"restart"}) {
+				t.Errorf("the approval gave %v", out)
+			}
+		})
+	}
+}
+
 // A question no comment answers in time is no, and a last comment says so.
 func TestJiraQuestionWithNoAnswerIsNo(t *testing.T) {
 	j := newJira(t)
-	w, approval := approvingOnJira(t, j, "1h", nil)
+	w, approval := approvingOnJira(t, j, "OPS-12", "1h")
 	questionIn(w, j)
 	w.set(w.now().Add(61 * time.Minute))
 	out := ended(w, approval).(map[string]any)

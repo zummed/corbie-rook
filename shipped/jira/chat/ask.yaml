@@ -1,16 +1,17 @@
 # Rook's question on Jira, which an approval calls, and any machine may. It is
 # Slack's chat/ask with Jira's script: it writes `text` as a comment on the
-# issue `in`, such as OPS-12, with a line for each of `choices` that holds the
-# choice and this run's ID. The listener sends a comment that holds only such
-# a line to its router as an answer, and the router sends it here. An answer
-# written on any issue but `in` is dropped, and its choice is matched to one
-# of `choices` in any case, as on GitLab. An answer counts when the person's
-# scopes, by the lookup at `lookup`, hold `approvers`, and the person's email
-# is not `asker`'s; anyone else is told why in a comment that names them, and
-# the question waits on. A choice that is none of
-# `choices` is told nothing. The first answer that counts closes the question
-# with a comment, and the run ends with { choice, by }. No answer that counts
-# within `within`, by default a week, closes it and ends with { choice: no }.
+# issue `in`, its key in any case, such as OPS-12, or its ID, with a line for
+# each of `choices` that holds the choice and this run's ID. The listener sends
+# a comment that holds only such a line to its router as an answer, and the
+# router sends it here. An answer written on any other issue is dropped, and
+# its choice is matched to one of `choices` in any case, as on GitLab. An
+# answer counts when the person's scopes, by the lookup at `lookup`, hold
+# `approvers`, and the person's email is not `asker`'s; anyone else is told why
+# in a comment that names them, and the question waits on. A choice that is
+# none of `choices` is told nothing. The first answer that counts closes the
+# question with a comment, and the run ends with { choice, by }. No answer that
+# counts within `within`, by default a week, closes it and ends with
+# { choice: no }.
 statechart: jira-chat-ask
 description: Asks a question in a comment on a Jira issue, and gives the first choice answered by someone whose scopes hold the approvers.
 title: "${input.in}: ${input.text.split('\\n')[0]}"
@@ -45,7 +46,7 @@ states:
     initial: waiting
     states:
       waiting:
-        on: { answer: { go: checking, when: "${event.from.at === run.tree + '/' + input.router && event.data.chat === input.in}" } }
+        on: { answer: { go: checking, when: "${event.from.at === run.tree + '/' + input.router && event.data.chat === states.asking.output.sent.in}" } }
       checking:
         defer: [answer]
         job:

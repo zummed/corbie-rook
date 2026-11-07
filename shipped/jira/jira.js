@@ -279,9 +279,12 @@ if (input.do === "send") {
 if (input.do === "ask") {
   // A question: the text, then a line for each choice, which a comment that
   // holds only that line answers by. input.question is the question's run ID.
+  // input.in is the issue's key in any case, or its ID, and sent.in is its key
+  // as Jira writes it, which an answer's chat is.
+  const key = call("GET", "/issue/" + encodeURIComponent(String(input.in)), { query: { fields: "key" } }).key
   const lines = input.choices.map((c) => "- `" + c + " " + input.question + "`")
-  say(input.in, input.text + "\n\nTo answer, write a comment that holds only one of these lines:\n\n" + lines.join("\n"))
-  return { sent: { in: input.in, question: input.question } }
+  say(key, input.text + "\n\nTo answer, write a comment that holds only one of these lines:\n\n" + lines.join("\n"))
+  return { sent: { in: key, question: input.question } }
 }
 
 if (input.do === "tell") {

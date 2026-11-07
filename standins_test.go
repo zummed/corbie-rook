@@ -1039,8 +1039,8 @@ func (j *jira) serve(w http.ResponseWriter, r *http.Request) {
 			issues = append(issues, o)
 		}
 		json.NewEncoder(w).Encode(map[string]any{"isLast": true, "issues": issues})
-	case r.Method == "GET" && r.URL.Path == "/rest/api/2/issue/OPS-12":
-		json.NewEncoder(w).Encode(map[string]any{"fields": j.withFiles(map[string]any{
+	case r.Method == "GET" && (strings.EqualFold(r.URL.Path, "/rest/api/2/issue/OPS-12") || r.URL.Path == "/rest/api/2/issue/10"):
+		json.NewEncoder(w).Encode(map[string]any{"id": "10", "key": "OPS-12", "fields": j.withFiles(map[string]any{
 			"summary": "Broken", "description": "It fails.", "reporter": map[string]any{"accountId": "acc-1", "displayName": "Al"},
 		})})
 	case r.Method == "GET" && r.URL.Path == "/rest/api/2/issue/OPS-12/comment":

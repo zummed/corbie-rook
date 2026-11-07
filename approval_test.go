@@ -686,7 +686,7 @@ func TestApprovalFitsEveryQuestion(t *testing.T) {
 		}
 		got := shape(question)
 		if name == "shipped/jira/chat/ask.yaml" {
-			own := " && event.data.chat === input.in"
+			own := " && event.data.chat === states.asking.output.sent.in"
 			if !strings.Contains(got, own) {
 				t.Errorf("%s takes an answer written on any issue", name)
 			}
