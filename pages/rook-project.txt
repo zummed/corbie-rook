@@ -55,6 +55,7 @@ conversation makes only for a message from a service the project is not on.
       gromit/slack/chat/post.yaml         ok
       gromit/slack/files/get.yaml         ok
       gromit/slack/gromit.yaml            ok
+      later.yaml                          ok
       people/find.yaml                    ok
       .rook/                              listed
       people/scopes.yaml                  listed
@@ -152,7 +153,7 @@ To add the agent:
     instructions: { include: ./orders.md }
     ask:
       machine: .rook/approval.yaml
-      input: { ask: gromit/slack/chat/ask, approvers: "orders:approve", in: "#orders-team", within: 1d, asker: "${input.asker.email}", request: "${input.messages.map((m) => m.text).join('\\n')}" }
+      input: { ask: gromit/slack/chat/ask, approvers: "orders:approve", in: "#orders-team", within: 1d, asker: "${input.asker.email}", request: "${input.messages.map((m) => (m.later != null ? '(a reminder the bot set) ' : '') + m.text).join('\\n')}" }
     tools:
       read_file: { call: gromit/gitlab/repository/files/read, input: { project: group/orders } }
       change_file:
@@ -195,6 +196,8 @@ Common changes
   answer some messages that do not name it          overhear: true, a rule in the router, and a filter stage
   clean a reply before it is posted outside a DM    a redact stage in conversation.yaml
   do something at a time                            a schedule under schedules/
+  say what it is doing while it works               the agent's system text: when to use its tool progress
+  come back later to check on something             the agent's system text: when to use its tool later
   be on another service                             corbie rook init . --bot gromit --services <name>
   be a second bot                                   corbie rook init . --bot <name> --services <names>, and a second conversation
 

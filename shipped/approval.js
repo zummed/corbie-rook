@@ -5,11 +5,21 @@
 // reads as Rook's own. The job's name is in the question's first line, and is
 // given again here only when there are several.
 const quoted = (text) => String(text).split("\n").map((line) => "> " + line).join("\n")
+// A value of one line longer than this, such as a link or a file's content,
+// is shown as its first and last 150 characters, with its length: whole, it
+// can make the question longer than a service takes. Its end is shown, since
+// what a command does can be at its end. A value of several lines, such as a
+// diff, is shown whole.
+const LONG = 300
+const cut = (text, at) => text.slice(0, /[\uDC00-\uDFFF]/.test(text[at] || "") ? at - 1 : at)
+const short = (value) => value.length > LONG && !value.includes("\n")
+  ? cut(value, 150) + " … (" + value.length + " characters, the middle left out) … " + value.slice(cut(value, value.length - 150).length)
+  : value
 // flat gives each argument as [path, value], a nested key joined by dots.
 const flat = (value, path) =>
   value && typeof value === "object" && !Array.isArray(value)
     ? Object.entries(value).flatMap(([key, inner]) => flat(inner, path ? path + "." + key : key))
-    : [[path, typeof value === "string" ? value : JSON.stringify(value)]]
+    : [[path, short(typeof value === "string" ? value : JSON.stringify(value))]]
 const shown = (args) => {
   const pairs = flat(args, "").map(([path, value]) => [path ? path + ":" : "", value])
   if (pairs.every(([, value]) => !value.includes("\n"))) return pairs.map((pair) => pair.join(" ").trim()).join(" · ")

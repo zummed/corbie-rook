@@ -4,7 +4,7 @@ description: The servers. Their state, and restarting one.
 instructions: { include: ./infra.md }
 ask:
   machine: .rook/approval.yaml
-  input: { ask: gromit/slack/chat/ask, approvers: "infra:approve", in: "#infra", within: 1h, asker: "${input.asker.email}", request: "${input.messages.map((m) => m.text).join('\\n')}" }
+  input: { ask: gromit/slack/chat/ask, approvers: "infra:approve", in: "#infra", within: 1h, asker: "${input.asker.email}", request: "${input.messages.map((m) => (m.later != null ? '(a reminder the bot set) ' : '') + m.text).join('\\n')}" }
 tools:
   vm_status: { call: infra/vms/status }
   restart: { call: infra/vms/restart, approve: true }

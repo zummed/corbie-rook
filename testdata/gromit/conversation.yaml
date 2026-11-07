@@ -20,13 +20,16 @@
 # turn's and the reply's output read the failure, and the record holds its
 # error.
 #
+# A message from `later`, which the agent's tool later sends after a wait, is
+# answered as one from its person, marked `later`.
+#
 # A run with no message for a day ends. Each message added costs a job, and
 # each kept message offered while the turn starts costs one more. The run
 # keeps at most 100 messages that come during a turn; a 101st is dropped.
 statechart: conversation
 description: Answers one person in one thread with the agent at agents/support.
 lifetime: keyed
-receive: [gromit/*/gromit]
+receive: { message: [gromit/*/gromit, later], stop: [gromit/*/gromit] }
 title: "${input.service} ${input.place}: ${String(input.text || '').split('\\n')[0]}"
 initial: idle
 states:
@@ -115,6 +118,8 @@ states:
                 format: "${stages.format.output}"
                 asker: "${stages.asker.output}"
                 conversation: "${input.conversation}"
+                post: "${'gromit/' + input.messages[0].service + '/chat/post'}"
+                back: { at: conversation, key: "${input.messages[0].service + ':' + input.messages[0].chat + ':' + input.messages[0].user + ':support'}" }
           # A redactor, which cleans the reply of what may not be posted outside
           # a direct message, is a stage here such as
           #   redact:

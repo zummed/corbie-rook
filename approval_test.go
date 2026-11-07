@@ -702,3 +702,61 @@ func TestApprovalFitsEveryQuestion(t *testing.T) {
 		}
 	}
 }
+
+// An argument of one line longer than 300 characters, such as a link, is
+// shown as its first and last 150 characters, with its length; one of several
+// lines is shown whole.
+func TestApprovalQuestionCutsALongLine(t *testing.T) {
+	w := newWorld(t)
+	dir := approvalProject(t, w, noModel)
+	write(t, dir, map[string]string{"agents/approve.yaml": "include: .rook/approval.yaml"})
+	w.sync(dir)
+	link := "https://example.com/get?" + strings.Repeat("x", 976)
+	lines := strings.Repeat("a line of a diff\n", 30)
+	w.start("agents/approve.yaml", map[string]any{
+		"asking": map[string]any{"machine": "fetcher"},
+		"jobs":   []any{map[string]any{"name": "fetch", "input": map[string]any{"url": link, "diff": lines}}},
+		"ask":    bot + "/telegram/chat/ask", "approvers": "messages:approve", "in": "1",
+	})
+	text := w.did(w.question(map[string]bool{}).ID, "ask")[0]["text"].(string)
+	if !strings.Contains(text, "url: "+link[:150]+" … (1000 characters, the middle left out) … "+link[850:]) || strings.Contains(text, link[:151]) {
+		t.Errorf("the link is shown as %q", text)
+	}
+	if !strings.Contains(text, strings.TrimSuffix(strings.ReplaceAll(lines, "a line", "> a line"), "\n")) {
+		t.Errorf("the diff is not shown whole: %q", text)
+	}
+}
+
+// A question longer than Telegram takes loses part of its middle, says how
+// much, and keeps its end; so does the question as it is closed, which still
+// ends with the answer.
+func TestTelegramQuestionFitsTelegram(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorld(t)
+	dir, _ := telegramProject(t, w, tg)
+	removeListener(t, dir)
+	write(t, dir, byTelegramID)
+	write(t, dir, map[string]string{"on/asker.yaml": asker("telegram", `{ in: "-5", text: "${'one line of a long question\\n'.repeat(200) + 'Deploy?'}", choices: [yes, no], approvers: "messages:approve" }`)})
+	receiveFrom(t, dir, "telegram", "on/*")
+	w.sync(dir)
+	id := w.start("on/asker.yaml", nil)
+	w.until("the question", func() bool { return len(tg.texts("-5")) == 1 })
+	asked := tg.texts("-5")[0]
+	if len(asked) > 4096 || !strings.HasPrefix(asked, "one line of a long question\n") || !strings.HasSuffix(asked, "\nDeploy?") || !strings.Contains(asked, " characters left out: Telegram takes at most 4096]") {
+		t.Fatalf("the question was sent as %d characters: %q", len(asked), asked)
+	}
+	var question *client.Run
+	w.until("the question waiting", func() bool {
+		for _, run := range w.at(bot + "/telegram/chat/ask.yaml") {
+			if run.Status == "running" && run.Timers == 1 {
+				question = run
+			}
+		}
+		return question != nil
+	})
+	w.answer("telegram", question.ID, map[string]any{"service": "telegram", "user": "1", "name": names[1], "choice": "yes", "tap": "cq1"})
+	w.until("the asker done", func() bool { return w.show(id).HasEnded() })
+	if got := tg.edited(); len(got) != 1 || len(got[0]) > 4096 || !strings.HasSuffix(got[0], "Deploy?\n\nalice said yes.") {
+		t.Fatalf("the question shows %q", got)
+	}
+}

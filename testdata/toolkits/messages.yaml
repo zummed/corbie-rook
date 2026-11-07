@@ -9,7 +9,7 @@ ask:
     approvers: messages:approve
     in: "1"
     asker: "${input.asker.email}"
-    request: "${input.messages.map((m) => m.text).join('\\n')}"
+    request: "${input.messages.map((m) => (m.later != null ? '(a reminder the bot set) ' : '') + m.text).join('\\n')}"
 tools:
   tell:
     description: Write a text in a person's Telegram chat, by the chat's ID.

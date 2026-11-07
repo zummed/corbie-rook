@@ -163,8 +163,9 @@ func Services() []string {
 }
 
 // Named are the project's files that init writes whenever one is not there:
-// AGENTS.md, which points at .rook/AGENTS.md, and .corbieignore.
-var Named = []string{"AGENTS.md", ".corbieignore"}
+// AGENTS.md, which points at .rook/AGENTS.md, .corbieignore, and later.yaml,
+// which places .rook/later.yaml for the agent's tool later.
+var Named = []string{"AGENTS.md", ".corbieignore", "later.yaml"}
 
 // Listed are the lines init adds to a project's .corbieignore when it does not
 // hold them: Rook's directory, and the table Rook's lookup reads.
