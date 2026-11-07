@@ -1,11 +1,11 @@
 // Jira's script. input.do names what it does, for the machine that runs it:
 //
-//   hear          listen.yaml
-//   say           issue/comment/create.yaml and chat/ask.yaml
-//   ask           chat/ask.yaml
-//   history       issue/comment/list.yaml
-//   attachments   attachment/get.yaml
-//   send          issue/attachments/create.yaml
+//   hear              listen.yaml
+//   say               issue/comment/create.yaml
+//   ask, tell, close  chat/ask.yaml: the question, a comment on an answer that does not count, the closing comment
+//   history           issue/comment/list.yaml
+//   attachments       attachment/get.yaml
+//   send              issue/attachments/create.yaml
 //
 // It calls the REST API of the Jira Cloud at input.site through api.js.
 const call = require("./api.js").api(input.site, input.email)
@@ -278,7 +278,22 @@ if (input.do === "ask") {
   // A question: the text, then a line for each choice, which a comment that
   // holds only that line answers by. input.question is the question's run ID.
   const lines = input.choices.map((c) => "- `" + c + " " + input.question + "`")
-  return say(input.issue, input.text + "\n\nTo answer, write a comment that holds only one of these lines:\n\n" + lines.join("\n"))
+  say(input.in, input.text + "\n\nTo answer, write a comment that holds only one of these lines:\n\n" + lines.join("\n"))
+  return { sent: { in: input.in, question: input.question } }
+}
+
+if (input.do === "tell") {
+  // A comment on the question's issue telling who answered why their answer
+  // does not count.
+  const text = String(input.text)
+  say(input.sent.in, "[~accountid:" + input.answer.user + "], " + text[0].toLowerCase() + text.slice(1))
+  return {}
+}
+
+if (input.do === "close") {
+  // A comment on the question's issue that closes the question.
+  say(input.sent.in, input.text)
+  return {}
 }
 
 if (input.do === "say") return say(input.issue, input.text)

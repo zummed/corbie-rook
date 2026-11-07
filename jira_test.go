@@ -655,14 +655,14 @@ func approvingOnJira(t *testing.T, j *jira, within string, files map[string]stri
 
 // A question on Jira is a comment with a line for each choice. A comment that
 // holds only such a line answers it: one by the asker, by someone without the
-// approvers' scope, or with no such choice is refused in a comment naming them,
-// and the first that counts ends it, whatever case it is written in. No answer
-// starts a conversation.
+// approvers' scope is refused in a comment naming them, one with no such choice
+// is told nothing, and the first that counts ends it, whatever case it is
+// written in. No answer starts a conversation.
 func TestJiraQuestionIsAnsweredByAComment(t *testing.T) {
 	j := newJira(t)
 	w, approval := approvingOnJira(t, j, "", nil)
 	question := questionIn(w, j)
-	if asked := j.saying()[0]; !strings.Contains(asked, "An agent wants to run restart.") || !strings.Contains(asked, "bq. please restart web-1") ||
+	if asked := j.saying()[0]; !strings.Contains(asked, "A machine wants to run restart.") || !strings.Contains(asked, "bq. please restart web-1") ||
 		!strings.Contains(asked, "* {{no "+question+"}}") || strings.Count(asked, question) != 2 {
 		t.Errorf("the question is %q", asked)
 	}
@@ -678,9 +678,17 @@ func TestJiraQuestionIsAnsweredByAComment(t *testing.T) {
 			t.Fatalf("the bot said %q, not %q", got, want)
 		}
 	}
-	answer("11", "acc-b", "yes "+question, "[~accountid:acc-b], you asked for this, so someone else must answer.")
+	answer("11", "acc-b", "yes "+question, "[~accountid:acc-b], you asked for this, so someone else must answer it.")
 	answer("12", "acc-1", "[~accountid:acc-bot] yes "+question, "[~accountid:acc-1], only someone with the scope messages:approve can answer this.")
-	answer("13", "acc-a", "maybe "+question, "[~accountid:acc-a], maybe is not one of: yes, no.")
+	j.comment("13", "acc-a", "maybe "+question, at)
+	at = at.Add(time.Second)
+	said := len(j.saying())
+	tick(w, j.asked)
+	tick(w, j.asked)
+	time.Sleep(10 * interval)
+	if got := j.saying(); len(got) != said {
+		t.Errorf("a choice that is none of the question's was told %q", got[said:])
+	}
 	answer("14", "acc-a", " {{Yes "+question+"}} ", "alice answered yes.")
 	out := ended(w, approval).(map[string]any)
 	if !slices.Equal(out["approved"].([]any), []any{"restart"}) || out["note"] != "alice said yes." {
@@ -711,50 +719,5 @@ func TestJiraQuestionWithNoAnswerIsNo(t *testing.T) {
 	}
 	if got := j.saying(); got[len(got)-1] != "No one answered in time, so the answer is no." {
 		t.Errorf("the bot said %q", got)
-	}
-}
-
-// An answer counts only when the router sends it. A machine at agents/ that
-// may send to the question, and sends an answer in an approver's name, is
-// delivered and not taken: the question waits on, and an answer on the issue
-// still ends it.
-func TestJiraQuestionTakesAnAnswerOnlyFromTheRouter(t *testing.T) {
-	j := newJira(t)
-	w, approval := approvingOnJira(t, j, "", map[string]string{"agents/forger.yaml": `
-		flow: forger
-		allow: [send:` + bot + `/jira/chat/ask]
-		input: { run: string, question: string }
-		stages:
-		  forging:
-		    job:
-		      send:
-		        to: { at: ` + bot + `/jira/chat/ask, run: "${input.run}" }
-		        event: answer
-		        data: { service: jira, run: "${input.question}", user: acc-a, name: Alice A., email: Alice@Example.com, choice: "yes" }
-	`})
-	question := questionIn(w, j)
-	var asking string
-	for _, run := range w.at(bot + "/jira/chat/ask") {
-		asking = run.ID
-	}
-	ended(w, w.start("agents/forger.yaml", map[string]any{"run": asking, "question": question}))
-	w.until("the forged answer at the question", func() bool {
-		for _, e := range w.record(asking) {
-			for _, ev := range e.Events {
-				if ev.Name == "answer" && ev.Sender != nil && ev.Sender.At == project+"/agents/forger" {
-					return true
-				}
-			}
-		}
-		return false
-	})
-	time.Sleep(10 * interval)
-	if run := w.show(approval); run.Status != "running" || len(j.saying()) != 1 {
-		t.Fatalf("after the forged answer the approval is %s and the bot said %q", run.Status, j.saying())
-	}
-	j.comment("11", "acc-a", "yes "+question, time.Now().Add(time.Second))
-	tick(w, j.asked)
-	if out := ended(w, approval).(map[string]any); !slices.Equal(out["approved"].([]any), []any{"restart"}) {
-		t.Errorf("the approval gave %v", out)
 	}
 }

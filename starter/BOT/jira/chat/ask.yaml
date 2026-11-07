@@ -1,4 +1,8 @@
-# Rook's question, which an approval at agents/ calls. It takes an answer only
-# when the router sends it, whatever this list accepts.
+# Rook's question. It takes events and calls only from the locations in
+# receive:. The router sends it each comment that answers it, and an agent's
+# approval calls it from agents/. A machine elsewhere that calls it, or whose
+# ask: is the approval, such as a statechart with an approve: job, calls it
+# from its own location, which must be added to receive:, or the call is
+# refused.
 include: .rook/jira/chat/ask.yaml
 receive: [BOT/jira/BOT, agents/*]
