@@ -1,5 +1,5 @@
 // Slack's script: input.do is hear, for listen.yaml, cut and say, for
-// say.yaml, ask, for ask.yaml, close, for close.yaml, history, for
+// say.yaml, ask, tell and close, for chat/ask.yaml, history, for
 // history.yaml, status, for status.yaml, attachments, for attachments.yaml, or
 // send, for send.yaml. It speaks Slack's Web API with the bot token SLACK_TOKEN
 // and listens with the app-level token SLACK_APP_TOKEN, holding each as a
@@ -59,10 +59,10 @@ if (input.do === "hear") {
   const mention = "<@" + me + ">"
 
   // pressed gives the answer a press of a question's button is. A button's value
-  // holds the question and the choice, and the message's form fields give their
-  // values by name. The question's run takes the buttons away once a press counts.
-  // A press of another button, such as one of a layout an agent posted, is
-  // logged and starts nothing.
+  // holds the question and the choice. The question's run takes the buttons
+  // away once a press counts. A press of another button, such as one of a
+  // layout an agent posted, starts nothing, and one whose value names no
+  // question is logged.
   const pressed = (body) => {
     const action = (body.actions || [])[0] || {}
     if (!String(action.action_id || "").startsWith("choice-")) return
@@ -70,14 +70,7 @@ if (input.do === "hear") {
     const at = value.indexOf(" ")
     if (at < 0 || !question.test(value.slice(0, at))) return log("a press names no question: " + value.slice(0, 100))
     if (!body.user || !body.user.id) return log("a press names no person")
-    const values = {}
-    for (const block of Object.values((body.state || {}).values || {})) {
-      for (const [name, field] of Object.entries(block)) {
-        const v = field.selected_option ? field.selected_option.value : field.value
-        values[name] = field.type === "number_input" && v != null && v !== "" ? Number(v) : v === undefined ? null : v
-      }
-    }
-    emit("answer", { service: "slack", run: value.slice(0, at), user: body.user.id, choice: value.slice(at + 1), values: values })
+    emit("answer", { service: "slack", run: value.slice(0, at), user: body.user.id, choice: value.slice(at + 1) })
   }
 
   // heard holds the messages emitted in the last ten minutes, as channel/ts,
@@ -208,23 +201,23 @@ if (input.do === "send") {
 }
 
 if (input.do === "ask") {
-  // A question, with a button for each choice: in input.in, a channel's #name or
-  // a conversation, or else in a direct message to the person input.to. Each
-  // of input.fields is a form field above the buttons. A button's value holds the
+  // A question, with a button for each choice, in input.in: a channel's #name
+  // or a conversation, either with /thread. A button's value holds the
   // question and the choice, which a press names.
   const label = (s) => ({ type: "plain_text", text: String(s).slice(0, 75) })
-  const element = (f) =>
-    f.kind === "choice" ? { type: "static_select", options: f.choices.map((c) => ({ text: label(c), value: String(c) })) }
-      : f.kind === "number" ? { type: "number_input", is_decimal_allowed: true }
-        : { type: "plain_text_input", multiline: f.kind === "long" }
-  const fields = (input.fields || []).map((f) => ({ type: "input", block_id: f.name, optional: true, label: label(f.label || f.name), element: Object.assign({ action_id: f.name }, element(f)) }))
   const buttons = input.choices.map((c, n) => ({ type: "button", action_id: "choice-" + n, text: label(c[0].toUpperCase() + c.slice(1)), value: input.question + " " + c }))
-  const blocks = [{ type: "section", text: { type: "mrkdwn", text: input.text } }, ...fields, { type: "actions", elements: buttons }]
-  const place = input.in || call("conversations.open", { users: input.to }).channel.id
-  const [to, thread] = place.split("/")
+  const blocks = [{ type: "section", text: { type: "mrkdwn", text: input.text } }, { type: "actions", elements: buttons }]
+  const [to, thread] = String(input.in).split("/")
   const channel = named(to)
   const posted = call("chat.postMessage", Object.assign({ channel: channel, text: input.text, blocks: blocks }, thread ? { thread_ts: thread } : {}))
-  return { sent: [{ channel: channel, ts: posted.ts }] }
+  return { sent: [{ channel: channel, ts: posted.ts, thread: thread || "" }] }
+}
+
+if (input.do === "tell") {
+  // input.text, shown only to the person who pressed a button of a question,
+  // input.answer.user, where the question was posted.
+  for (const m of input.sent) call("chat.postEphemeral", Object.assign({ channel: m.channel, user: input.answer.user, text: input.text }, m.thread ? { thread_ts: m.thread } : {}))
+  return {}
 }
 
 if (input.do === "close") {

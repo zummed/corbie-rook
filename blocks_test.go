@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -14,7 +13,6 @@ import (
 	"time"
 
 	"github.com/zummed/corbie/client"
-	llmstandin "github.com/zummed/corbie/plugin/llm/standin"
 )
 
 // replying puts in an agent that gives one reply to everything.
@@ -327,45 +325,6 @@ func TestGitLabHearsANoteMadeWhileItsIssueWaits(t *testing.T) {
 	}
 }
 
-// attend.yaml written as an agent that includes .rook/attend/agent.yaml asks
-// its model, shown the thread and the message and what the bot is for, and
-// gives its answer as reply.
-func TestAttendAsksAModel(t *testing.T) {
-	t.Skip("R2 revives this: approval, lookup and question")
-	w := newWorld(t)
-	w.secret("TEST_KEY", "sk-test")
-	dir := filepath.Join(t.TempDir(), "project")
-	if err := exampleProject(dir, nil); err != nil {
-		t.Fatal(err)
-	}
-	model := &llmstandin.Server{Answer: func(llmstandin.Call) llmstandin.Reply { return llmstandin.Reply{Text: `{"answer": true}`} }}
-	web := httptest.NewServer(model)
-	t.Cleanup(web.Close)
-	write(t, dir, map[string]string{"attend.yaml": `
-		agent: attend
-		include: .rook/attend/agent.yaml
-		model: { name: test-model, service: anthropic, address: ` + web.URL + `, secret: TEST_KEY }
-		system:
-		  - { include: .rook/attend/agent.yaml#system }
-		  - The bot answers questions about the build.
-	`})
-	w.sync(dir)
-	id := w.start("attend.yaml", map[string]any{"said": "please look", "asker": "alice", "address": map[string]any{"bridge": "slack", "id": "C1/1.0"}, "history": "you: earlier words"})
-	w.until("the answer", func() bool { return w.show(id).HasEnded() })
-	if run := w.show(id); run.Status != "done" || fmt.Sprint(run.Output.(map[string]any)["reply"]) != "map[answer:true]" {
-		t.Fatalf("attend ended %s with %v: %s", run.Status, run.Output, run.Error)
-	}
-	shown := fmt.Sprint(model.Calls[0].Messages)
-	for _, want := range []string{"you: earlier words", "from alice", "please look"} {
-		if !strings.Contains(shown, want) {
-			t.Errorf("%q is not in %s", want, shown)
-		}
-	}
-	if system := model.Calls[0].System; !strings.Contains(system, "meant for the") || !strings.Contains(system, "about the build") {
-		t.Errorf("the system text is %q", system)
-	}
-}
-
 // With overhear and no attend.yaml, a message that does not name the bot is not
 // answered: the call to attend fails, which the chat's record shows, and a
 // message that names it is answered.
@@ -399,70 +358,6 @@ func TestOverheardWithNoAttendIsNotAnswered(t *testing.T) {
 	}
 	if failed != 1 {
 		t.Errorf("the chat's record shows %d failed calls of attend", failed)
-	}
-}
-
-// A question in a Slack channel is posted there, and the first tap from someone in
-// the group it names answers it; the message then shows who answered, with no
-// buttons. A part's ask names such approvers as people and in.
-func TestQuestionInAChannelCountsTheGroup(t *testing.T) {
-	t.Skip("R2 revives this: approval, lookup and question")
-	s := newSlack(t)
-	w := newWorld(t)
-	dir := slackProject(t, w, s)
-	write(t, dir, map[string]string{
-		"people.yaml": "people:\n  alice: { slack: U1 }\n  bob: { slack: U2 }\ngroups:\n  team: [bob]\n",
-		"rules.yaml":  "places: {}\nagents:\n  - { name: helper, for: [alice] }\n",
-		"on/asker.yaml": `
-			flow: asker
-			allow: [send:.rook/blocks/ask]
-			stages:
-			  asking: { job: { call: { at: .rook/blocks/ask }, input: { people: [team], in: "#approvals", text: "Deploy?", choices: ["yes", "no"] } } }
-			output: ${stages.asking.output.choice}
-		`,
-	})
-	w.sync(dir)
-	asker := w.start("on/asker.yaml", nil)
-	w.until("Slack connected", s.connected)
-	w.until("the question", func() bool { return len(s.posted()) == 1 })
-	post := s.posted()[0]
-	if post["channel"] != "C5" {
-		t.Fatalf("the question went to %v", post)
-	}
-	blocks, _ := json.Marshal(post["blocks"])
-	value := strings.Split(strings.Split(string(blocks), `"value":"`)[1], " ")[0]
-	press := func(id, user, choice string) {
-		s.send(map[string]any{"envelope_id": id, "type": "interactive", "payload": map[string]any{
-			"type": "block_actions", "user": map[string]any{"id": user}, "actions": []any{map[string]any{"action_id": "choice-0", "value": value + " " + choice}},
-			"channel": map[string]any{"id": "C5"}, "message": map[string]any{"ts": "1.1", "text": "Deploy?"},
-		}})
-	}
-	press("a", "U1", "no")
-	w.until("the press received", func() bool { return s.acked() == 1 })
-	time.Sleep(20 * interval)
-	if run := w.show(asker); run.Status != "running" {
-		t.Fatalf("a press by someone outside the group ended the question: %+v", run)
-	}
-	s.mu.Lock()
-	changed := len(s.updates)
-	s.mu.Unlock()
-	if changed != 0 {
-		t.Fatalf("a press that did not count changed the question")
-	}
-	press("b", "U2", "yes")
-	w.until("the asker done", func() bool { return w.show(asker).Status == "done" })
-	if got := w.show(asker).Output; got != "yes" {
-		t.Fatalf("the choice was %v", got)
-	}
-	w.until("the question closed", func() bool {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		return len(s.updates) == 1
-	})
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if got := s.updates[0]; got["channel"] != "C5" || got["text"] != "Deploy?\n\nbob said yes." {
-		t.Fatalf("the question was changed to %v", got)
 	}
 }
 

@@ -364,21 +364,6 @@ func recordsAsThePageShows(t *testing.T, w *world, runs map[string]string) {
 	}
 }
 
-// An approval's result names who answered, so the agent's record says who
-// approved.
-func TestApprovalResultNamesTheApprover(t *testing.T) {
-	t.Skip("R2 revives this: approval, lookup and question")
-	w := newWorld(t)
-	dir, _ := traceProject(t, w, from("1", "tell bob", 10))
-	w.sync(dir)
-	w.tap(w.question(map[string]bool{}).ID, "1", "yes")
-	w.until("the reply said", func() bool { return sayings(t, w)["done: told bob"] != nil })
-	agent := stubs(t, w, "helper")[0].ID
-	if got := fmt.Sprint(w.arrived(agent, "done", "ask")); got != "[map[approve:[tell] note:alice said yes.]]" {
-		t.Errorf("the approval gave %s", got)
-	}
-}
-
 // A project with no model: the agent is a flow. It says something at the
 // message's address, calls a question for alice, and replies with her answer.
 // The submit names no secret that is missing, and the trail goes from the
@@ -559,24 +544,6 @@ func TestDeletedAgentWhileQuestionWaits(t *testing.T) {
 		}
 		return strings.Contains(failure, "agents/desk")
 	})
-}
-
-// A no is followed the same way: the agent's record shows the approval's no,
-// and tell never runs.
-func TestApprovalNoIsFollowed(t *testing.T) {
-	t.Skip("R2 revives this: approval, lookup and question")
-	w := newWorld(t)
-	dir, _ := traceProject(t, w, from("1", "tell bob", 10))
-	w.sync(dir)
-	w.tap(w.question(map[string]bool{}).ID, "1", "no")
-	w.until("the reply said", func() bool { return sayings(t, w)["done: told bob"] != nil })
-	agent := stubs(t, w, "helper")[0].ID
-	if got := fmt.Sprint(w.arrived(agent, "done", "ask")); got != "[map[approve:[] note:alice said no.]]" {
-		t.Errorf("the approval gave %s", got)
-	}
-	if runs := stubs(t, w, "tell"); len(runs) != 0 {
-		t.Errorf("tell ran after a no")
-	}
 }
 
 // A tool that fails is followed: the agent's record shows the tool's failure

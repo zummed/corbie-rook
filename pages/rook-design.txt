@@ -41,19 +41,21 @@ deleted.
   .rook/people/file.yaml, file.js    the lookup that reads people/scopes.yaml by email
   .rook/agent.yaml                   included by an agent: its input, prompt, conversation and receive: [conversation]
   .rook/filters/model.yaml           included by an agent that says whether a message is meant for the bot
-  .rook/shared/                      types.js, rich.js, thread.js, format.js, file.js
+  .rook/filters/words.yaml, words.js a flow that says whether a text holds one of the words given
+  .rook/shared/                      types.js, rich.js, thread.js, format.js, file.js, and press.yaml, press.js: whether a press counts
   .rook/AGENTS.md                    the page rook
 
 A listener sends its parent, the router, three events. Each holds `service`:
 slack, telegram, gitlab or jira.
 
   message   service, place, chat, user, name, email, text, history, complete, attachments, unaddressed, own, change, answers
-  answer    service, run, user, name, email, choice, values
+  answer    service, run, user, name, email, choice, and on Telegram tap
   stop      service, place, chat, user, name, email
 
 `user` is the sender's ID on the service, and `email` is given where the
 service gives one. `run` is the ID of the question's run without its client's
-name, which the button holds.
+name, which the button holds. `tap` is the id of Telegram's callback query,
+which the question answers.
 
 A router sends a message and a stop to the conversation keyed
 `<service>:<chat>:<user>:<agent>`, so each person in a thread has their own
@@ -61,6 +63,30 @@ run. It sends an answer to `{ at: <bot>/<service>/chat/ask, run: <its client's
 name>/<run> }`, which reaches only a question at that location.
 A stop that starts the conversation's run, because none was running, ends
 that run at once.
+
+The lookup takes `{ service, user, name, email }` and gives `{ name, email,
+scopes }`. Rook's matches the email only, ignoring case, so a Telegram user,
+whose email Telegram never gives, holds no scope unless the project places a
+lookup of its own. A filter gives `{ reply: { answer } }`: the words filter
+takes `{ text, words }`, an agent including the model filter `{ text, name,
+thread }`.
+
+The approval takes Corbie's `asking` and `jobs` and `{ ask, lookup, approvers,
+in, within, asker, request }`, calls the question at `ask`, and gives
+`{ approved, note }`. Each service's chat/ask is the same statechart, which
+takes `{ in, text, choices, lookup, approvers, asker, within }` and gives
+`{ choice, by }`:
+
+1. It posts the buttons with the script's `do: ask`, which gives `sent`.
+2. For each press it runs `.rook/shared/press.yaml`, which calls the lookup.
+3. A press from `asker`, or without the scope `approvers`, is told why with `do: tell`, given `sent`, the press and the text. Slack shows the text only to the presser in the question's thread; Telegram shows it in an alert that answers the tap, or, once Telegram no longer takes one, in the presser's own chat with the bot.
+4. The first press that counts, or `within` with none, ends it, and `do: close`, given `sent` and the press, shows the answer in place of the buttons.
+
+The placed question at `<bot>/<service>/chat/ask.yaml` takes events and calls
+only from its `receive:`, which `init` writes as the router and `agents/*`. A
+machine elsewhere that calls the question, or whose `ask:` is the approval,
+such as a statechart with an `approve:` job, calls it from its own location,
+which the person adds to that list, or the call is refused.
 
 Rook is ready-made Corbie machines in a project's `.rook/`. The project's own
 files fill five slots, and its own machines use Rook's blocks as jobs.

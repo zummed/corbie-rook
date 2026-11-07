@@ -1,5 +1,5 @@
 // The bot's script: input.do is hear, for listen.yaml, say, for say.yaml,
-// ask, for ask.yaml, close, for close.yaml, status, for status.yaml,
+// ask, tell and close, for chat/ask.yaml, status, for status.yaml,
 // attachments, for attachments.yaml, or send, for send.yaml. It speaks
 // Telegram's Bot API with the token of the secret input.token names, which it
 // holds only as a handle.
@@ -43,8 +43,8 @@ if (input.do === "hear") {
   // cursor, Telegram gives the oldest it has not been told of. A message in
   // a person's own chat with the bot is emitted as message, except /start and
   // /stop. /stop, or /stop@<bot>, with any words after it, is emitted as stop;
-  // a tap on a button of a question is emitted as answer. A message in a group
-  // is logged.
+  // a tap on a button of a question is emitted as answer, in a group too. A
+  // message in a group is logged.
   //
   // An update that lacks what the listener reads is logged and passed over.
   // An update the listener fails on for any other reason is given again, by
@@ -65,17 +65,20 @@ if (input.do === "hear") {
       if (!q.id || !q.from || !q.data) return log("a tap with no id, sender or data is passed over")
       const at = q.data.indexOf(" ")
       const question = q.data.slice(0, at), choice = q.data.slice(at + 1)
-      // This only shows the tap. Telegram refuses it for an old tap, and a
-      // refusal must not stop the cursor passing this update.
+      // The question answers the tap, which Telegram takes once: with an
+      // alert for a tap that does not count, and with nothing for the one
+      // that does. The answer carries the tap's id as tap. Telegram passes on
+      // whatever data a client sends, so a tap that names no question is
+      // logged, answered here with nothing, and starts nothing. Telegram
+      // refuses an answer to an old tap, and a refusal must not stop the
+      // cursor passing this update.
+      if (at > 0 && /^\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{10}$/.test(question)) return emit("answer", { service: "telegram", run: question, user: String(q.from.id), choice: choice, tap: q.id })
+      log("a tap names no question: " + q.data.slice(0, 100))
       try {
-        call("answerCallbackQuery", { callback_query_id: q.id, text: choice })
+        call("answerCallbackQuery", { callback_query_id: q.id })
       } catch (e) {
         log(e.message)
       }
-      // Telegram passes on whatever data a client sends, so a tap that names
-      // no question is logged and starts nothing.
-      if (at > 0 && /^\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{10}$/.test(question)) emit("answer", { service: "telegram", run: question, user: String(q.from.id), choice: choice })
-      else log("a tap names no question: " + q.data.slice(0, 100))
       return
     }
     const m = u.message
@@ -139,9 +142,36 @@ if (input.do === "ask") {
   return { sent: [{ chat: input.to, id: m.message_id }] }
 }
 
+if (input.do === "tell") {
+  // input.text, shown to the person who tapped a button of a question,
+  // input.answer.user, in an alert that answers the tap, input.answer.tap.
+  // Telegram takes an answer to a tap only for a short while. After that, or
+  // with no tap, the text goes to the person's own chat with the bot, which
+  // Telegram refuses for someone who has never opened one, and the job fails.
+  if (input.answer.tap) {
+    try {
+      call("answerCallbackQuery", { callback_query_id: input.answer.tap, text: String(input.text).slice(0, 200), show_alert: true })
+      return {}
+    } catch (e) {
+      log(e.message)
+    }
+  }
+  call("sendMessage", { chat_id: input.answer.user, text: input.text })
+  return {}
+}
+
 if (input.do === "close") {
-  // Each message a question posted shows input.text, with no buttons.
+  // Each message a question posted shows input.text, with no buttons. The tap
+  // that counted, input.answer.tap, is answered with nothing; Telegram
+  // refuses an old tap, which is logged.
   for (const m of input.sent) call("editMessageText", { chat_id: m.chat, message_id: m.id, text: input.text })
+  if (input.answer && input.answer.tap) {
+    try {
+      call("answerCallbackQuery", { callback_query_id: input.answer.tap })
+    } catch (e) {
+      log(e.message)
+    }
+  }
   return {}
 }
 

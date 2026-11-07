@@ -110,6 +110,7 @@ type telegram struct {
 	got     []string          // each file_id getFile was asked for
 	uploads []upload          // each file the bot sent, in order
 	refuse  map[string]string // a chat_id whose sendMessage is refused, with Telegram's description
+	old     map[string]bool   // a tap's id Telegram no longer takes an answer to
 	methods []string          // each method called, in order
 }
 
@@ -137,7 +138,7 @@ func uploaded(r *http.Request, method, to string) (upload, error) {
 }
 
 func newTelegram(t *testing.T) *telegram {
-	tg := &telegram{files: map[string]string{}, refuse: map[string]string{}}
+	tg := &telegram{files: map[string]string{}, refuse: map[string]string{}, old: map[string]bool{}}
 	tg.Server = httptest.NewServer(http.HandlerFunc(tg.serve))
 	t.Cleanup(tg.Close)
 	return tg
@@ -219,6 +220,10 @@ func (tg *telegram) serve(w http.ResponseWriter, r *http.Request) {
 		tg.edits = append(tg.edits, ask)
 		reply(map[string]any{"message_id": ask["message_id"]})
 	case "answerCallbackQuery":
+		if tg.old[fmt.Sprint(ask["callback_query_id"])] {
+			fmt.Fprint(w, `{"ok": false, "error_code": 400, "description": "Bad Request: query is too old and response timeout expired or query ID is invalid"}`)
+			return
+		}
 		tg.acks = append(tg.acks, ask)
 		reply(true)
 	case "sendChatAction":
