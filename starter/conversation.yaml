@@ -12,7 +12,7 @@
 #    has no agent yet." when agents/assistant.yaml is missing, and the next
 #    turn starts a new conversation with the agent.
 # 4. A stop cancels the turn, the agent's run and its tools with it, and posts
-#    "Stopped.". A stop with no turn running is dropped.
+#    "Stopped.". A stop with no agent working is dropped.
 #
 # A run with no message for a day ends. Each message added costs a job, and
 # each kept message offered while the turn starts costs one more. The run
@@ -32,7 +32,7 @@ states:
       # A stop that started the run, since no conversation was running, ends it.
       stop: { when: "${!states.adding.output}", go: over }
   adding:
-    defer: [message, stop]
+    defer: [message]
     job:
       script: .rook/shared/fold.js
       input:
@@ -46,7 +46,6 @@ states:
     job: { script: .rook/shared/gathered.js, restart: { after: failure, limit: 3 } }
     on:
       message: adding
-      stop: adding
       done:
         - { go: answering, when: "${states.adding.output.length > 0}" }
         - idle
