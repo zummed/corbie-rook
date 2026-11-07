@@ -593,10 +593,10 @@ func TestBlobCodeHasNoNetworkOrSecret(t *testing.T) {
 	}
 }
 
-// On Slack, a layout an agent writes is posted as it is, so it can hold a
-// button whose action_id starts choice- and whose value names no run. A press
-// of it reaches the listener as a tap, which should be noted as undelivered:
-// the listener should not fail, and a message after it is answered.
+// On Slack, a press whose action_id starts choice- and whose value names no
+// run can still arrive, since Slack passes on what any client sends. It reaches
+// the listener as a tap, which should be noted as undelivered: the listener
+// should not fail, and a message after it is answered.
 func TestSlackPressOfALayoutButtonDoesNotStopTheListener(t *testing.T) {
 	s := newSlack(t)
 	w := newWorld(t)
