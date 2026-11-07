@@ -544,6 +544,72 @@ func TestSlackQuestionTellsAPressThatDoesNotCount(t *testing.T) {
 	}
 }
 
+// The Telegram question, posted in a group, answers each tap it is sent. A
+// tap by the asker and one by someone without the scope are each answered
+// with an alert saying why, and the buttons stay; a tap Telegram no longer
+// takes an answer to is told in the presser's own chat with the bot. The
+// first tap that counts is answered with nothing and shows who answered in
+// place of the buttons.
+func TestTelegramQuestionAnswersEachTap(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorld(t)
+	dir, _ := telegramProject(t, w, tg)
+	removeListener(t, dir)
+	write(t, dir, byTelegramID)
+	write(t, dir, map[string]string{"on/asker.yaml": asker("telegram", `{ in: "-5", text: "Deploy?", choices: [yes, no], lookup: people/find, approvers: "messages:approve", asker: bob@example.com }`)})
+	receiveFrom(t, dir, "telegram", "on/*")
+	tg.mu.Lock()
+	tg.old["cq9"] = true
+	tg.mu.Unlock()
+	w.sync(dir)
+	id := w.start("on/asker.yaml", nil)
+	w.until("the question", func() bool { return len(tg.texts("-5")) == 1 })
+	var question *client.Run
+	w.until("the question waiting", func() bool {
+		for _, run := range w.at(bot + "/telegram/chat/ask.yaml") {
+			if run.Status == "running" && run.Timers == 1 {
+				question = run
+			}
+		}
+		return question != nil
+	})
+	tap := func(user, tap, choice string) {
+		w.send(question.ID, "answer", map[string]any{"service": "telegram", "run": question.ID[strings.Index(question.ID, "/")+1:], "user": user, "name": names[atoi(user)], "choice": choice, "tap": tap})
+	}
+	tap("2", "cq2", "yes")
+	w.checked(question.ID, 1)
+	tap("3", "cq3", "yes")
+	w.checked(question.ID, 2)
+	tap("3", "cq9", "yes")
+	w.until("all three told", func() bool { return len(tg.alerts()) == 2 && len(tg.texts("3")) == 1 })
+	if got, want := tg.alerts(), []string{"You asked for this, so someone else must answer it.", "Only someone with the scope messages:approve can answer this."}; !slices.Equal(got, want) {
+		t.Fatalf("the alerts are %q", got)
+	}
+	if got := tg.texts("3"); got[0] != "Only someone with the scope messages:approve can answer this." {
+		t.Fatalf("carol was told %q in her own chat", got)
+	}
+	if len(tg.edited()) != 0 || w.show(id).Status != "running" {
+		t.Fatalf("a tap that does not count changed the question")
+	}
+	tap("1", "cq1", "no")
+	w.until("the asker done", func() bool { return w.show(id).HasEnded() })
+	if out := fmt.Sprint(w.show(id).Output); out != "map[by:alice choice:no]" {
+		t.Fatalf("the question gave %s", out)
+	}
+	if got := tg.edited(); len(got) != 1 || got[0] != "Deploy?\n\nalice said no." {
+		t.Fatalf("the question shows %q", got)
+	}
+	tg.mu.Lock()
+	defer tg.mu.Unlock()
+	var answered []string
+	for _, a := range tg.acks {
+		answered = append(answered, fmt.Sprint(a["callback_query_id"], " ", a["show_alert"] == true))
+	}
+	if want := []string{"cq2 true", "cq3 true", "cq1 false"}; !slices.Equal(answered, want) {
+		t.Errorf("the taps were answered as %q", answered)
+	}
+}
+
 // Each service's chat/ask takes what the approval gives it: no field the
 // approval does not give is required, and every field it gives is declared.
 // Each is Slack's statechart: the same input, states and transitions, with

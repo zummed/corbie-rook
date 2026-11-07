@@ -49,12 +49,13 @@ A listener sends its parent, the router, three events. Each holds `service`:
 slack, telegram, gitlab or jira.
 
   message   service, place, chat, user, name, email, text, history, complete, attachments, unaddressed, own, change, answers
-  answer    service, run, user, name, email, choice, values
+  answer    service, run, user, name, email, choice, and on Telegram tap
   stop      service, place, chat, user, name, email
 
 `user` is the sender's ID on the service, and `email` is given where the
 service gives one. `run` is the ID of the question's run without its client's
-name, which the button holds.
+name, which the button holds. `tap` is the id of Telegram's callback query,
+which the question answers.
 
 A router sends a message and a stop to the conversation keyed
 `<service>:<chat>:<user>:<agent>`, so each person in a thread has their own
@@ -78,8 +79,14 @@ takes `{ in, text, choices, lookup, approvers, asker, within }` and gives
 
 1. It posts the buttons with the script's `do: ask`, which gives `sent`.
 2. For each press it runs `.rook/shared/press.yaml`, which calls the lookup.
-3. A press from `asker`, or without the scope `approvers`, is told why with `do: tell`, given `sent`, the press and the text.
-4. The first press that counts, or `within` with none, ends it, and `do: close` shows the answer in place of the buttons.
+3. A press from `asker`, or without the scope `approvers`, is told why with `do: tell`, given `sent`, the press and the text. Slack shows the text only to the presser in the question's thread; Telegram shows it in an alert that answers the tap, or, once Telegram no longer takes one, in the presser's own chat with the bot.
+4. The first press that counts, or `within` with none, ends it, and `do: close`, given `sent` and the press, shows the answer in place of the buttons.
+
+The placed question at `<bot>/<service>/chat/ask.yaml` takes events and calls
+only from its `receive:`, which `init` writes as the router and `agents/*`. A
+machine elsewhere that calls the question, or whose `ask:` is the approval,
+such as a statechart with an `approve:` job, calls it from its own location,
+which the person adds to that list, or the call is refused.
 
 Rook is ready-made Corbie machines in a project's `.rook/`. The project's own
 files fill five slots, and its own machines use Rook's blocks as jobs.

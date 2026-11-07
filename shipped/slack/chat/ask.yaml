@@ -12,7 +12,7 @@
 # Each service's chat/ask is this statechart, with the service's script doing
 # three things: ask posts the buttons and gives `sent`, tell tells a presser
 # `text` given the press and `sent`, and close shows `text` in place of the
-# buttons.
+# buttons, given `sent` and, after a press that counts, that press.
 statechart: slack-chat-ask
 description: Asks a question on Slack with a button for each choice, and gives the first choice pressed by someone whose scopes hold the approvers.
 title: "${input.text.split('\\n')[0]}"
@@ -55,7 +55,7 @@ states:
   answered:
     job:
       script: .rook/slack/slack.js
-      input: { do: close, sent: "${states.asking.output.sent}", text: "${input.text + '\\n\\n' + states.checking.output.by + ' said ' + states.checking.output.choice + '.'}" }
+      input: { do: close, sent: "${states.asking.output.sent}", answer: "${states.checking.output.answer}", text: "${input.text + '\\n\\n' + states.checking.output.by + ' said ' + states.checking.output.choice + '.'}" }
       allow: [net:slack.com, "secret:SLACK_TOKEN@net:slack.com"]
       restart: { limit: 2 }
     on: { done: over, failed: over }
