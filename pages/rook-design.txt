@@ -80,7 +80,7 @@ The client that submitted the project may send to and call every location,
 and every other tree and client is refused.
 
   conversation.yaml                receive: [gromit/*/gromit]: only a router
-  .rook/agent.yaml                 receive: [conversation], which an agent that includes it takes
+  .rook/agent.yaml                 receive: [conversation]; an agent a second conversation calls writes its own, naming both
   gromit/<service>/chat/ask.yaml   receive: [gromit/<service>/gromit, agents/*]; an answer only from its router
 
 A sender needs `send:` for the location in its `allow:`.

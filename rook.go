@@ -150,6 +150,13 @@ var Values = map[string][]Value{
 	"jira":   {{"JIRA_SITE", "<host>"}, {"JIRA_EMAIL", "<email>"}},
 }
 
+// Placeholders gives the fields of a listener's input that a service's
+// starting router holds a placeholder for, which a person sets.
+var Placeholders = map[string]string{
+	"gitlab": "projects: or group:",
+	"jira":   "projects:",
+}
+
 // Services gives the name of every service, sorted.
 func Services() []string {
 	return slices.Sorted(maps.Keys(Secrets))

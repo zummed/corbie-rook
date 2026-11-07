@@ -15,6 +15,7 @@ import (
 
 	rook "github.com/zummed/corbie-rook"
 	"github.com/zummed/corbie/client"
+	llmstandin "github.com/zummed/corbie/plugin/llm/standin"
 )
 
 // waitingAgent stands in for the agent at agents/assistant: it waits for the
@@ -237,34 +238,45 @@ func TestStrangerHasNoScopes(t *testing.T) {
 	}
 }
 
-// A project with two agents has a conversation for each, and its router
-// chooses by the words: a message about a deploy goes to the conversation
-// that calls agents/deploy, any other to the one that calls agents/assistant.
-// Each keeps its own conversation with its agent.
+// A project with two conversations, conversation.yaml and a copy at
+// deploys.yaml, has its router choose by the words: a message about a deploy
+// goes to deploys, any other to the conversation. Both call agents/assistant,
+// which includes .rook/agent.yaml and writes its own receive: naming both, so
+// each is answered by the model.
 func TestRouterChoosesAConversationByWords(t *testing.T) {
 	w := newWorld(t)
+	_, address := standin(t, w, func(c llmstandin.Call) llmstandin.Reply {
+		if strings.Contains(last(c), "deploy") {
+			return llmstandin.Reply{Text: "deploying"}
+		}
+		return llmstandin.Reply{Text: "fine"}
+	})
 	dir := copyStarter(t)
 	write(t, dir, map[string]string{
 		".rook/telegram/telegram.js": heard(from("1", "please deploy the site", 10), from("1", "how are you", 11)),
-		"agents/assistant.yaml":      echoAgent("assistant"),
-		"agents/deploy.yaml":         echoAgent("deploy"),
-		"agents/turn.js":             turnJS,
+		"agents/assistant.yaml":      modelAgent("assistant", address, "receive: [conversation, deploys]\n"),
 	})
 	conversation := readFile(t, dir, "conversation.yaml")
-	write(t, dir, map[string]string{"deploys.yaml": strings.ReplaceAll(strings.ReplaceAll(conversation, "agents/assistant", "agents/deploy"), "statechart: conversation", "statechart: deploys")})
+	write(t, dir, map[string]string{"deploys.yaml": strings.ReplaceAll(conversation, "statechart: conversation", "statechart: deploys")})
 	setSite(t, dir, router("telegram"), "        when: \"${!event.data.change}\"\n        send:", ""+
 		"        - when: \"${/\\\\bdeploy\\\\b/i.test(event.data.text)}\"\n"+
-		"          send: { to: { at: deploys, key: \"${'telegram:' + event.data.chat + ':' + event.data.user + ':deploy'}\" }, event: message, data: \"${event.data}\" }\n"+
+		"          send: { to: { at: deploys, key: \"${'telegram:' + event.data.chat + ':' + event.data.user + ':assistant'}\" }, event: message, data: \"${event.data}\" }\n"+
 		"        - when: \"${!event.data.change}\"\n"+
 		"          send:")
 	setSite(t, dir, router("telegram"), "allow: [send:conversation,", "allow: [send:deploys, send:conversation,")
 	w.sync(dir)
 	w.until("both answered", func() bool {
 		said := sayings(t, w)
-		return said["deploy to Alice (1): please deploy the site"] != nil && said["assistant to Alice (1): how are you"] != nil
+		return said["deploying"] != nil && said["fine"] != nil
 	})
-	if runs := keyed(w, "deploys.yaml"); len(runs["telegram:1:1:deploy"]) != 1 || len(runs) != 1 {
+	if said := sayings(t, w); said["That could not be answered."] != nil {
+		t.Errorf("a turn failed: %v", said)
+	}
+	if runs := keyed(w, "deploys.yaml"); len(runs["telegram:1:1:assistant"]) != 1 || len(runs) != 1 {
 		t.Errorf("the deploys conversations are %v", runs)
+	}
+	if runs := keyed(w, "conversation.yaml"); len(runs["telegram:1:1:assistant"]) != 1 || len(runs) != 1 {
+		t.Errorf("the conversations are %v", runs)
 	}
 }
 

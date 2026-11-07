@@ -65,12 +65,18 @@ func cmdInit(e *cli.Env, args []string) error {
 	}
 	dir := rest[0]
 	updating := rook.IsProject(dir)
+	others := rook.Bots(dir)
 	if err := rook.Init(dir, bot, services); err != nil {
 		return err
 	}
-	in := ""
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return err
+	}
+	// The project is named by its directory, as corbie run submit names its tree.
+	in, name := "", filepath.Base(abs)
 	if filepath.Clean(dir) != "." {
-		in = "cd " + dir + " && "
+		in, name = "cd "+dir+" && ", dir
 	}
 	if slices.Contains(services, "slack") {
 		fmt.Fprintln(e.Out, "Make the Slack app first, as corbie rook manual rook-project says under The Slack app.")
@@ -80,7 +86,7 @@ func cmdInit(e *cli.Env, args []string) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(e.Out, "%s has this version's .rook.\n\n", dir)
+		fmt.Fprintf(e.Out, "%s has this version's .rook.\n\n", name)
 		if len(differ) > 0 {
 			fmt.Fprintf(e.Out, "These of your files are not as this version starts a project:\n\n  %s\n\ncorbie rook manual rook-starter shows how it starts them. Take what you want of them, then:\n\n", strings.Join(differ, "\n  "))
 		} else {
@@ -88,20 +94,22 @@ func cmdInit(e *cli.Env, args []string) error {
 			fmt.Fprintln(e.Out)
 		}
 	} else {
-		fmt.Fprintf(e.Out, "%s is ready, and answers nobody until agents/assistant.yaml is there. Add it as corbie rook manual rook-project says under Add an agent, or ask a model in %s to. Then:\n\n", dir, dir)
+		fmt.Fprintf(e.Out, "%s is ready, and answers nobody until agents/assistant.yaml is there. Add it as corbie rook manual rook-project says under Add an agent, or ask a model in %s to. Then:\n\n", name, name)
 	}
-	abs, err := filepath.Abs(dir)
-	if err != nil {
-		return err
-	}
-	for _, name := range services {
-		at := "/" + filepath.Base(abs) + "/" + bot + "/" + name
-		for _, secret := range rook.Secrets[name] {
+	for _, service := range services {
+		at := "/" + filepath.Base(abs) + "/" + bot + "/" + service
+		for _, secret := range rook.Secrets[service] {
 			fmt.Fprintf(e.Out, "  corbie controller secret set %s --at %s\n", secret, at)
 		}
-		for _, value := range rook.Values[name] {
+		for _, value := range rook.Values[service] {
 			fmt.Fprintf(e.Out, "  corbie controller value set %s %s --at %s\n", value.Name, value.Shown, at)
 		}
+		if fields, ok := rook.Placeholders[service]; ok {
+			fmt.Fprintf(e.Out, "  set the listener's %s in %s/%s/%s.yaml\n", fields, bot, service, bot)
+		}
+	}
+	if bot != "" && len(others) > 0 && !slices.Contains(others, bot) {
+		fmt.Fprintf(e.Out, "\n%s holds another bot, so %s needs a conversation of its own, as corbie rook manual rook-project says under Common changes: copy conversation.yaml to %s/conversation.yaml with the other bot's name in it changed to %s, change conversation to %s/conversation in the send: and allow: of %s's routers, and add %s/conversation to the receive: of each agent it calls. Then:\n\n", name, bot, bot, bot, bot, bot, bot)
 	}
 	if len(rook.Bots(dir)) == 0 {
 		fmt.Fprintf(e.Out, "  corbie rook init %s --bot <name> --services <names>\n", dir)

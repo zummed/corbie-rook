@@ -88,9 +88,22 @@ Add an agent
 The conversation calls the agent at `agents/assistant` for each turn, with
 the asker's scopes, which the lookup reads from `people/scopes.yaml`. A
 toolkit the agent includes is offered only to a person whose scopes its
-`when:` names. The example's tools call GitLab, so add it first, as Common
-changes says under To add a service, and set the secret `GITLAB_TOKEN` and
-the value `GITLAB_SITE` at `/my-bot/gromit/gitlab`. To add the agent:
+`when:` names. The example's tools call GitLab, so add it first in the
+project, and do what `init` prints. The router it writes reads the project
+`group/project` until you set the listener's `projects:` or `group:`.
+
+    corbie rook init . --bot gromit --services gitlab
+      my-bot has this version's .rook.
+
+      Then:
+
+        corbie controller secret set GITLAB_TOKEN --at /my-bot/gromit/gitlab
+        corbie controller value set GITLAB_SITE <host> --at /my-bot/gromit/gitlab
+        set the listener's projects: or group: in gromit/gitlab/gromit.yaml
+        corbie test .
+        corbie run submit .
+
+To add the agent:
 
 1. Give each person their email, as the service shows it, with their name and scopes, in `people/scopes.yaml`.
 2. Write `agents/assistant.yaml`, which includes `.rook/agent.yaml` and names its model.
@@ -168,12 +181,13 @@ Common changes
 - To send a channel's messages to a machine of your own, such as `deploys.yaml` in `corbie rook manual rook-design` under Asking a person, add a rule before the conversation's in the router, and `send:deploys` to its `allow:`:
 
       message:
-        - when: "${event.data.place === '#deploys' && !event.data.change}"
+        - when: "${event.data.place === '#deploys' && !event.data.change && !event.data.unaddressed}"
           send: { to: { at: deploys, key: "${event.data.chat}" }, event: message, data: "${event.data}" }
         - when: "${!event.data.unaddressed && !event.data.change}"
           send: { to: { at: conversation, key: "${'slack:' + event.data.chat + ':' + event.data.user + ':assistant'}" }, event: message, data: "${event.data}" }
 
 - To answer in one channel with a second agent, copy `conversation.yaml` to a file such as `team/conversation.yaml`, and change `agents/assistant` in it to `agents/team`. Write `receive: [team/conversation]` in `agents/team.yaml`, and send that channel's messages to `team/conversation` from the router, with a key that ends `:team`, and `send:team/conversation` to the router's `allow:`.
+- An agent that includes `.rook/agent.yaml` takes calls only from `conversation`. When a second conversation, such as a copy at `deploys.yaml`, calls the same agent, the agent writes its own `receive:` naming both, as `receive: [conversation, deploys]`, or the call is refused.
 - To answer Slack messages that do not name the bot, add `input: { overhear: true }` to the router's job. A channel's message outside a thread, or a reply in a thread the bot has said something in, then comes with `unaddressed: true`, which the router's `when:` drops until you change it.
 - To answer some of those, add a stage that calls a filter to the turn in `conversation.yaml`, as its comment shows, and place `.rook/filters/words.yaml`, or write an agent that includes `.rook/filters/model.yaml`.
 - To clean a reply posted outside a direct message, add a stage that calls a redactor of your own, as the comment in `conversation.yaml` shows, and `send:redact` to the turn's `allow:`. The model still sees every tool's whole result.
@@ -181,7 +195,7 @@ Common changes
 - To post from a machine, call the bot's `chat/post` with `{ in, text }`, as `corbie rook manual rook-design` shows under Rook's calls.
 - To find people somewhere else, write `people/find.yaml` as a machine of your own that takes `{ service, user, name, email }` and gives `{ name, email, scopes }`.
 - To add a service, run `corbie rook init . --bot gromit --services <name>`, set the secrets and values it names, and submit. The conversation answers every service already.
-- `init` writes no second `conversation.yaml`. For a second bot, copy it to `<bot>/conversation.yaml`, change `gromit` in it to the bot's name, and in the bot's routers, which `init` writes sending to `conversation`, change the `send:` target and the `allow:` entry from `conversation` to `<bot>/conversation`. Its agent writes `receive:` naming that conversation.
+- `init` writes no second `conversation.yaml`, and prints these steps when it adds a second bot. Copy `conversation.yaml` to `<bot>/conversation.yaml` and change `gromit` in it to the new bot's name, so its `receive:` names the new bot's routers. In those routers, change the `send:` target and the `allow:` entry from `conversation` to `<bot>/conversation`. Add `<bot>/conversation` to the `receive:` of each agent it calls, as `receive: [conversation, <bot>/conversation]`.
 
 With a model
 ------------
