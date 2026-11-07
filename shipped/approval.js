@@ -6,11 +6,15 @@
 // given again here only when there are several.
 const quoted = (text) => String(text).split("\n").map((line) => "> " + line).join("\n")
 // A value of one line longer than this, such as a link or a file's content,
-// is shown cut short, with its length: whole, it can make the question longer
-// than a bridge takes. A value of several lines, such as a diff, is shown
-// whole.
+// is shown as its first and last 150 characters, with its length: whole, it
+// can make the question longer than a service takes. Its end is shown, since
+// what a command does can be at its end. A value of several lines, such as a
+// diff, is shown whole.
 const LONG = 300
-const short = (value) => value.length > LONG && !value.includes("\n") ? value.slice(0, LONG) + "… (" + value.length + " characters)" : value
+const cut = (text, at) => text.slice(0, /[\uDC00-\uDFFF]/.test(text[at] || "") ? at - 1 : at)
+const short = (value) => value.length > LONG && !value.includes("\n")
+  ? cut(value, 150) + " … (" + value.length + " characters, the middle left out) … " + value.slice(cut(value, value.length - 150).length)
+  : value
 // flat gives each argument as [path, value], a nested key joined by dots.
 const flat = (value, path) =>
   value && typeof value === "object" && !Array.isArray(value)

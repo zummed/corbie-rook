@@ -234,9 +234,11 @@ if (input.do === "send") {
 function fit(text) {
   text = String(text)
   if (text.length <= 4096) return text
-  const end = 400
-  const head = 4096 - end - 80
-  return text.slice(0, head) + "\n\n[" + (text.length - head - end) + " characters left out: Telegram takes at most 4096]\n\n" + text.slice(-end)
+  // A cut between the two halves of an emoji moves one character back.
+  const at = (n) => (/[\uDC00-\uDFFF]/.test(text[n] || "") ? n - 1 : n)
+  const head = at(4096 - 400 - 80)
+  const tail = at(text.length - 400)
+  return text.slice(0, head) + "\n\n[" + (tail - head) + " characters left out: Telegram takes at most 4096]\n\n" + text.slice(tail)
 }
 
 if (input.do === "ask") {

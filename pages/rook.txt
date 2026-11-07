@@ -43,7 +43,7 @@ While you write
 - Choose each change with the table under Common changes in `corbie rook manual rook-project`.
 - Name scopes as `<toolkit>:<what>`, such as `orders:read` and `orders:approve`, and give a toolkit a `when:` on the asker's scopes on its entry in the agent's file.
 - Write a tool as `call: <location>` of a machine the project places or writes, with `input:` fixing what the model must not choose, and `approve: true` when it changes something.
-- Give a toolkit with a held tool an `ask:` that runs `.rook/approval.yaml`, with `asker: "${input.asker.email}"`, so the approvers see who asked and nobody approves their own request.
+- Give a toolkit with a held tool an `ask:` that runs `.rook/approval.yaml`, with `asker: "${input.asker.email}"`, so the approvers see who asked and nobody approves their own request, and a `request:` that marks a reminder's note as the bot's, as `corbie rook manual rook-project` shows.
 - Place a call of Rook's with a file of one line under `<bot>/<service>/`, as `include: .rook/gitlab/pipeline/create.yaml`.
 - Add a location that calls the bot's `chat/ask` to the `receive:` of its placed file, or the call is refused.
 - An agent that includes `.rook/agent.yaml` takes calls only from `conversation`. When another conversation calls it, write `receive:` in the agent naming both.

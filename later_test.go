@@ -26,17 +26,21 @@ func TestProgressPostsAtOnce(t *testing.T) {
 	}
 }
 
-// laterModel sets a reminder for ten minutes when a person asks, and answers
-// a reminder with what it read in it.
-func laterModel(c llmstandin.Call) llmstandin.Reply {
-	said, results := turnOf(c)
-	switch {
-	case strings.Contains(said, "This is a reminder you set 10 minutes ago, and Alice did not write it.") && strings.Contains(said, "check the download"):
-		return llmstandin.Reply{Text: "The download is done."}
-	case len(results) == 0:
-		return llmstandin.Reply{Calls: []llmstandin.ToolCall{{ID: "l1", Name: "later", Args: `{"minutes": 10, "note": "check the download"}`}}}
-	default:
-		return llmstandin.Reply{Text: "I will look again in ten minutes."}
+// laterModel sets a reminder for `minutes` when a person asks, and answers a
+// reminder that says it waited `waited` with what it read in it.
+func laterModel(minutes, waited string) func(llmstandin.Call) llmstandin.Reply {
+	return func(c llmstandin.Call) llmstandin.Reply {
+		said, results := turnOf(c)
+		switch {
+		case strings.Contains(said, "This is a reminder you set "+waited+" ago, and Alice did not write it.") && strings.Contains(said, "check the download"):
+			return llmstandin.Reply{Text: "The download is done."}
+		case strings.Contains(said, "check the download"):
+			return llmstandin.Reply{Text: "The reminder was given as the person's words."}
+		case len(results) == 0:
+			return llmstandin.Reply{Calls: []llmstandin.ToolCall{{ID: "l1", Name: "later", Args: `{"minutes": ` + minutes + `, "note": "check the download"}`}}}
+		default:
+			return llmstandin.Reply{Text: "I will look again in ten minutes."}
+		}
 	}
 }
 
@@ -48,7 +52,7 @@ func TestLaterBringsTheConversationBack(t *testing.T) {
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir, _ := telegramProject(t, w, tg)
-	model := &llmstandin.Server{Answer: laterModel}
+	model := &llmstandin.Server{Answer: laterModel("10", "10 minutes")}
 	web := httptest.NewServer(model)
 	t.Cleanup(web.Close)
 	realAgent(t, dir, web.URL)
@@ -81,5 +85,25 @@ func TestLaterBringsTheConversationBack(t *testing.T) {
 	runs := keyed(w, "conversation.yaml")
 	if len(runs) != 1 {
 		t.Errorf("the reminder went to %d conversations: %v", len(runs), runs)
+	}
+}
+
+// A reminder the model asks for in 0 minutes waits one, and is still given
+// as the agent's own reminder.
+func TestLaterOfNoMinutesIsStillAReminder(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorld(t)
+	dir, _ := telegramProject(t, w, tg)
+	web := httptest.NewServer(&llmstandin.Server{Answer: laterModel("0", "a minute")})
+	t.Cleanup(web.Close)
+	realAgent(t, dir, web.URL)
+	tg.says(map[string]any{"text": "fetch the film"})
+	w.sync(dir)
+	w.until("the first reply", func() bool { return len(tg.texts("1")) == 1 })
+	w.until("the reminder waiting", func() bool { return len(keyed(w, "later.yaml")) == 1 })
+	w.set(w.now().Add(2 * time.Minute))
+	w.until("the reminder answered", func() bool { return len(tg.texts("1")) == 2 })
+	if got := tg.texts("1")[1]; got != "The download is done." {
+		t.Errorf("the reminder was answered %q", got)
 	}
 }

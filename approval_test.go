@@ -704,7 +704,8 @@ func TestApprovalFitsEveryQuestion(t *testing.T) {
 }
 
 // An argument of one line longer than 300 characters, such as a link, is
-// shown cut short, with its length; one of several lines is shown whole.
+// shown as its first and last 150 characters, with its length; one of several
+// lines is shown whole.
 func TestApprovalQuestionCutsALongLine(t *testing.T) {
 	w := newWorld(t)
 	dir := approvalProject(t, w, noModel)
@@ -718,7 +719,7 @@ func TestApprovalQuestionCutsALongLine(t *testing.T) {
 		"ask":    bot + "/telegram/chat/ask", "approvers": "messages:approve", "in": "1",
 	})
 	text := w.did(w.question(map[string]bool{}).ID, "ask")[0]["text"].(string)
-	if !strings.Contains(text, "url: "+link[:300]+"… (1000 characters)") || strings.Contains(text, link[:301]) {
+	if !strings.Contains(text, "url: "+link[:150]+" … (1000 characters, the middle left out) … "+link[850:]) || strings.Contains(text, link[:151]) {
 		t.Errorf("the link is shown as %q", text)
 	}
 	if !strings.Contains(text, strings.TrimSuffix(strings.ReplaceAll(lines, "a line", "> a line"), "\n")) {

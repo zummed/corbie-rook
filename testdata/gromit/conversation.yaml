@@ -119,7 +119,7 @@ states:
                 asker: "${stages.asker.output}"
                 conversation: "${input.conversation}"
                 post: "${'gromit/' + input.messages[0].service + '/chat/post'}"
-                back: "${input.messages[0].service + ':' + input.messages[0].chat + ':' + input.messages[0].user + ':support'}"
+                back: { at: conversation, key: "${input.messages[0].service + ':' + input.messages[0].chat + ':' + input.messages[0].user + ':support'}" }
           # A redactor, which cleans the reply of what may not be posted outside
           # a direct message, is a stage here such as
           #   redact:

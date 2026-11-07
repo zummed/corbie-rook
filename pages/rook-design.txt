@@ -103,12 +103,12 @@ A sender needs `send:` for the location in its `allow:`.
   conversation.yaml                in its turn, send:people/find, send:agents/assistant, and the bot's files/get and status; in its reply, send:gromit/*/chat/post and send:gromit/slack/assistant/status
   .rook/approval.yaml              send: for the question its ask names
   .rook/agent.yaml                 in its tool progress, send:*/*/chat/post; in its tool later, send:later
-  .rook/later.yaml                 send:conversation
+  .rook/later.yaml                 send: for the conversation the agent's input names
   .rook/shared/press.yaml          send: for the question's lookup
   a toolkit's tool                 a tool written call: holds send: for its location; a job writes its own allow:
 
 - The lookup's answer is trusted because only the conversation calls the agent, only a router and `later` send to the conversation, and a router takes events only from its listener.
-- A reminder acts for the person of the turn that set it: the tool `later` fixes the message's service, chat and user and the conversation's key from the agent's input, and the model chooses only the minutes and the note.
+- A reminder acts for the person of the turn that set it: the tool `later` fixes the message's service, chat and user and the conversation's run from the agent's input, and the model chooses only the minutes and the note.
 - A question trusts an answer from its router for the same reason: no location can send to the router or its listener, so each answer the router sends on came from the service.
 - A gateway is a client, so a gateway whose client submitted the project can call any of its locations with any input. Submit the project from a client no gateway uses.
 
@@ -224,7 +224,7 @@ A message is one mapping, the same from every service.
   change         what changed: reaction on Slack; closed, reopened, labels, milestone or assignees on GitLab
   at             on Slack, the message's time, by which conversations/replies reads what came before it
   answers        on Telegram, the message a reply answers
-  later          on a reminder, the minutes since the agent set it; its text is the agent's note
+  later          on a reminder, the minutes it waited; its text is the agent's note
 
   Telegram    chat: the chat's ID
   Slack       chat: the conversation, with /thread in a thread; a channel's message outside a thread starts its own
@@ -321,7 +321,7 @@ and `receive: [conversation]`, and names no model.
   asker           { name, email, scopes } of the person, from the lookup
   conversation    the conversation so far, or nothing
   post            the bot's chat/post for the service, which the tool progress calls
-  back            the key of the conversation's run, which the tool later returns to
+  back            the conversation's run, { at, key }, which the tool later returns to
 
   reply           the conversation posts it; an empty reply, or none, posts nothing
   conversation    goes to the next turn
@@ -337,7 +337,8 @@ and `receive: [conversation]`, and names no model.
   later      { minutes, note }: after 1 to 1440 minutes, the note comes back as a message; offered when the conversation gives back
 
 A reminder whose conversation ended in the meantime starts it again, with no
-earlier turns, so the note says in full what to do.
+earlier turns, so the note says in full what to do. At most 20 reminders wait
+at once in a project, and a stop does not cancel one.
 
 An agent's toolkits are listed under `toolkits:`, each with a `when:` on the
 agent's input, so only a person whose scopes allow it is offered one. A tool
@@ -384,7 +385,7 @@ Rook's approval, `.rook/approval.yaml`, is an ask, which a toolkit or a
 machine names under `ask:`. It calls the question with yes and no, naming
 the asker by email and each held call with its arguments, and quoting what was
 asked and what the agent said. An argument of one line over 300 characters is
-shown cut short, with its length. It gives `{ approved, note }`.
+shown as its first and last 150 characters, with its length. It gives `{ approved, note }`.
 
   ask         the question's location, such as gromit/slack/chat/ask
   approvers   the scope a press needs to count
