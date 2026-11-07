@@ -803,35 +803,60 @@ func writeRaw(t *testing.T, dir, name, text string) {
 	}
 }
 
-// rook-design's ask-alice.yaml, as written: alice is asked on Telegram, taps
-// Yes, and the run gives yes.
-func TestPageAskAlice(t *testing.T) {
-	t.Skip("R8 revives this: pages")
-	tg := newTelegram(t)
+// rook-design's deploys.yaml, with the placed pipeline call and question, as
+// written, on Slack and GitLab's stand-ins: bob asks to deploy orders in a
+// thread, his own press is refused, alice's yes starts the pipeline, and the
+// thread is told it started.
+func TestPageDeploys(t *testing.T) {
+	s := newSlack(t)
+	gl := newGitLab(t)
 	w := newWorld(t)
-	dir := chatProject(t, w, tg, nil)
-	writeRaw(t, dir, "ask-alice.yaml", pageExample(t, "rook-design", "ask-alice.yaml"))
-	w.sync(dir)
-	id := w.start("ask-alice.yaml", nil)
-	w.until("the question", func() bool { return len(tg.buttons()) == 2 })
-	if got := tg.texts("1"); len(got) != 1 || got[0] != "The disk is full. Clear the cache?" {
-		t.Errorf("alice was asked %q", got)
+	dir := slackProject(t, w, s)
+	point(t, dir, "gitlab", gl.Server)
+	w.secret("GITLAB_TOKEN", "gl-token")
+	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
+	for _, path := range []string{"deploys.yaml", "gromit/gitlab/pipeline/create.yaml", "gromit/slack/chat/ask.yaml"} {
+		writeRaw(t, dir, path, pageExample(t, "rook-design", path))
 	}
-	tg.tapOn(t, 0, 1, "yes")
-	w.until("the run ended", func() bool { return w.show(id).HasEnded() })
-	if r := w.show(id); r.Status != "done" || r.Output != "yes" {
-		t.Errorf("the run ended %s with %v: %s", r.Status, r.Output, r.Error)
+	write(t, dir, map[string]string{"people/scopes.yaml": `
+		alice@example.com: { name: alice, scopes: ["deploy:approve"] }
+		bob@example.com: { name: bob, scopes: ["deploy:approve"] }
+	`})
+	w.sync(dir)
+	w.until("Slack connected", s.connected)
+	w.sendTo("deploys.yaml", "C1/4.0", "message", map[string]any{"service": "slack", "place": "#help", "chat": "C1/4.0", "user": "U2", "name": "Bob", "email": "bob@example.com", "text": "deploy orders"})
+	w.until("the question", func() bool { return len(s.posted()) == 1 })
+	post := s.posted()[0]
+	if post["channel"] != "C1" || post["thread_ts"] != "4.0" {
+		t.Fatalf("the question went to %v", post)
+	}
+	yes := value(t, post, "yes")
+	s.press("a", "U2", yes)
+	w.until("bob told", func() bool { return len(s.whispered()) == 1 })
+	if got := s.whispered()[0]["text"]; got != "You asked for this, so someone else must answer it." {
+		t.Errorf("bob was told %v", got)
+	}
+	if len(gl.pipelines) != 0 {
+		t.Fatal("the pipeline started before a yes that counts")
+	}
+	s.press("b", "U1", yes)
+	w.until("the thread told", func() bool { return len(s.posted()) == 2 })
+	if got := s.posted()[1]; got["channel"] != "C1" || got["thread_ts"] != "4.0" || got["markdown_text"] != "Pipeline started." {
+		t.Errorf("the thread was told %v", got)
+	}
+	if got := gl.pipelines; len(got) != 1 || got[0]["project"] != "group/orders" || got[0]["ref"] != "main" {
+		t.Errorf("the pipelines started are %v", got)
 	}
 }
 
-// rook-design's schedules/evening.yaml, as written: at 18:00 in London, alice
-// is told the day is over on Telegram.
+// rook-design's schedules/evening.yaml, as written but for the chat's ID: at
+// 18:00 in London, chat 1 is told the day is over on Telegram.
 func TestPageEveningSchedule(t *testing.T) {
-	t.Skip("R8 revives this: pages")
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir := chatProject(t, w, tg, nil)
-	writeRaw(t, dir, "schedules/evening.yaml", pageExample(t, "rook-design", "schedules/evening.yaml"))
+	evening := pageExample(t, "rook-design", "schedules/evening.yaml")
+	writeRaw(t, dir, "schedules/evening.yaml", strings.Replace(evening, `in: "123456789"`, `in: "1"`, 1))
 	london, err := time.LoadLocation("Europe/London")
 	if err != nil {
 		t.Skip(err)
@@ -844,37 +869,51 @@ func TestPageEveningSchedule(t *testing.T) {
 	tg.waitFor(w, "1", "The day is over.")
 }
 
-// rook-design's parts/messages/part.yaml and rook-project's helper, as written,
-// with only the model's address and service changed to the stand-in's.
-func TestPagePartAndAgent(t *testing.T) {
-	t.Skip("R8 revives this: pages")
+// rook-project's agent, toolkit, its instructions and placed calls, as
+// written but for the model's address: alice, with orders:read only, asks on
+// Telegram; the model opens orders, is given its instructions, is shown
+// read_file without the project it fixes and not change_file, reads the file
+// from group/orders, and replies.
+func TestPageToolkitAndAgent(t *testing.T) {
 	tg := newTelegram(t)
+	gl := newGitLab(t)
 	w := newWorld(t)
 	model, address := standin(t, w, func(c llmstandin.Call) llmstandin.Reply {
-		said, results := turnOf(c)
-		_ = said
-		switch len(results) {
+		switch _, results := turnOf(c); len(results) {
 		case 0:
-			return calls("open", `{"toolkit": "messages"}`)
+			return calls("open", `{"toolkit": "orders"}`)
 		case 1:
-			return calls("tell", `{"person": "bob", "text": "dinner at six"}`)
+			return calls("read_file", `{"path": "config/app.yaml"}`)
 		}
-		return llmstandin.Reply{Text: "Told bob."}
+		return llmstandin.Reply{Text: "It is size 2."}
 	})
 	dir := chatProject(t, w, tg, nil)
+	point(t, dir, "gitlab", gl.Server)
+	gl.repo["group/orders@HEAD:config/app.yaml"] = "size: 2\n"
+	w.secret("GITLAB_TOKEN", "gl-token")
+	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
 	w.secret("ANTHROPIC_KEY", "sk-test")
-	writeRaw(t, dir, "parts/messages/part.yaml", pageExample(t, "rook-design", "parts/messages/part.yaml"))
-	helper := pageExample(t, "rook-design", "agents/helper.yaml")
-	helper = strings.Replace(helper, "model: { name: claude-sonnet-5-5, secret: ANTHROPIC_KEY }", "model: { name: claude-sonnet-5-5, service: anthropic, address: "+address+", secret: ANTHROPIC_KEY }", 1)
-	writeRaw(t, dir, "agents/helper.yaml", helper)
-	tg.dm(1, "tell bob dinner is at six")
+	for _, path := range []string{"agents/assistant.yaml", "toolkits/orders.yaml", "toolkits/orders.md", "gromit/gitlab/repository/files/read.yaml", "gromit/gitlab/repository/commits/create.yaml", ".corbieignore"} {
+		writeRaw(t, dir, path, pageExample(t, "rook-project", path))
+	}
+	agent := pageExample(t, "rook-project", "agents/assistant.yaml")
+	writeRaw(t, dir, "agents/assistant.yaml", strings.Replace(agent, "model: { name: claude-sonnet-5-5, secret: ANTHROPIC_KEY }", "model: { name: claude-sonnet-5-5, service: anthropic, address: "+address+", secret: ANTHROPIC_KEY }", 1))
+	write(t, dir, map[string]string{"people/scopes.yaml": `alice@example.com: { name: alice, scopes: ["orders:read"] }`})
+	tg.dm(1, "what size is the app?")
 	w.sync(dir)
-	w.until("the question", func() bool { return len(tg.buttons()) == 2 })
-	tg.tapOn(t, 0, 1, "yes")
-	tg.waitFor(w, "2", "dinner at six")
-	tg.waitFor(w, "1", "Told bob.")
-	if s := model.Calls[0].System; !strings.Contains(s, "plain text") {
-		t.Errorf("the system text does not hold the format for Telegram: %q", s)
+	tg.waitFor(w, "1", "It is size 2.")
+	if len(model.Calls) != 3 {
+		t.Fatalf("the model was called %d times", len(model.Calls))
+	}
+	if opened := fmt.Sprint(model.Calls[1].Messages); !strings.Contains(opened, "The orders app is built from the repository group/orders.") {
+		t.Errorf("open did not give the instructions: %s", opened)
+	}
+	tools, _ := json.Marshal(model.Calls[1].Tools)
+	if !strings.Contains(string(tools), `"name":"read_file"`) || strings.Contains(string(tools), "change_file") || strings.Contains(string(tools), `"project"`) {
+		t.Errorf("after open the model is shown %s", tools)
+	}
+	if read := fmt.Sprint(model.Calls[2].Messages); !strings.Contains(read, "size: 2") {
+		t.Errorf("read_file gave the model %s", read)
 	}
 }
 
