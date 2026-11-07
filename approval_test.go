@@ -612,7 +612,9 @@ func TestTelegramQuestionAnswersEachTap(t *testing.T) {
 // approval does not give is required but router and lookup, which the placed
 // file gives, and every field the approval gives is declared.
 // Each is Slack's statechart: the same input, states and transitions, with
-// its own service's script.
+// its own service's script. Jira's also drops an answer written on any issue
+// but the question's, since a comment there names the question's run in the
+// open.
 func TestApprovalFitsEveryQuestion(t *testing.T) {
 	read := func(name string) map[string]any {
 		text, err := os.ReadFile(name)
@@ -665,7 +667,15 @@ func TestApprovalFitsEveryQuestion(t *testing.T) {
 				t.Errorf("%s does not take %s, which the approval gives", name, field)
 			}
 		}
-		if got := shape(question); got != template {
+		got := shape(question)
+		if name == "shipped/jira/chat/ask.yaml" {
+			own := " && event.data.chat === input.in"
+			if !strings.Contains(got, own) {
+				t.Errorf("%s takes an answer written on any issue", name)
+			}
+			got = strings.Replace(got, own, "", 1)
+		}
+		if got != template {
 			t.Errorf("%s is not Slack's question:\n%s\nSlack's:\n%s", name, got, template)
 		}
 	}

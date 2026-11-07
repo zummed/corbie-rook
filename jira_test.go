@@ -709,6 +709,38 @@ func TestJiraQuestionIsAnsweredByAComment(t *testing.T) {
 	}
 }
 
+// An answer counts only on the question's own issue. A stranger copies the
+// question on OPS-12 into a comment on OPS-99, and alice, who may approve,
+// answers it there: the question is told nothing and waits on, and alice's
+// answer on OPS-12 ends it.
+func TestJiraAnswerOnAnotherIssueDoesNotCount(t *testing.T) {
+	j := newJira(t)
+	w, approval := approvingOnJira(t, j, "", nil)
+	question := questionIn(w, j)
+	at := time.Now().Add(time.Second)
+	j.commentOn("OPS-99", "901", "acc-9", "Close the duplicate OPS-99?\n\nTo answer, write a comment that holds only one of these lines:\n\n- `yes "+question+"`\n- `no "+question+"`", at)
+	j.commentOn("OPS-99", "902", "acc-a", "yes "+question, at.Add(time.Second))
+	said := len(j.saying())
+	tick(w, j.asked)
+	tick(w, j.asked)
+	time.Sleep(10 * interval)
+	if got := j.saying(); len(got) != said {
+		t.Fatalf("an answer on OPS-99 was told %q", got[said:])
+	}
+	if got := stubs(t, w, "press"); len(got) != 0 {
+		t.Fatalf("an answer on OPS-99 was checked %d times", len(got))
+	}
+	j.comment("11", "acc-a", "yes "+question, at.Add(2*time.Second))
+	tick(w, j.asked)
+	w.until("the question closed", func() bool { return len(j.saying()) > said })
+	if got := j.saying()[said]; got != "alice answered yes." {
+		t.Errorf("the bot said %q", got)
+	}
+	if out := ended(w, approval).(map[string]any); !slices.Equal(out["approved"].([]any), []any{"restart"}) {
+		t.Errorf("the approval gave %v", out)
+	}
+}
+
 // A question no comment answers in time is no, and a last comment says so.
 func TestJiraQuestionWithNoAnswerIsNo(t *testing.T) {
 	j := newJira(t)

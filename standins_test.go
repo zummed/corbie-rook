@@ -983,6 +983,7 @@ type jira struct {
 	stored    string                    // the name Jira keeps a file under; by default the name it was sent
 	people    map[string]map[string]any // what /user gives, by account ID
 	lookups   []string                  // the account ID of each /user, in order
+	others    []map[string]any          // other issues of the project the search gives, each with its comments
 }
 
 func newJira(t *testing.T) *jira {
@@ -1030,10 +1031,14 @@ func (j *jira) serve(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, j.contents[id])
 	case r.URL.Path == "/rest/api/2/search/jql":
 		j.asks++
-		json.NewEncoder(w).Encode(map[string]any{"isLast": true, "issues": []any{map[string]any{"id": "10", "key": "OPS-12", "fields": j.withFiles(map[string]any{
+		issues := []any{map[string]any{"id": "10", "key": "OPS-12", "fields": j.withFiles(map[string]any{
 			"summary": "Broken", "description": "", "created": "2020-01-01T00:00:00.000+0000",
 			"reporter": map[string]any{"accountId": "acc-1"}, "comment": map[string]any{"comments": j.comments},
-		})}}})
+		})}}
+		for _, o := range j.others {
+			issues = append(issues, o)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"isLast": true, "issues": issues})
 	case r.Method == "GET" && r.URL.Path == "/rest/api/2/issue/OPS-12":
 		json.NewEncoder(w).Encode(map[string]any{"fields": j.withFiles(map[string]any{
 			"summary": "Broken", "description": "It fails.", "reporter": map[string]any{"accountId": "acc-1", "displayName": "Al"},
@@ -1091,6 +1096,25 @@ func (j *jira) comment(id, author, body string, at time.Time) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 	j.comments = append(j.comments, map[string]any{"id": id, "body": body, "created": jiraTime(at), "author": map[string]any{"accountId": author}})
+}
+
+// commentOn adds a comment on another issue of the project, which the search
+// gives after OPS-12.
+func (j *jira) commentOn(issue, id, author, body string, at time.Time) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	c := map[string]any{"id": id, "body": body, "created": jiraTime(at), "author": map[string]any{"accountId": author}}
+	for _, o := range j.others {
+		if o["key"] == issue {
+			comments := o["fields"].(map[string]any)["comment"].(map[string]any)
+			comments["comments"] = append(comments["comments"].([]map[string]any), c)
+			return
+		}
+	}
+	j.others = append(j.others, map[string]any{"id": fmt.Sprint(100 + len(j.others)), "key": issue, "fields": map[string]any{
+		"summary": "Other", "description": "", "created": "2020-01-01T00:00:00.000+0000",
+		"reporter": map[string]any{"accountId": "acc-1"}, "comment": map[string]any{"comments": []map[string]any{c}},
+	}})
 }
 
 func jiraTime(at time.Time) string { return at.UTC().Format("2006-01-02T15:04:05.000+0000") }

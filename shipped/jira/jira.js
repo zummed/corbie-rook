@@ -165,7 +165,9 @@ if (input.do === "hear") {
     return (people[id] = { name: u.displayName || id, email: u.emailAddress || "", at: now })
   }
   // A question's comment shows a line for each choice: the choice and the
-  // question's run ID. A comment that holds only such a line answers the question.
+  // question's run ID. A comment that holds only such a line answers the
+  // question, with chat, the issue it was written on, which the question
+  // matches against its own.
   const answer = (text) => /^(.+?)\s+(\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{10})$/.exec(text.trim().replace(/^(\{\{|`)|(\}\}|`)$/g, "").trim())
   const heard = []
   // hear keeps a message that names the bot, and with overhear one that does
@@ -210,7 +212,7 @@ if (input.do === "hear") {
     const a = t.id.startsWith("comment:") && answer(t.text.replaceAll(mention, ""))
     if (a) {
       const who = person(t.from)
-      heard.push(["answer", { service: "jira", run: a[2], user: t.from, name: who.name, email: who.email, choice: a[1] }])
+      heard.push(["answer", { service: "jira", run: a[2], chat: t.issue, user: t.from, name: who.name, email: who.email, choice: a[1] }])
     } else if (t.id.startsWith("issue:")) waiting.push({ chat: t.issue, from: t.from })
     else {
       const id = Number(t.id.slice("comment:".length))

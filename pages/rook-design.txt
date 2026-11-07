@@ -221,7 +221,7 @@ A message is one mapping, the same from every service.
 - `history` holds at most 20 entries and 8000 characters, and on Jira the issue and its latest 50 public comments. It is an empty list when nothing came before.
 - A Slack reaction's text is the emoji, such as `:eyes:`, its `at` the message reacted to, and its history the thread before the reaction, that message included.
 - A GitLab change's text says what changed, such as `labels +bug`, and an opened issue is a message whose text is its title and description.
-- An answer holds `service`, `run`, `user`, `name`, `email` and `choice`, and on Telegram `tap`. A stop holds `service`, `place`, `chat`, `user`, `name` and `email`.
+- An answer holds `service`, `run`, `user`, `name`, `email` and `choice`, on Telegram `tap`, and on Jira `chat`, the issue it was written on. A stop holds `service`, `place`, `chat`, `user`, `name` and `email`.
 
 Telegram's Bot API keeps no history a bot can read, so Telegram's listener
 keeps the person's messages it heard, never the bot's replies. `complete` says
@@ -348,7 +348,7 @@ asker, within }`, and it gives `{ choice, by }`.
   Slack       tells a refused presser in a message only they see, in the question's thread
   Telegram    tells a refused presser in an alert, or in their own chat with the bot once Telegram no longer takes one
   GitLab      asks in a comment on the issue; a comment that is only a choice is the answer
-  Jira        shows a line for each choice, <choice> <run>; a comment that holds only such a line is the answer
+  Jira        shows a line for each choice, <choice> <run>; a comment on the question's issue that holds only such a line is the answer
 
 The placed file fixes two fields of the input with `const:` and `default:`,
 so no caller gives them, as the file with deploys added below shows.
