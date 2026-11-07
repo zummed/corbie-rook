@@ -1,12 +1,13 @@
-# `to` is a conversation, a channel's #name, or either with /thread.
+# `in` is a conversation, a channel's #name or a person's member ID, each with
+# /thread for a thread. The token needs the scope files:write.
 flow: slack-files-upload
 description: Uploads a file to Slack under a name.
-input: { to: string, name: string, file: blob }
+input: { in: string, name: string, file: blob }
 stages:
-  send:
+  upload:
     job:
       script: .rook/slack/slack.js
-      input: { do: send, to: "${input.to}", name: "${input.name}", file: "${input.file}" }
+      input: { do: upload, in: "${input.in}", name: "${input.name}", file: "${input.file}" }
       allow: [net:slack.com, net:files.slack.com, "secret:SLACK_TOKEN@net:slack.com"]
       timeout: 5m
-output: ${stages.send.output}
+output: ${stages.upload.output}

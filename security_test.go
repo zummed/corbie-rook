@@ -700,7 +700,6 @@ func TestBlobCodeHasNoNetworkOrSecret(t *testing.T) {
 // of it reaches the listener as a tap, which should be noted as undelivered:
 // the listener should not fail, and a message after it is answered.
 func TestSlackPressOfALayoutButtonDoesNotStopTheListener(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)

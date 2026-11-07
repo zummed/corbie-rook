@@ -2,11 +2,15 @@
 # nothing need reach this computer. It sends its parent message for a direct
 # message and a message naming the bot, and with overhear, for a channel's
 # message outside a thread and a reply in a thread the bot has said something
-# in. A press of Slack's stop button under a thread is sent as stop, and a press
-# of a question's button as answer. A job ends after four minutes, and the next
-# connects again. An event Slack sends again is sent once.
+# in, marked unaddressed. Each message carries the sender's name and email,
+# which Slack gives with the scopes users:read and users:read.email, what its
+# thread held before it as history, and complete. An emoji a person adds to a
+# message is sent as message with change: reaction. A press of Slack's stop
+# button under a thread is sent as stop, and a press of a question's button as
+# answer. A job ends after four minutes, and the next connects again. An event
+# Slack sends again is sent once.
 statechart: slack-listen
-description: Sends its parent each Slack message, button press and stop meant for the bot.
+description: Sends its parent each Slack message, reaction, button press and stop meant for the bot.
 title: Slack listener
 input: { overhear: "boolean?" }
 initial: hearing

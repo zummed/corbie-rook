@@ -157,8 +157,8 @@ in a shell.
 The Slack app
 -------------
 
-The Slack bridge needs a Slack app that is an agent and uses Socket Mode, so
-nothing on the internet connects to this computer.
+The Slack listener needs a Slack app that is an agent and uses Socket Mode,
+so nothing on the internet connects to this computer.
 
 1. At api.slack.com/apps, choose Create New App, then From a manifest, and
    pick the workspace.
@@ -166,11 +166,11 @@ nothing on the internet connects to this computer.
    description. Slack cannot turn an agent back into a plain app.
 3. Under Basic Information, App-Level Tokens, make a token with the scope
    `connections:write`, and run `corbie controller secret set
-   SLACK_APP_TOKEN --at /my-bot`.
+   SLACK_APP_TOKEN --at /my-bot/gromit/slack`.
 4. Under Install App, install the app, and set its Bot User OAuth Token with
-   `corbie controller secret set SLACK_TOKEN --at /my-bot`.
-5. In `people.yaml`, give each person `slack:` with their member ID, from
-   their profile's menu, Copy member ID.
+   `corbie controller secret set SLACK_TOKEN --at /my-bot/gromit/slack`.
+5. In `people/scopes.yaml`, give each person's email as Slack shows it in
+   their profile, with their name and scopes.
 6. In each channel the bot should hear, run `/invite @Rook`.
 
     {
@@ -198,9 +198,13 @@ nothing on the internet connects to this computer.
             "im:write",
             "channels:read",
             "groups:read",
+            "im:read",
             "channels:history",
             "groups:history",
             "im:history",
+            "users:read",
+            "users:read.email",
+            "reactions:read",
             "files:read",
             "files:write"
           ]
@@ -212,6 +216,7 @@ nothing on the internet connects to this computer.
             "message.channels",
             "message.groups",
             "message.im",
+            "reaction_added",
             "agent_session_stopped"
           ]
         },
@@ -223,12 +228,15 @@ nothing on the internet connects to this computer.
     }
 
   assistant:write                                   makes the bot an agent, which Slack gives a status and a stop button in a thread
-  chat:write                                        posts, sets the status in a thread, and changes a question once it is answered
-  im:write                                          opens a direct message to ask a question
-  channels:read, groups:read                        reads a channel's name, as rules.yaml names places
+  chat:write                                        posts, tells a person why their press does not count, and changes a question once it is answered
+  im:write                                          opens a direct message to post to a person by their member ID
+  channels:read, groups:read                        reads a channel's name, which a message gives as its place
+  im:read                                           reads whether a conversation is a direct message, for a stop or a reaction there
   channels:history, groups:history, im:history      hears messages, and reads a thread's history
+  users:read, users:read.email                      reads a sender's name and email, which the lookup finds them by
+  reactions:read                                    hears an emoji added to a message, with the event reaction_added
   files:read                                        downloads the files sent with a message
-  files:write                                       sends a file an agent gives
+  files:write                                       uploads a file with files/upload
 
 The bot hears a direct message, and a message that names it in a channel it
 was invited to. With the event `agent_session_stopped`, Slack shows a stop

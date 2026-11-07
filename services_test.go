@@ -164,11 +164,10 @@ func inChannel(user, ts, thread, text string) map[string]any {
 	return e
 }
 
-// A message naming the bot in a channel starts a thread's chat, and a reply in
-// that thread naming it again is the same chat and the same conversation, and is
-// answered in the thread.
+// A message naming the bot in a channel starts a thread, and a reply in that
+// thread naming it again goes to the same conversation, and is answered in the
+// thread.
 func TestSlackThreadReplyKeepsItsConversation(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
@@ -183,24 +182,15 @@ func TestSlackThreadReplyKeepsItsConversation(t *testing.T) {
 			t.Errorf("a reply was posted at %v", post)
 		}
 	}
-	chats := keyed(w, ".rook/blocks/chat.yaml")
-	if len(chats) != 1 || chats["slack:C1/4.0"] == nil {
-		t.Errorf("the chats are %v", slices.Collect(func(yield func(string) bool) {
-			for k := range chats {
-				yield(k)
-			}
-		}))
-	}
-	conversations := keyed(w, ".rook/blocks/conversation.yaml")
-	if len(conversations) != 1 || conversations["slack:C1/4.0:helper"] == nil {
-		t.Errorf("there are %d conversations", len(conversations))
+	conversations := keyed(w, "conversation.yaml")
+	if len(conversations) != 1 || len(conversations["slack:C1/4.0:U1:assistant"]) != 1 {
+		t.Errorf("the conversations are %v", conversations)
 	}
 }
 
-// A reply in a thread of a direct message is its own chat, and is answered in
-// that thread; the top of the direct message is another.
+// A reply in a thread of a direct message has its own conversation, and is
+// answered in that thread; the top of the direct message has another.
 func TestSlackDirectMessageThreadIsItsOwnChat(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
@@ -216,9 +206,9 @@ func TestSlackDirectMessageThreadIsItsOwnChat(t *testing.T) {
 	if got[0]["thread_ts"] != nil || got[1]["thread_ts"] != "3.0" {
 		t.Errorf("the replies went to %v", got)
 	}
-	chats := keyed(w, ".rook/blocks/chat.yaml")
-	if chats["slack:D1"] == nil || chats["slack:D1/3.0"] == nil {
-		t.Errorf("the chats are %v", chats)
+	conversations := keyed(w, "conversation.yaml")
+	if conversations["slack:D1:U1:assistant"] == nil || conversations["slack:D1/3.0:U1:assistant"] == nil {
+		t.Errorf("the conversations are %v", conversations)
 	}
 }
 
@@ -226,7 +216,6 @@ func TestSlackDirectMessageThreadIsItsOwnChat(t *testing.T) {
 // envelope ID. The event in it is answered once, since the listener's cursor
 // carries what it heard to the next job.
 func TestSlackResentEnvelopeAfterReconnectIsAnsweredOnce(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
@@ -255,39 +244,21 @@ func TestSlackResentEnvelopeAfterReconnectIsAnsweredOnce(t *testing.T) {
 // A press of a question's button that Slack sends twice answers the question
 // once, and the question is changed once.
 func TestSlackResentPressAnswersOnce(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
-	write(t, dir, map[string]string{"on/asker.yaml": `
-		flow: asker
-		allow: [send:.rook/blocks/ask]
-		stages:
-		  asking: { job: { call: { at: .rook/blocks/ask }, input: { people: [alice], text: "Restart?", choices: ["yes", "no"] } } }
-		output: ${stages.asking.output.choice}
-	`})
+	write(t, dir, map[string]string{"agents/asker.yaml": asker("slack", `{ in: U1, text: "Restart?", choices: ["yes", "no"], lookup: people/find, approvers: messages:approve }`)})
 	w.sync(dir)
-	asker := w.start("on/asker.yaml", nil)
+	asking := w.start("agents/asker.yaml", nil)
 	w.until("Slack connected", s.connected)
 	w.until("the question", func() bool { return len(s.posted()) == 1 })
-	blocks, _ := json.Marshal(s.posted()[0]["blocks"])
-	value := strings.Split(strings.Split(string(blocks), `"value":"`)[1], `"`)[0]
-	value = value[:strings.LastIndex(value, " ")] + " yes"
-	press := map[string]any{"type": "interactive", "payload": map[string]any{
-		"type": "block_actions", "user": map[string]any{"id": "U1"}, "actions": []any{map[string]any{"action_id": "choice-0", "value": value}},
-		"channel": map[string]any{"id": "D9"}, "message": map[string]any{"ts": "1.1", "text": "Restart?"},
-	}}
-	press["envelope_id"] = "p1"
-	s.send(press)
-	press["envelope_id"] = "p2"
-	s.send(press)
-	w.until("the asker done", func() bool { return w.show(asker).Status == "done" })
+	yes := value(t, s.posted()[0], "yes")
+	s.press("p1", "U1", yes)
+	s.press("p2", "U1", yes)
+	w.until("the asker done", func() bool { return w.show(asking).Status == "done" })
 	time.Sleep(30 * interval)
-	s.mu.Lock()
-	updates := len(s.updates)
-	s.mu.Unlock()
-	if got := w.show(asker).Output; got != "yes" || updates != 1 {
-		t.Fatalf("the choice was %v, and the question changed %d times", got, updates)
+	if got, _ := json.Marshal(w.show(asking).Output); string(got) != `{"by":"alice","choice":"yes"}` || len(s.changed()) != 1 {
+		t.Fatalf("the question gave %s, and changed %d times", got, len(s.changed()))
 	}
 }
 
@@ -296,7 +267,6 @@ func TestSlackResentPressAnswersOnce(t *testing.T) {
 // the bot hearing the next message: the direct message after it is answered
 // without waiting for the listener's minute of rest.
 func TestSlackUnreadableChannelDoesNotStopTheListener(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
 	s := newSlack(t)
 	override(s.Server, func(w http.ResponseWriter, r *http.Request) bool {
 		if r.URL.Path == "/api/conversations.info" && r.URL.Query().Get("channel") == "C7" {
@@ -335,7 +305,6 @@ func TestSlackUnreadableChannelDoesNotStopTheListener(t *testing.T) {
 // acknowledged. A press with no user, which lacks what the listener reads, is
 // acknowledged and skipped.
 func TestSlackListenerLeavesAFailedEnvelopeForSlackToSendAgain(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
 	s := newSlack(t)
 	var mu sync.Mutex
 	failed := map[string]bool{}
@@ -551,7 +520,6 @@ func TestSiteWithASchemeIsExplained(t *testing.T) {
 // A file whose address is not on Slack's own file host is left out of the
 // message, and the bot token is never sent to its host.
 func TestSlackFileOnAnotherHostGetsNoToken(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
 	other := &headers{}
 	elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "secret file") }))
 	t.Cleanup(elsewhere.Close)
@@ -571,25 +539,24 @@ func TestSlackFileOnAnotherHostGetsNoToken(t *testing.T) {
 	if seen := other.all(); len(seen) != 0 {
 		t.Fatalf("the other host was asked %v", seen)
 	}
-	for _, run := range stubs(t, w, "route") {
-		if in := fmt.Sprint(w.show(run.ID).Input); strings.Contains(in, elsewhere.URL) {
-			t.Errorf("the message names the other host's file: %s", in)
+	for _, m := range emitted(w, "slack", "message") {
+		if strings.Contains(fmt.Sprint(m), elsewhere.URL) {
+			t.Errorf("the message names the other host's file: %v", m)
 		}
 	}
 }
 
 // A message that is only the bot's name is answered, with nothing said.
 func TestSlackNameAloneIsHeard(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
-	write(t, dir, map[string]string{"agents/helper.yaml": `
-		statechart: helper
-		input: { said: string, asker: string, home: string, conversation: "any?" }
+	write(t, dir, map[string]string{"agents/assistant.yaml": `
+		statechart: assistant
+		input: { messages: list, medium: string, asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
 		initial: e
 		states:
-		  e: { end: done, output: { reply: "said [${input.said}]" } }
+		  e: { end: done, output: { reply: "said [${input.messages[0].text}]" } }
 	`})
 	w.sync(dir)
 	w.until("Slack connected", s.connected)
@@ -603,7 +570,6 @@ func TestSlackNameAloneIsHeard(t *testing.T) {
 // An edited message that comes to name the bot is not heard, and one deleted
 // is not either: Slack's message_changed and message_deleted are not messages.
 func TestSlackEditsAreNotHeard(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
@@ -623,7 +589,6 @@ func TestSlackEditsAreNotHeard(t *testing.T) {
 // A long answer is said in two messages. When Slack fails the second post once,
 // only that post is tried again, and the person reads each part once.
 func TestSlackLongAnswerIsNotSaidTwice(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
 	s := newSlack(t)
 	var mu sync.Mutex
 	posts := 0
@@ -661,18 +626,31 @@ func TestSlackLongAnswerIsNotSaidTwice(t *testing.T) {
 	}
 }
 
-// alice asks on Slack for a held tool. The approval asks her by a Slack button,
-// her press lets the tool run, and the message can be followed: listener, chat,
-// conversation, agent, the tool and its approval, and the question, which names
-// the approval that called it. The agent's run lists the tools it used.
+// slackMessages is a toolkit whose one tool posts on Slack, and waits for a
+// yes in #approvals from someone who holds messages:approve.
+const slackMessages = `
+	description: Messages to people on Slack.
+	instructions: Write to a person only when the asker asks you to.
+	ask:
+	  machine: .rook/approval.yaml
+	  input: { ask: gromit/slack/chat/ask, lookup: people/find, approvers: messages:approve, in: "#approvals", asker: "${input.asker.email}" }
+	tools:
+	  tell: { call: gromit/slack/chat/post, approve: true }
+`
+
+// bob asks on Slack for a held tool. The approval asks in #approvals with
+// Slack's buttons, alice's press lets the tool run, and the message can be
+// followed: the router, the conversation, the agent, its approval and the
+// question, which names the approval that called it, and the press the router
+// sent to it.
 func TestSlackApprovalByButtonCanBeFollowed(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
 	s := newSlack(t)
 	w := newWorld(t)
 	dir, model := slackAgentProject(t, w, s)
+	write(t, dir, map[string]string{"toolkits/messages.yaml": slackMessages})
 	replies := []llmstandin.Reply{
 		{Calls: []llmstandin.ToolCall{{ID: "c1", Name: "open", Args: `{"toolkit": "messages"}`}}},
-		{Calls: []llmstandin.ToolCall{{ID: "c2", Name: "tell", Args: `{"person": "bob", "text": "hello bob"}`}}},
+		{Calls: []llmstandin.ToolCall{{ID: "c2", Name: "tell", Args: `{"in": "U2", "text": "hello bob"}`}}},
 		{Text: "told"},
 	}
 	var mu sync.Mutex
@@ -685,178 +663,74 @@ func TestSlackApprovalByButtonCanBeFollowed(t *testing.T) {
 	}
 	w.sync(dir)
 	w.until("Slack connected", s.connected)
-	s.says("a", dm("U1", "3.0", "tell bob hello"))
+	s.says("a", dm("U2", "3.0", "tell me hello"))
+	var question map[string]any
 	w.until("the question", func() bool {
 		for _, p := range s.posted() {
 			if p["blocks"] != nil {
-				return true
+				question = p
 			}
 		}
-		return false
+		return question != nil
 	})
-	var question map[string]any
-	for _, p := range s.posted() {
-		if p["blocks"] != nil {
-			question = p
-		}
-	}
-	if question["channel"] != "D9" {
+	if question["channel"] != "C5" {
 		t.Errorf("the question went to %v", question["channel"])
 	}
-	blocks, _ := json.Marshal(question["blocks"])
-	if !strings.Contains(string(blocks), "tell") || !strings.Contains(string(blocks), "hello bob") {
+	if blocks, _ := json.Marshal(question["blocks"]); !strings.Contains(string(blocks), "tell") || !strings.Contains(string(blocks), "hello bob") {
 		t.Errorf("the question does not show the held call: %s", blocks)
 	}
-	var yes string
-	for _, part := range strings.Split(string(blocks), `"value":"`)[1:] {
-		v := strings.Split(part, `"`)[0]
-		if strings.HasSuffix(v, " yes") {
-			yes = v
-		}
-	}
-	if yes == "" {
-		t.Fatalf("no yes button in %s", blocks)
-	}
-	s.send(map[string]any{"envelope_id": "p1", "type": "interactive", "payload": map[string]any{
-		"type": "block_actions", "user": map[string]any{"id": "U1"}, "actions": []any{map[string]any{"action_id": "choice-0", "value": yes}},
-		"channel": map[string]any{"id": "D9"}, "message": map[string]any{"ts": "1.1"},
-	}})
-	w.until("bob told and alice answered", func() bool {
-		var bob, told bool
+	s.press("p1", "U1", value(t, question, "yes"))
+	w.until("bob told and answered", func() bool {
+		var hello, told bool
 		for _, p := range s.posted() {
-			bob = bob || p["markdown_text"] == "hello bob"
-			told = told || p["markdown_text"] == "told"
+			hello = hello || p["markdown_text"] == "hello bob" && p["channel"] == "D9"
+			told = told || p["markdown_text"] == "told" && p["channel"] == "D1"
 		}
-		return bob && told
+		return hello && told
 	})
 
-	sent := func(from, kind, at string) []string {
-		var out []string
+	sent := func(from, kind, at string) []instance.Ask {
+		var out []instance.Ask
 		for _, ask := range w.asked(from, kind) {
 			if ask.Location == at {
-				out = append(out, ask.Run)
+				out = append(out, ask)
 			}
 		}
 		return out
 	}
-	listeners := listenerRuns(w, "slack")
-	if len(listeners) == 0 {
-		t.Fatal("no listener")
+	router := w.kept(router("slack"))
+	conversations := sent(router, instance.AskEvent, location("conversation"))
+	if len(conversations) != 1 || conversations[0].Key != "slack:D1:U2:assistant" {
+		t.Fatalf("the router sent %+v", conversations)
 	}
-	listener := listeners[0].ID
-	chats := sent(listener, instance.AskEvent, location(".rook/blocks/chat"))
-	if len(chats) == 0 {
-		t.Fatal("the listener's record names no chat")
-	}
-	chat := chats[0]
-	if run := w.show(chat); run.StartedBy != listener || run.Key != "slack:D1" {
-		t.Errorf("the chat is %+v", run)
-	}
-	conversations := sent(chat, instance.AskEvent, location(".rook/blocks/conversation"))
-	if len(conversations) == 0 {
-		t.Fatal("the chat's record names no conversation")
-	}
-	agents := sent(conversations[0], instance.AskCall, location("agents/helper"))
+	conversation := keyed(w, "conversation.yaml")["slack:D1:U2:assistant"][0].ID
+	agents := sent(conversation, instance.AskCall, location("agents/assistant"))
 	if len(agents) != 1 {
-		t.Fatalf("the conversation called %v", agents)
+		t.Fatalf("the conversation called %+v", agents)
 	}
-	runs, err := w.List(context.Background(), client.Filter{Parent: agents[0], Finished: true})
+	runs, err := w.List(context.Background(), client.Filter{Parent: agents[0].Run, Finished: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	tools := map[string]string{}
+	var approval string
 	for _, run := range runs {
-		tools[run.Machine] = run.ID
-	}
-	if tools["tell"] == "" || tools["approval"] == "" {
-		t.Fatalf("the agent's runs are %v", tools)
-	}
-	asked := sent(tools["approval"], instance.AskCall, location(".rook/blocks/ask"))
-	if len(asked) != 1 || w.show(asked[0]).StartedBy != tools["approval"] {
-		t.Errorf("the approval's record names the questions %v", asked)
-	}
-	// The listener's record names the question the press went to.
-	pressed := false
-	for _, ask := range w.asked(listener, instance.AskEvent) {
-		if ask.Location == location(".rook/blocks/ask") || (len(asked) == 1 && ask.To == asked[0]) {
-			pressed = true
+		if run.Machine == "approval" {
+			approval = run.ID
 		}
+	}
+	if approval == "" || len(sent(agents[0].Run, instance.AskCall, location(bot+"/slack/chat/post"))) != 1 {
+		t.Fatalf("the agent's runs are %v, and it called %+v", runs, w.asked(agents[0].Run, instance.AskCall))
+	}
+	asked := sent(approval, instance.AskCall, location(bot+"/slack/chat/ask"))
+	if len(asked) != 1 || w.show(asked[0].Run).StartedBy != approval {
+		t.Fatalf("the approval's record names the questions %+v", asked)
+	}
+	pressed := false
+	for _, ask := range w.asked(router, instance.AskEvent) {
+		pressed = pressed || ask.To == asked[0].Run
 	}
 	if !pressed {
-		t.Errorf("the listener's record does not name the question its press went to")
-	}
-}
-
-// A question to two people on Slack goes to each in a direct message. One's
-// press answers it, and both messages lose their buttons and show who answered.
-func TestSlackQuestionToTwoPeopleClosesBoth(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
-	s := newSlack(t)
-	var mu sync.Mutex
-	opened := 0
-	override(s.Server, func(w http.ResponseWriter, r *http.Request) bool {
-		if r.URL.Path != "/api/conversations.open" {
-			return false
-		}
-		mu.Lock()
-		defer mu.Unlock()
-		opened++
-		fmt.Fprintf(w, `{"ok": true, "channel": {"id": "D%d"}}`, 10+opened)
-		return true
-	})
-	var tsMu sync.Mutex
-	ts := 0
-	override(s.Server, func(w http.ResponseWriter, r *http.Request) bool {
-		if r.URL.Path != "/api/chat.postMessage" {
-			return false
-		}
-		var post map[string]any
-		json.NewDecoder(r.Body).Decode(&post)
-		s.mu.Lock()
-		s.posts = append(s.posts, post)
-		s.mu.Unlock()
-		tsMu.Lock()
-		ts++
-		fmt.Fprintf(w, `{"ok": true, "ts": "%d.5"}`, ts)
-		tsMu.Unlock()
-		return true
-	})
-	w := newWorld(t)
-	dir := slackProject(t, w, s)
-	write(t, dir, map[string]string{"on/asker.yaml": `
-		flow: asker
-		allow: [send:.rook/blocks/ask]
-		stages:
-		  asking: { job: { call: { at: .rook/blocks/ask }, input: { people: [alice, bob], text: "Ship it?", choices: ["yes", "no"] } } }
-		output: ${stages.asking.output.choice}
-	`})
-	w.sync(dir)
-	asker := w.start("on/asker.yaml", nil)
-	w.until("Slack connected", s.connected)
-	w.until("two questions", func() bool { return len(s.posted()) == 2 })
-	blocks, _ := json.Marshal(s.posted()[0]["blocks"])
-	value := strings.Split(strings.Split(string(blocks), `"value":"`)[1], `"`)[0]
-	value = value[:strings.LastIndex(value, " ")] + " yes"
-	s.send(map[string]any{"envelope_id": "p1", "type": "interactive", "payload": map[string]any{
-		"type": "block_actions", "user": map[string]any{"id": "U2"}, "actions": []any{map[string]any{"action_id": "choice-0", "value": value}},
-	}})
-	w.until("the asker done", func() bool { return w.show(asker).Status == "done" })
-	w.until("both closed", func() bool {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		return len(s.updates) >= 2
-	})
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	channels := map[any]bool{}
-	for _, u := range s.updates {
-		channels[u["channel"]] = true
-		if u["text"] != "Ship it?\n\nbob said yes." {
-			t.Errorf("a question was changed to %v", u)
-		}
-	}
-	if len(channels) != 2 {
-		t.Errorf("the questions changed are %v", s.updates)
+		t.Errorf("the router's record does not name the question its press went to")
 	}
 }
 
@@ -1330,7 +1204,6 @@ func TestGitLabRequestApprovedOnSlack(t *testing.T) {
 // A Slack project with no SLACK_APP_TOKEN: the listener fails before anything
 // is sent, naming the secret.
 func TestSlackWithNoAppTokenNamesTheSecret(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
 	s := newSlack(t)
 	seen := &headers{}
 	seen.wrap(s.Server)

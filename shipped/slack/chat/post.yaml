@@ -1,6 +1,7 @@
-# `in` is a conversation, a channel's #name, or either with /thread. The text is
-# cut into the messages Slack takes, which are posted in order, each tried again
-# on its own after a failure, so that none is posted twice.
+# `in` is a conversation, a channel's #name or a person's member ID, each with
+# /thread for a thread. The text is Markdown, cut into the messages Slack
+# takes, which are posted in order, each tried again on its own after a
+# failure, so that none is posted twice.
 flow: slack-chat-post
 description: Posts a text on Slack, in Markdown, drawing its charts.
 input: { in: string, text: string }
@@ -10,10 +11,10 @@ stages:
       script: .rook/slack/slack.js
       files: [.rook/shared/rich.js]
       input: { do: cut, text: "${input.text}" }
-  say:
+  post:
     each: { items: "${stages.cut.output}", serial: true }
     job:
       script: .rook/slack/slack.js
-      input: { do: say, to: "${input.in}", message: "${item}" }
+      input: { do: post, in: "${input.in}", message: "${item}" }
       allow: [net:slack.com, "secret:SLACK_TOKEN@net:slack.com"]
       restart: { limit: 2 }

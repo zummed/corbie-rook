@@ -1,4 +1,5 @@
-# A larger file is given without its contents.
+# `attachments` are a message's, as the listener sends them. Each is given with
+# its contents as `file`, a blob; a larger one is given without them.
 flow: slack-files-get
 description: Downloads the files sent with a Slack message, each at most 32 MiB.
 input: { attachments: list }
@@ -6,7 +7,7 @@ stages:
   download:
     job:
       script: .rook/slack/slack.js
-      input: { do: attachments, attachments: "${input.attachments}", most: 33554432 }
+      input: { do: download, attachments: "${input.attachments}", most: 33554432 }
       allow: [net:files.slack.com, "secret:SLACK_TOKEN@net:files.slack.com"]
       timeout: 5m
 output: ${stages.download.output}

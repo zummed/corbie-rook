@@ -20,7 +20,7 @@ import (
 // A picture sent on Slack is downloaded when the message is answered, and the
 // model is shown it as an image beside the message.
 func TestSlackPictureIsShownToTheModel(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
+	t.Skip("R7 revives this: conversation, agent and starter")
 	s := newSlack(t)
 	w := newWorld(t)
 	w.secret("TEST_KEY", "sk-test")
@@ -47,7 +47,7 @@ func TestSlackPictureIsShownToTheModel(t *testing.T) {
 // A file sent with no text is a message, and one over the largest size is
 // named to the model and not downloaded.
 func TestSlackLargeFileIsNamedAndNotDownloaded(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
+	t.Skip("R7 revives this: conversation, agent and starter")
 	s := newSlack(t)
 	w := newWorld(t)
 	w.secret("TEST_KEY", "sk-test")
@@ -492,70 +492,6 @@ func slackAgentProject(t *testing.T, w *world, s *slack) (string, *llmstandin.Se
 	return dir, model
 }
 
-// An agent sends a text as a file, typed by its name, in the direct message it
-// was asked in.
-func TestSlackAgentSendsATextAsAFile(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
-	s := newSlack(t)
-	w := newWorld(t)
-	dir, model := slackAgentProject(t, w, s)
-	model.Answer = sending(`{"name": "report.csv", "text": "a,b\n1,2\n"}`)
-	w.sync(dir)
-	w.until("Slack connected", s.connected)
-	s.says("a", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "ts": "3.0", "text": "the report, please"})
-	w.until("the reply", func() bool { return len(s.posted()) >= 1 })
-	want := upload{Method: "files.completeUploadExternal", To: "D1", Name: "report.csv", Type: "text/csv", Body: "a,b\n1,2\n"}
-	if len(s.shared) != 1 || s.shared[0] != want {
-		t.Fatalf("the bot sent %+v; want %+v", s.shared, want)
-	}
-	if got := s.posted()[0]["markdown_text"]; got != "sent" {
-		t.Errorf("the bot said %v", got)
-	}
-}
-
-// An agent sends back a picture it was shown, in the thread of the channel
-// message it was asked in.
-func TestSlackAgentSendsAPictureInTheThread(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
-	s := newSlack(t)
-	w := newWorld(t)
-	dir, model := slackAgentProject(t, w, s)
-	setSite(t, dir, "rules.yaml", "  dm: { readers: [asker] }\n", "  dm: { readers: [asker] }\n  \"#help\": { readers: [asker] }\n")
-	model.Answer = sending(`{"name": "cat.png", "blob": "blob1"}`)
-	picture := "\x89PNG picture"
-	s.files = map[string]string{"/files/T1-F1/cat.png": picture}
-	w.sync(dir)
-	w.until("Slack connected", s.connected)
-	s.says("a", map[string]any{"type": "message", "subtype": "file_share", "channel": "C1", "channel_type": "channel", "user": "U1", "ts": "4.0", "text": "<@UBOT> send it back",
-		"files": []any{map[string]any{"id": "F1", "name": "cat.png", "mimetype": "image/png", "size": len(picture), "url_private_download": s.URL + "/files/T1-F1/cat.png"}}})
-	w.until("the reply", func() bool { return len(s.posted()) >= 1 })
-	want := upload{Method: "files.completeUploadExternal", To: "C1/4.0", Name: "cat.png", Type: "image/png", Body: picture}
-	if len(s.shared) != 1 || s.shared[0] != want {
-		t.Fatalf("the bot sent %+v; want %+v", s.shared, want)
-	}
-}
-
-// A token without the scope files:write sends nothing, and the model is given
-// Slack's refusal.
-func TestSlackAgentIsToldASendIsRefused(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
-	s := newSlack(t)
-	s.noWrite = true
-	w := newWorld(t)
-	dir, model := slackAgentProject(t, w, s)
-	model.Answer = sending(`{"name": "report.csv", "text": "a,b\n"}`)
-	w.sync(dir)
-	w.until("Slack connected", s.connected)
-	s.says("a", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "ts": "3.0", "text": "the report, please"})
-	w.until("the reply", func() bool { return len(s.posted()) >= 1 })
-	if len(s.shared) != 0 {
-		t.Fatalf("the bot sent %+v", s.shared)
-	}
-	if shown := fmt.Sprint(model.Calls[1].Messages); !strings.Contains(shown, "Slack refused files.getUploadURLExternal: missing_scope") {
-		t.Errorf("the model was shown %s", shown)
-	}
-}
-
 // An agent sends a text as a file, typed by its name: it is uploaded to the
 // issue's project, and the bot's first comment on the issue links to it.
 func TestGitLabAgentSendsATextAsAFile(t *testing.T) {
@@ -714,26 +650,93 @@ func TestJiraOtherImageIsLinked(t *testing.T) {
 	}
 }
 
-// A machine sends a file to a person by the address lookup.yaml gives, their
-// member id, and Slack puts it in their direct message with the bot.
+// uploading is a machine that uploads a text as a file at the bot's Slack
+// files/upload, which the project places, in a conversation `in` names.
+func uploading(t *testing.T, dir string) {
+	t.Helper()
+	write(t, dir, map[string]string{
+		bot + "/slack/files/upload.yaml": "include: .rook/slack/files/upload.yaml",
+		"on/report.yaml": `
+			flow: report
+			input: { in: string }
+			allow: [send:gromit/slack/files/upload]
+			stages:
+			  file: { job: { script: ./file.js } }
+			  upload: { job: { call: { at: gromit/slack/files/upload }, input: { in: "${input.in}", name: report.csv, file: "${stages.file.output}" } } }
+			output: ${stages.upload.output}
+		`,
+		"on/file.js": `return blobs.make("a,b\n", { type: "text/csv" })`,
+	})
+}
+
+// A machine uploads a file to a person by their member ID, which Slack puts in
+// their direct message with the bot, and to a channel's thread.
 func TestSlackSendsAFileToAPerson(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
 	s := newSlack(t)
 	w := newWorld(t)
 	dir := slackProject(t, w, s)
-	machine := "flow: report\nstages:\n  send:\n    job: { machine: .rook/blocks/send.yaml, input: { address: { bridge: slack, id: U1 }, name: report.csv, text: \"a,b\\n\" } }\n"
-	if err := os.WriteFile(filepath.Join(dir, "on", "report.yaml"), []byte(machine), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	uploading(t, dir)
 	w.sync(dir)
-	w.start("on/report.yaml", nil)
-	w.until("the file shared", func() bool {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		return len(s.shared) == 1
+	for _, in := range []string{"U1", "C1/4.0"} {
+		id := w.start("on/report.yaml", map[string]any{"in": in})
+		w.until("the upload", func() bool { return w.show(id).Status == "done" })
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	want := []upload{
+		{Method: "files.completeUploadExternal", To: "D9", Name: "report.csv", Type: "text/csv", Body: "a,b\n"},
+		{Method: "files.completeUploadExternal", To: "C1/4.0", Name: "report.csv", Type: "text/csv", Body: "a,b\n"},
+	}
+	if !slices.Equal(s.shared, want) {
+		t.Fatalf("the bot sent %+v; want %+v", s.shared, want)
+	}
+}
+
+// A token without the scope files:write uploads nothing, and the upload fails
+// with Slack's refusal.
+func TestSlackRefusedUploadFailsSayingWhy(t *testing.T) {
+	s := newSlack(t)
+	s.noWrite = true
+	w := newWorld(t)
+	dir := slackProject(t, w, s)
+	uploading(t, dir)
+	w.sync(dir)
+	id := w.start("on/report.yaml", map[string]any{"in": "U1"})
+	w.until("the upload failed", func() bool { return w.show(id).Status == "failed" })
+	if got := w.show(id).Error; !strings.Contains(got, "Slack refused files.getUploadURLExternal: missing_scope") || len(s.shared) != 0 {
+		t.Fatalf("the upload failed with %q, and the bot sent %+v", got, s.shared)
+	}
+}
+
+// files/get downloads a message's file with the bot token, as a blob, and
+// gives one over 32 MiB as it is, without downloading it.
+func TestSlackFilesGetDownloadsAFile(t *testing.T) {
+	s := newSlack(t)
+	w := newWorld(t)
+	dir := slackProject(t, w, s)
+	picture := "\x89PNG picture"
+	s.files = map[string]string{"/files/T1-F1/cat.png": picture}
+	write(t, dir, map[string]string{
+		"on/get.yaml": `
+			flow: get
+			input: { attachments: list }
+			allow: [send:gromit/slack/files/get]
+			stages:
+			  get: { job: { call: { at: gromit/slack/files/get }, input: { attachments: "${input.attachments}" } } }
+			  read: { job: { script: ./read.js, input: { files: "${stages.get.output}" } } }
+			output: ${stages.read.output}
+		`,
+		"on/read.js": `return input.files.map((f) => f.name + " " + f.type + " " + (f.file ? blobs.read(f.file, { as: "bytes" }).length + " bytes" : "not downloaded"))`,
 	})
-	if want := (upload{Method: "files.completeUploadExternal", To: "D9", Name: "report.csv", Type: "text/csv", Body: "a,b\n"}); s.shared[0] != want {
-		t.Fatalf("the bot sent %+v; want %+v", s.shared[0], want)
+	w.sync(dir)
+	id := w.start("on/get.yaml", map[string]any{"attachments": []any{
+		map[string]any{"name": "cat.png", "type": "image/png", "size": len(picture), "id": s.URL + "/files/T1-F1/cat.png"},
+		map[string]any{"name": "film.mp4", "type": "video/mp4", "size": 64 << 20, "id": s.URL + "/files/T1-F2/film.mp4"},
+	}})
+	w.until("the files", func() bool { st := w.show(id).Status; return st == "done" || st == "failed" })
+	got, _ := json.Marshal(w.show(id).Output)
+	if want := fmt.Sprintf(`["cat.png image/png %d bytes","film.mp4 video/mp4 not downloaded"]`, len(picture)); string(got) != want {
+		t.Fatalf("files/get gave %s: %s", got, w.show(id).Error)
 	}
 }
 
@@ -754,45 +757,28 @@ func looking(name string) func(llmstandin.Call) llmstandin.Reply {
 	}
 }
 
-// A reply in a Slack thread starts a conversation that is given the files earlier
-// in the thread without their contents, beside its own. The model is shown an
-// earlier picture when it looks at it.
+// A reply in a Slack thread carries its own files, and its history names the
+// files earlier in the thread.
 func TestSlackThreadGivesItsEarlierFiles(t *testing.T) {
-	t.Skip("R3 revives this: Slack")
 	s := newSlack(t)
 	w := newWorld(t)
-	w.secret("TEST_KEY", "sk-test")
 	dir := slackProject(t, w, s)
-	model := &llmstandin.Server{Answer: looking("fox.png")}
-	web := httptest.NewServer(model)
-	t.Cleanup(web.Close)
-	realAgent(t, dir, web.URL)
-	picture, note := "\x89PNG fox", "a sentence"
-	s.files = map[string]string{"/files/T1-F1/fox.png": picture, "/files/T1-F2/note.txt": note}
-	file := func(id, name, mimetype, body string) []any {
-		return []any{map[string]any{"id": id, "name": name, "mimetype": mimetype, "size": len(body), "url_private_download": s.URL + "/files/T1-" + id + "/" + name}}
+	echoing(t, dir)
+	file := func(id, name, mimetype string) []any {
+		return []any{map[string]any{"id": id, "name": name, "mimetype": mimetype, "size": 3, "url_private_download": s.URL + "/files/T1-" + id + "/" + name}}
 	}
-	s.thread = []map[string]any{{"ts": "1.0", "user": "U1", "text": "", "files": file("F1", "fox.png", "image/png", picture)}}
+	s.thread = []map[string]any{{"ts": "1.0", "user": "U1", "text": "", "files": file("F1", "fox.png", "image/png")}}
 	w.sync(dir)
 	w.until("Slack connected", s.connected)
 	s.says("a", map[string]any{"type": "message", "channel": "D1", "channel_type": "im", "user": "U1", "ts": "2.0", "thread_ts": "1.0", "text": "what are these?",
-		"files": file("F2", "note.txt", "text/plain", note)})
+		"files": file("F2", "note.txt", "text/plain")})
 	w.until("the answer", func() bool { return len(s.posted()) >= 1 })
-	if got := s.posted(); !strings.Contains(fmt.Sprint(got), "seen") {
-		t.Fatalf("the bot said %v", got)
+	if got := fmt.Sprint(s.posted()[0]["markdown_text"]); got != "[Alice:  (files: fox.png)] what are these?" {
+		t.Fatalf("the bot said %q", got)
 	}
-	encoded := base64.StdEncoding.EncodeToString([]byte(picture))
-	first := fmt.Sprint(model.Calls[0].Messages)
-	for _, want := range []string{"note.txt", `"earlier":[`, "(files: fox.png)"} {
-		if !strings.Contains(first, want) {
-			t.Errorf("%q is not in %s", want, first)
-		}
-	}
-	if strings.Contains(first, encoded) {
-		t.Errorf("the model was shown the earlier picture before it looked: %s", first)
-	}
-	if shown := fmt.Sprint(model.Calls[1].Messages); !strings.Contains(shown, encoded) {
-		t.Errorf("the model was not shown the picture it looked at: %s", shown)
+	sent := emitted(w, "slack", "message")
+	if files, _ := json.Marshal(sent[0]["attachments"]); string(files) != `[{"id":"`+s.URL+`/files/T1-F2/note.txt","name":"note.txt","size":3,"type":"text/plain"}]` {
+		t.Errorf("the message's files are %s", files)
 	}
 }
 
