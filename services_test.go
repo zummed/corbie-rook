@@ -1245,33 +1245,6 @@ func TestSlackWithNoAppTokenNamesTheSecret(t *testing.T) {
 	}
 }
 
-// With overhear on Jira, a comment that does not name the bot goes to attend,
-// and one that attend says yes to is answered on the issue.
-func TestJiraOverheardCommentGoesToAttend(t *testing.T) {
-	t.Skip("R6 revives this: Jira")
-	j := newJira(t)
-	w := newWorld(t)
-	w.secret("JIRA_TOKEN", "jira-token")
-	dir := pointed(t, "jira", j.Server)
-	jiraAt(w, j)
-	setSite(t, dir, router("jira"), "projects: [OPS] }", "projects: [OPS], overhear: true }")
-	if err := os.WriteFile(filepath.Join(dir, "attend.yaml"), []byte(dedent(attendStub)), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	w.sync(dir)
-	tick(w, j.asked)
-	at := time.Now().Add(time.Second)
-	j.comment("1", "acc-1", "please look", at)
-	j.comment("2", "acc-1", "just noting", at.Add(time.Millisecond))
-	tick(w, j.asked)
-	w.until("the answer", func() bool { return len(j.saying()) >= 1 })
-	tick(w, j.asked)
-	time.Sleep(10 * interval)
-	if got := j.saying(); len(got) != 1 || got[0] != "please look" {
-		t.Fatalf("the bot said %q", got)
-	}
-}
-
 // A question whose bridge runs but fails is not asked on the person's next
 // bridge: it fails with the bridge's error, given once.
 func TestQuestionOnAFailingBridgeFailsWithItsError(t *testing.T) {

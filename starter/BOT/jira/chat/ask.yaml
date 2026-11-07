@@ -1,4 +1,4 @@
-# Rook's question, which an approval calls. It takes an answer only when the
-# router sends it.
+# Rook's question, which an approval at agents/ calls. It takes an answer only
+# when the router sends it, whatever this list accepts.
 include: .rook/jira/chat/ask.yaml
 receive: [BOT/jira/BOT, agents/*]

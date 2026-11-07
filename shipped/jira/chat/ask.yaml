@@ -2,6 +2,9 @@
 # comment on the issue `in`, such as OPS-12, with a line for each of `choices`
 # that holds the choice and this run's ID. The listener sends a comment that
 # holds only such a line to the router as answer, and the router sends it here.
+# An answer is taken only from the router: the question at
+# <bot>/jira/chat/ask takes it from <bot>/jira/<bot>, whatever else its
+# receive: lets send to it, since the answer's person is only the sender's claim.
 #
 # An answer counts when its choice is one of `choices`, the person's scopes, by
 # the lookup at `lookup`, hold `approvers`, and their email is not `asker`. Any
@@ -36,7 +39,10 @@ states:
     on: { within: unanswered }
     states:
       open:
-        on: { answer: checking }
+        on:
+          answer:
+            go: checking
+            when: "${event.from.at === run.location.split('/').slice(0, -2).concat(run.location.split('/').slice(-4, -3)).join('/')}"
       checking:
         defer: [answer]
         job:
