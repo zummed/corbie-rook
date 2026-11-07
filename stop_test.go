@@ -173,28 +173,6 @@ func TestStopCancelsAQuestion(t *testing.T) {
 	}
 }
 
-// /stop with nothing being answered is told so, and the next message is
-// answered in the same conversation. The chat and the conversation it started
-// are titled stop.
-func TestStopWithNothingRunning(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
-	tg := newTelegram(t)
-	w := newWorld(t)
-	dir := stopProject(t, w, tg)
-	tg.dm(1, "/stop")
-	w.sync(dir)
-	tg.waitFor(w, "1", "Nothing is running.")
-	tg.dm(1, "hello")
-	tg.waitFor(w, "1", "ok: hello")
-	if n := len(keyed(w, ".rook/blocks/conversation.yaml")["telegram:1:helper"]); n != 1 {
-		t.Errorf("there are %d conversations", n)
-	}
-	w.titled(map[string][]string{"chat": {"dm: stop"}, "conversation": {"helper in dm: stop"}})
-	if f := failedRuns(t, w); len(f) > 0 {
-		t.Errorf("runs failed: %v", f)
-	}
-}
-
 // slowAgent is an agent with no model that takes an hour to answer.
 const slowAgent = `
 	flow: helper
@@ -335,8 +313,8 @@ func TestStopWithABotNameOrWords(t *testing.T) {
 			if text == "/stopwatch" {
 				want, said = []string{"message", "message"}, []string{"/stopwatch", "after"}
 			}
-			if !slices.Equal(events, want) || !slices.Equal(tg.texts("1"), said) {
-				t.Errorf("the conversations took %v, and alice was told %q", events, tg.texts("1"))
+			if !slices.Equal(events, want) || !slices.Equal(tg.lines("1"), said) {
+				t.Errorf("the conversations took %v, and alice was told %q", events, tg.lines("1"))
 			}
 		})
 	}

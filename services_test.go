@@ -480,21 +480,24 @@ func TestTelegramUpdateThatAlwaysFailsIsPassedOver(t *testing.T) {
 	}
 }
 
-// historyAgent stands in for the agent at agents/assistant: it replies with
-// the history its message carries, each entry's line and files, whether that
-// history is complete, and the message's text.
+// historyAgent stands in for the agent at agents/assistant: it replies with a
+// line for each message of the turn, giving the history the message carries,
+// each entry's line and files, whether that history is complete, and the
+// message's text.
 var historyAgent = map[string]string{
 	"agents/assistant.yaml": `
 		flow: assistant
 		input: { messages: list, medium: string, asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
 		stages:
-		  turn: { job: { script: ./history.js, input: { message: "${input.messages[0]}" } } }
+		  turn: { job: { script: ./history.js, input: { messages: "${input.messages}" } } }
 		output: ${stages.turn.output}
 	`,
 	"agents/history.js": `
-		const m = input.message
-		const lines = Array.from(blobs.items(m.history)).map((e) => e.line + e.attachments.map((a) => " +" + a.name).join(""))
-		return { reply: (m.complete ? "complete" : "partial") + " [" + lines.join(" | ") + "] " + m.text }
+		const said = (m) => {
+		  const lines = Array.from(blobs.items(m.history)).map((e) => e.line + e.attachments.map((a) => " +" + a.name).join(""))
+		  return (m.complete ? "complete" : "partial") + " [" + lines.join(" | ") + "] " + m.text
+		}
+		return { reply: input.messages.map(said).join("\n") }
 	`,
 }
 
@@ -520,7 +523,7 @@ func TestTelegramHistoryIsKeptForEachChat(t *testing.T) {
 		"2": {"partial [] hello"},
 	}
 	for chat, said := range want {
-		if got := tg.texts(chat); !slices.Equal(got, said) {
+		if got := tg.lines(chat); !slices.Equal(got, said) {
 			t.Errorf("chat %s was told %q", chat, got)
 		}
 	}
@@ -546,14 +549,14 @@ func TestTelegramHistoryIsBounded(t *testing.T) {
 	w.sync(dir)
 	tg.waitFor(w, "1", "] m22")
 	tg.waitFor(w, "2", "] last")
-	said := tg.texts("1")
+	said := tg.lines("1")
 	if want := "complete [" + strings.Join(lines[:20], " | ") + "] m21"; said[20] != want {
 		t.Errorf("the 21st message was given %q", said[20])
 	}
 	if want := "partial [" + strings.Join(lines[1:21], " | ") + "] m22"; said[21] != want {
 		t.Errorf("the 22nd message was given %q", said[21])
 	}
-	if got := tg.texts("2"); got[len(got)-1] != "partial [Bob: "+long+"y] last" {
+	if got := tg.lines("2"); got[len(got)-1] != "partial [Bob: "+long+"y] last" {
 		t.Errorf("the message after two long ones was given %.80q", got[len(got)-1])
 	}
 }
@@ -569,7 +572,7 @@ func TestTelegramHistoryIsDroppedAfterADay(t *testing.T) {
 	tg.dm(1, "two", map[string]any{"date": 1700000000 + 24*60*60})
 	w.sync(dir)
 	tg.waitFor(w, "1", "] two")
-	if got := tg.texts("1"); !slices.Equal(got, []string{"complete [] one", "partial [] two"}) {
+	if got := tg.lines("1"); !slices.Equal(got, []string{"complete [] one", "partial [] two"}) {
 		t.Errorf("alice was told %q", got)
 	}
 }
@@ -593,7 +596,9 @@ func TestTelegramHistoryIsBoundedInAll(t *testing.T) {
 	tg.dm(103, "still", map[string]any{"date": 1700000300})
 	w.sync(dir)
 	tg.waitFor(w, "103", "] still")
-	if got := tg.texts("100"); got[len(got)-1] != "partial [] again" {
+	tg.waitFor(w, "100", "] again")
+	tg.waitFor(w, "105", "] again")
+	if got := tg.lines("100"); got[len(got)-1] != "partial [] again" {
 		t.Errorf("the chat quiet longest was given %.80q", got[len(got)-1])
 	}
 	// A reply past 4096 characters is posted in parts.

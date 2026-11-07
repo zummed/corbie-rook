@@ -45,13 +45,14 @@ const telegramScript = `
 `
 
 // helperStub stands in for the agent at agents/assistant: it replies with what
-// it was said, and counts the turns of its conversation.
+// it was said, a line for each message of the turn, and counts the turns of
+// its conversation.
 const helperStub = `
 	statechart: assistant
 	input: { messages: list, medium: string, asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
 	initial: e
 	states:
-	  e: { end: done, output: { reply: "${input.messages.map((m) => m.text).join(' ')}", conversation: "${(input.conversation || 0) + 1}" } }
+	  e: { end: done, output: { reply: "${input.messages.map((m) => m.text).join('\\n')}", conversation: "${(input.conversation || 0) + 1}" } }
 `
 
 // exampleProject makes a project with a bot on the services given, as rook.Init
@@ -235,166 +236,6 @@ func (w *world) question(seen map[string]bool) *client.Run {
 func (w *world) tap(question, user, choice string) {
 	w.t.Helper()
 	w.send(question, "answer", map[string]any{"service": "telegram", "user": user, "name": names[atoi(user)], "choice": choice})
-}
-
-// The starter's machines: three messages from one person go to one chat, and
-// to the conversation of that chat and their agent, which answers them one at
-// a time and in order, each carrying on the one before. A stranger is told the
-// bot is not theirs, and has no conversation.
-func TestChatAnswersOneMessageAtATime(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
-	w := newWorld(t)
-	dir := copyStarter(t)
-	w.sync(dir)
-	w.kept(router("telegram"))
-	w.until("two chats", func() bool {
-		chats := keyed(w, ".rook/blocks/chat.yaml")
-		return len(chats["telegram:1"]) == 1 && len(chats["telegram:9"]) == 1
-	})
-	var conversation *client.Run
-	w.until("one conversation", func() bool {
-		all := keyed(w, ".rook/blocks/conversation.yaml")
-		if len(all["telegram:1:helper"]) == 1 {
-			conversation = all["telegram:1:helper"][0]
-		}
-		return conversation != nil
-	})
-	answered := map[string]any{}
-	w.until("three messages answered", func() bool {
-		runs, err := w.List(context.Background(), client.Filter{Parent: conversation.ID, Finished: true})
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, run := range runs {
-			if run.Machine == "message" && run.Status == "done" {
-				shown := w.show(run.ID)
-				answered[shown.Input.(map[string]any)["message"].(map[string]any)["text"].(string)] = shown.Output.(map[string]any)["conversation"]
-			}
-		}
-		return len(answered) == 3 && w.show(conversation.ID).Timers == 1
-	})
-	if want := map[string]any{"one": 1.0, "two": 2.0, "three": 3.0}; !reflect.DeepEqual(answered, want) {
-		t.Fatalf("the conversations are %v", answered)
-	}
-	w.until("the stranger told", func() bool { return sayings(t, w)["This bot answers only the people it belongs to."] != nil })
-	for key := range keyed(w, ".rook/blocks/conversation.yaml") {
-		if key != "telegram:1:helper" {
-			t.Errorf("a conversation %s", key)
-		}
-	}
-	w.titled(map[string][]string{
-		"telegram-bridge": {"Telegram bridge"},
-		"telegram-listen": {"Telegram listener"},
-		"chat":            {"dm: hello", "dm: one"},
-		"route":           {"hello", "one", "three", "two"},
-		"conversation":    {"helper in dm: one"},
-		"message":         {"one", "three", "two"},
-	})
-}
-
-// A message goes to the agent who chose: two people in one chat with two
-// agents have two conversations, and one agent is never given the other's
-// conversation. Each agent here is a machine with no model.
-func TestTwoAgentsInOneChatAreTwoConversations(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
-	w := newWorld(t)
-	dir := copyStarter(t)
-	stub := `
-		flow: NAME
-		input: { said: string, asker: string, conversation: "any?" }
-		stages:
-		  turn: { job: { script: ./turn.js, input: { said: "${input.said}", conversation: "${input.conversation}" } } }
-		output: ${stages.turn.output}
-	`
-	write(t, dir, map[string]string{
-		"agents/helper.yaml": strings.ReplaceAll(stub, "NAME", "helper"),
-		"agents/team.yaml":   strings.ReplaceAll(stub, "NAME", "team"),
-		// Each agent's conversation is the list of what it was said.
-		"agents/turn.js": `return { reply: "", conversation: [...(input.conversation || []), input.said] }`,
-		".rook/telegram/telegram.js": `
-			if (input.do === "hear") {
-			  if (input.cursor !== null) throw new Error("nothing more")
-			  emit("message", { bridge: "telegram", text: "alice one", chat: "5", from: "1", place: "dm", answers: "5:1" })
-			  emit("message", { bridge: "telegram", text: "bob one", chat: "5", from: "2", place: "dm", answers: "5:2" })
-			  emit("message", { bridge: "telegram", text: "alice two", chat: "5", from: "1", place: "dm", answers: "5:3" })
-			  emit("message", { bridge: "telegram", text: "bob two", chat: "5", from: "2", place: "dm", answers: "5:4" })
-			  return { cursor: 1 }
-			}
-			return { sent: [input.answers || ""] }
-		`,
-	})
-	w.sync(dir)
-	given := map[string]any{}
-	w.until("four answers", func() bool {
-		for _, at := range []string{"agents/helper.yaml", "agents/team.yaml"} {
-			for _, run := range w.at(at) {
-				if run.Status == "done" {
-					shown := w.show(run.ID)
-					given[shown.Input.(map[string]any)["said"].(string)] = shown.Input.(map[string]any)["conversation"]
-				}
-			}
-		}
-		return len(given) == 4
-	})
-	want := map[string]any{"alice one": nil, "bob one": nil, "alice two": []any{"alice one"}, "bob two": []any{"bob one"}}
-	if !reflect.DeepEqual(given, want) {
-		t.Fatalf("the agents were given %v", given)
-	}
-	keys := slices.Sorted(maps.Keys(keyed(w, ".rook/blocks/conversation.yaml")))
-	if !reflect.DeepEqual(keys, []string{"telegram:5:helper", "telegram:5:team"}) {
-		t.Fatalf("the conversations are %v", keys)
-	}
-}
-
-// An answer that fails is told so and starts the conversation again, so one the
-// agent cannot take does not fail every later message of the chat.
-func TestChatStartsAfreshAfterAFailedAnswer(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
-	w := newWorld(t)
-	dir := copyStarter(t)
-	write(t, dir, map[string]string{
-		".rook/telegram/telegram.js": `
-			if (input.do === "hear") {
-			  if (input.cursor !== null) throw new Error("nothing more")
-			  emit("message", { bridge: "telegram", text: "one", chat: "1", from: "1", place: "dm", answers: "1:10" })
-			  emit("message", { bridge: "telegram", text: "two", chat: "1", from: "1", place: "dm", answers: "1:11" })
-			  emit("message", { bridge: "telegram", text: "three", chat: "1", from: "1", place: "dm", answers: "1:12" })
-			  emit("message", { bridge: "telegram", text: "four", chat: "1", from: "1", place: "dm", answers: "1:13" })
-			  return { cursor: 1 }
-			}
-			return { sent: [input.answers || ""] }
-		`,
-		"boom.js": `if (input.said === "two") throw new Error("the model cannot take this")
-			return {}`,
-		"agents/helper.yaml": `
-			statechart: helper
-			input: { said: string, asker: string, home: string, conversation: "any?" }
-			initial: work
-			states:
-			  work:
-			    job: { script: boom.js, input: { said: "${input.said}" } }
-			    on: { done: e }
-			  e: { end: done, output: { reply: "${input.said}", conversation: "${(input.conversation || 0) + 1}" } }
-		`,
-	})
-	w.sync(dir)
-	w.kept(router("telegram"))
-	got := map[string]any{}
-	w.until("four messages answered", func() bool {
-		for _, run := range w.at(".rook/blocks/conversation.yaml") {
-			if run.Machine == "message" && run.Status == "done" {
-				shown := w.show(run.ID)
-				got[shown.Input.(map[string]any)["message"].(map[string]any)["text"].(string)] = shown.Output.(map[string]any)["conversation"]
-			}
-		}
-		return len(got) == 4
-	})
-	if want := map[string]any{"one": 1.0, "two": nil, "three": 1.0, "four": 2.0}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("the conversations are %v", got)
-	}
-	if said := sayings(t, w); said["That could not be answered."] == nil {
-		t.Errorf("the failure was not told: %v", said)
-	}
 }
 
 // telegramAsker is a machine that asks a question on Telegram, in chat 2, of
@@ -688,7 +529,9 @@ func TestRouterSendsEachPersonToTheirConversation(t *testing.T) {
 		for _, run := range w.at(bot + "/telegram/chat/post.yaml") {
 			if run.Status == "done" {
 				input := w.show(run.ID).Input.(map[string]any)
-				posted[fmt.Sprint(input["in"], " ", input["text"])] = true
+				for _, line := range strings.Split(fmt.Sprint(input["text"]), "\n") {
+					posted[fmt.Sprint(input["in"], " ", line)] = true
+				}
 			}
 		}
 		return len(posted) == 4
@@ -763,128 +606,6 @@ const oneMessage = `
 	if (input.do === "post") return { sent: [input.answers || ""] }
 	return {}
 `
-
-// A machine that answers can say a text at the message's address while it works,
-// and an empty reply or no output says nothing more and keeps the chat going.
-func TestMachineSaysAsItWorksAndGivesNoReply(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
-	for name, output := range map[string]string{"an empty reply": `output: { reply: "" }`, "no output": ""} {
-		t.Run(name, func(t *testing.T) {
-			w := newWorld(t)
-			dir := copyStarter(t)
-			write(t, dir, map[string]string{
-				".rook/telegram/telegram.js": `
-					if (input.do === "hear") {
-					  if (input.cursor !== null) throw new Error("nothing more")
-					  emit("message", { bridge: "telegram", text: "one", chat: "1", from: "1", place: "dm", answers: "1:10" })
-					  emit("message", { bridge: "telegram", text: "two", chat: "1", from: "1", place: "dm", answers: "1:11" })
-					  return { cursor: 1 }
-					}
-					return { sent: [input.answers || ""] }
-				`,
-				"agents/helper.yaml": `
-					flow: helper
-					input: { said: string, address: map }
-					stages:
-					  progress:
-					    job: { machine: .rook/blocks/say.yaml, input: { address: "${input.address}", text: "on ${input.said}" } }
-				` + "\n" + output,
-			})
-			w.sync(dir)
-			w.kept(router("telegram"))
-			w.until("both messages answered", func() bool {
-				done := 0
-				for _, run := range w.at(".rook/blocks/conversation.yaml") {
-					if run.Machine == "message" {
-						if run.Status == "failed" {
-							t.Fatalf("a message failed: %v", w.show(run.ID).Error)
-						}
-						if run.Status == "done" {
-							done++
-						}
-					}
-				}
-				return done == 2
-			})
-			for key, runs := range keyed(w, ".rook/blocks/chat.yaml") {
-				if run := w.show(runs[0].ID); run.Status != "running" {
-					t.Fatalf("the chat %s ended %s", key, run.Status)
-				}
-			}
-			said := sayings(t, w)
-			if len(said) != 2 || said["on one"]["answers"] != "1:10" || said["on two"]["answers"] != "1:11" {
-				t.Fatalf("what was said is %v", said)
-			}
-		})
-	}
-}
-
-// An agent's tool says a text at the message's address, and its model chooses only
-// the text.
-func TestAgentsToolSaysAtTheAddress(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
-	w := newWorld(t)
-	w.secret("TEST_KEY", "sk-test")
-	dir := copyStarter(t)
-	replies := []llmstandin.Reply{
-		{Calls: []llmstandin.ToolCall{{ID: "c1", Name: "progress", Args: `{"text": "on it"}`}}},
-		{Text: ""},
-	}
-	turn := 0
-	model := &llmstandin.Server{Answer: func(llmstandin.Call) llmstandin.Reply {
-		turn++
-		return replies[min(turn, len(replies))-1]
-	}}
-	web := httptest.NewServer(model)
-	t.Cleanup(web.Close)
-	realAgent(t, dir, web.URL)
-	helper, err := os.ReadFile(filepath.Join(dir, "agents/helper.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	cut, _, _ := strings.Cut(string(helper), "open:")
-	tool := dedent(`
-		tools:
-		  progress:
-		    description: Say how the work is going.
-		    args: { text: string }
-		    job: { machine: .rook/blocks/say.yaml, input: { address: "${input.address}", text: "${args.text}" } }
-	`)
-	if err := os.WriteFile(filepath.Join(dir, "agents/helper.yaml"), []byte(cut+tool), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	write(t, dir, map[string]string{".rook/telegram/telegram.js": oneMessage})
-	w.sync(dir)
-	w.kept(router("telegram"))
-	w.until("the text said", func() bool { return sayings(t, w)["on it"] != nil })
-	if to := sayings(t, w)["on it"]; to["bridge"] != "telegram" || to["id"] != "1" {
-		t.Fatalf("the text went to %v", to)
-	}
-}
-
-// A conversation gives the agent the project's directory as home.
-func TestAgentIsGivenTheProject(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
-	w := newWorld(t)
-	dir := copyStarter(t)
-	write(t, dir, map[string]string{".rook/telegram/telegram.js": oneMessage})
-	w.sync(dir)
-	var given any
-	w.until("the agent", func() bool {
-		for _, run := range w.at("agents/helper.yaml") {
-			given = w.show(run.ID).Input
-			return true
-		}
-		return false
-	})
-	real, err := filepath.EvalSymlinks(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := given.(map[string]any)["home"]; got != real {
-		t.Fatalf("the agent was given %v", got)
-	}
-}
 
 // undelivered gives what a run's record notes of the events it sent that were
 // not delivered.

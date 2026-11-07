@@ -308,6 +308,16 @@ func (tg *telegram) texts(chat string) []string {
 	return out
 }
 
+// lines gives each line the bot posted in a chat, in order. A turn that
+// answers several messages answers each on a line of its own.
+func (tg *telegram) lines(chat string) []string {
+	var out []string
+	for _, text := range tg.texts(chat) {
+		out = append(out, strings.Split(text, "\n")...)
+	}
+	return out
+}
+
 // edited gives the text of each message the bot edited, in order.
 func (tg *telegram) edited() []string {
 	tg.mu.Lock()

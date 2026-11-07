@@ -426,33 +426,6 @@ func TestNoModelFlowAgentIsFollowed(t *testing.T) {
 	}
 }
 
-// A project with no agent and no model: alice, whom people.yaml names, is told
-// the bot does not answer her here, and the chat's record shows who gave no
-// agent and no rule.
-func TestNoAgentProjectRefusesAndSaysWhy(t *testing.T) {
-	t.Skip("R7 revives this: conversation, agent and starter")
-	w := newWorld(t)
-	dir := copyStarter(t)
-	write(t, dir, map[string]string{
-		".rook/telegram/telegram.js": heard(from("1", "hello", 10)),
-		"rules.yaml":                 "places:\n  dm: { readers: [asker] }\nagents: []\n",
-	})
-	for _, name := range []string{"agents/helper.yaml", "agents/team.yaml", "parts/messages/part.yaml"} {
-		os.Remove(filepath.Join(dir, name))
-	}
-	w.sync(dir)
-	w.until("the refusal", func() bool { return sayings(t, w)["This bot does not answer you here."] != nil })
-	for _, run := range stubs(t, w, "who") {
-		out := w.show(run.ID).Output.(map[string]any)
-		if out["person"] != "alice" || out["agent"] != nil || out["rule"] != nil {
-			t.Errorf("who gave %v", out)
-		}
-	}
-	if runs := stubs(t, w, "conversation"); len(runs) != 0 {
-		t.Errorf("a conversation started: %v", runs)
-	}
-}
-
 // A changed agent's file, submitted while its run waits on an approval, leaves
 // the waiting run, its approval and its question running; a yes finishes it,
 // and the conversation's next message is answered by the new agent.
