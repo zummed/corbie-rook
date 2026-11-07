@@ -20,7 +20,6 @@ import (
 	"github.com/zummed/corbie/client"
 	"github.com/zummed/corbie/instance"
 	llmstandin "github.com/zummed/corbie/plugin/llm/standin"
-	"go.yaml.in/yaml/v3"
 )
 
 // bot is the name of the bot in every test's project.
@@ -397,131 +396,6 @@ func TestChatStartsAfreshAfterAFailedAnswer(t *testing.T) {
 	}
 }
 
-// A tool marked approve: true waits for its part's approvers, and a no comes back
-// to the model with nothing done. The tree's own client starts the agent at its
-// location with no message, and the approver is shown the request.
-func TestHeldCallWaitsForItsApprovers(t *testing.T) {
-	t.Skip("R2 revives this: approval, lookup and question")
-	w := newWorld(t)
-	w.secret("TEST_KEY", "sk-test")
-	dir := copyStarter(t)
-	removeListener(t, dir)
-	replies := []llmstandin.Reply{
-		{Calls: []llmstandin.ToolCall{{ID: "c1", Name: "open", Args: `{"toolkit": "messages"}`}}},
-		{Calls: []llmstandin.ToolCall{{ID: "c2", Name: "tell", Args: `{"person": "bob", "text": "hello"}`}}},
-		{Text: "done"},
-	}
-	model := &llmstandin.Server{Answer: func(c llmstandin.Call) llmstandin.Reply { return replies[c.Turn-1] }}
-	web := httptest.NewServer(model)
-	t.Cleanup(web.Close)
-	realAgent(t, dir, web.URL)
-	w.sync(dir)
-	id := w.start("agents/helper.yaml", map[string]any{"said": "q", "asker": "alice", "request": "alice: before\nalice: q", "home": dir})
-	question := w.question(map[string]bool{})
-	if text := fmt.Sprint(w.show(question.ID).Input); !strings.Contains(text, "Request, the latest message last:\n> alice: before\n> alice: q") {
-		t.Errorf("the approver was shown %s", text)
-	}
-	w.tap(question.ID, "1", "no")
-	w.until("the helper to end", func() bool { return w.show(id).HasEnded() })
-	if run := w.show(id); run.Status != "done" {
-		t.Fatalf("the helper ended %s: %v", run.Status, run.Error)
-	}
-	said := model.Calls[2].Messages
-	text, _ := json.Marshal(said[len(said)-1])
-	if !strings.Contains(string(text), "alice said no.") {
-		t.Errorf("the held call came back as %s", text)
-	}
-	if runs := stubs(t, w, "tell"); len(runs) != 0 {
-		t.Errorf("the message was sent after a no: %v", runs)
-	}
-	w.titled(map[string][]string{"helper": {"alice: q"}, "approval": {"Approve tell: alice: q"}, "ask": {"An agent wants to run tell."}})
-}
-
-// workPeople is a team, platform, for the rules rook-design shows: a public
-// channel, a channel of the team's own, and an agent for anyone.
-const workPeople = `
-	people:
-	  sam: { slack: U1 }
-	  ana: { slack: U2 }
-	  cara: { slack: U3 }
-	groups:
-	  platform: [sam, ana]
-`
-
-// pageRules is the rules.yaml rook-design shows.
-func pageRules(t *testing.T) string {
-	for _, ex := range examples(t, "rook-design") {
-		if ex.path == "rules.yaml" {
-			return ex.text
-		}
-	}
-	t.Fatal("rook-design shows no rules.yaml")
-	return ""
-}
-
-// try writes the flow on/try.yaml into a project with stages, and gives its
-// output once it has run, failing the test if it failed.
-func try(t *testing.T, w *world, dir, stages string, output string) any {
-	t.Helper()
-	write(t, dir, map[string]string{"on/try.yaml": "flow: try\nallow: [send:lookup, send:.rook/blocks/ask]\nstages:\n" + stages + "output: " + output + "\n"})
-	w.sync(dir)
-	id := w.start("on/try.yaml", nil)
-	run, err := w.Wait(context.Background(), id, interval)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if run.Status != "done" {
-		t.Fatalf("the flow ended %s: %v", run.Status, run.Error)
-	}
-	return w.show(id).Output
-}
-
-// review stands in for review.yaml: it says what the held job's input names.
-const review = `
-	statechart: review
-	input: { context: string }
-	initial: e
-	states:
-	  e: { end: done, output: { reply: { says: "${input.context.match(/yes|refuse|refer/)[0]}", note: why } } }
-`
-
-// A held call goes to the part's own people: only their answer counts, and
-// nobody else is asked. A part that names nobody approves nothing, and says so.
-func TestApprovalAsksThePartsApprovers(t *testing.T) {
-	t.Skip("R2 revives this: approval, lookup and question")
-	w := newWorld(t)
-	dir := copyStarter(t)
-	removeListener(t, dir)
-	write(t, dir, map[string]string{"on/try.yaml": `
-		flow: try
-		stages:
-		  held: { job: { machine: .rook/blocks/approval.yaml, input: { asking: {}, part: messages, people: [bob], jobs: [{ name: tell, input: {} }] } } }
-		  nobody: { job: { machine: .rook/blocks/approval.yaml, input: { asking: {}, part: deploys, people: [], jobs: [{ name: tell, input: {} }] } } }
-		  unnamed: { job: { machine: .rook/blocks/approval.yaml, input: { asking: {}, part: deploys, jobs: [{ name: tell, input: {} }] } } }
-		output: { held: "${stages.held.output.approve}", nobody: "${stages.nobody.output}", unnamed: "${stages.unnamed.output}" }
-	`})
-	w.sync(dir)
-	try := w.start("on/try.yaml", nil)
-	question := w.question(map[string]bool{})
-	if got := w.show(question.ID).Input.(map[string]any)["people"]; !reflect.DeepEqual(got, []any{"bob"}) {
-		t.Fatalf("it asked %v", got)
-	}
-	for _, from := range []string{"1", "2"} {
-		w.tap(question.ID, from, "yes")
-		time.Sleep(10 * interval)
-		if ended := w.show(question.ID).Status != "running"; ended != (from == "2") {
-			t.Fatalf("after an answer from %s the question is %s", from, w.show(question.ID).Status)
-		}
-	}
-	w.until("the approval", func() bool { return w.show(try).HasEnded() })
-	if got := fmt.Sprint(w.show(try).Output); got != "map[held:[tell] nobody:map[approve:[] note:The part deploys names no one in people to approve its calls.] unnamed:map[approve:[] note:The part deploys names no one in people to approve its calls.]]" {
-		t.Fatalf("it gave %s", got)
-	}
-	if n := len(keyed(w, ".rook/blocks/ask.yaml")[""]); n != 1 {
-		t.Errorf("%d questions were asked", n)
-	}
-}
-
 // A question is a run of .rook/blocks/ask that a machine calls, and a tap by a
 // person it names answers it, on any of their bridges. A tap by anyone else
 // changes nothing.
@@ -625,42 +499,6 @@ func TestProjectReads(t *testing.T) {
 	for _, m := range tree.Machines {
 		if m.Path == "agents/assistant.yaml" && m.Problem == nil && !reflect.DeepEqual(m.Draft.Definition.Receive, map[string][]string{"": {"conversation"}}) {
 			t.Errorf("an agent that includes .rook/agent.yaml receives from %v", m.Draft.Definition.Receive)
-		}
-	}
-}
-
-// Each service's chat/ask takes what the approval gives it: no field the
-// approval does not give is required, and every field it gives is declared.
-func TestApprovalFitsEveryQuestion(t *testing.T) {
-	t.Skip("R2 revives this: the question statechart")
-	read := func(name string) map[string]any {
-		text, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var m map[string]any
-		if err := yaml.Unmarshal(text, &m); err != nil {
-			t.Fatal(err)
-		}
-		return m
-	}
-	approval := read("shipped/approval.yaml")
-	given := approval["stages"].(map[string]any)["question"].(map[string]any)["job"].(map[string]any)["input"].(map[string]any)
-	asks, _ := filepath.Glob("shipped/*/chat/ask.yaml")
-	if len(asks) < 2 {
-		t.Fatalf("Rook ships questions only at %v", asks)
-	}
-	for _, name := range asks {
-		input, _ := read(name)["input"].(map[string]any)
-		for field, shape := range input {
-			if s, _ := shape.(string); given[field] == nil && !strings.HasSuffix(s, "?") {
-				t.Errorf("%s requires %s, which the approval does not give", name, field)
-			}
-		}
-		for field := range given {
-			if input[field] == nil {
-				t.Errorf("%s does not take %s, which the approval gives", name, field)
-			}
 		}
 	}
 }
@@ -909,26 +747,6 @@ func approving(t *testing.T, w *world, script string) (string, *llmstandin.Serve
 	realAgent(t, dir, web.URL)
 	write(t, dir, map[string]string{".rook/telegram/telegram.js": script})
 	return dir, model
-}
-
-// A message that names a held tool waits for its approver through every level
-// from the bridge down, within the depth every machine has by default, and a yes
-// tells the person it names.
-func TestApprovalFromAChatGetsToTheApprover(t *testing.T) {
-	t.Skip("R2 revives this: approval, lookup and question")
-	w := newWorld(t)
-	dir, _ := approving(t, w, oneMessage)
-	w.sync(dir)
-	w.kept(router("telegram"))
-	w.tap(w.question(map[string]bool{}).ID, "1", "yes")
-	w.until("the reply said", func() bool { return sayings(t, w)["told"]["to"] != nil })
-	said := sayings(t, w)
-	if to := said["hello"]; to == nil || to["to"] != "2" {
-		t.Errorf("the person was told at %v", to)
-	}
-	if to := said["told"]; to["id"] != "1" || to["to"] != "1" || to["answers"] != "1:10" {
-		t.Errorf("the reply went to %v", to)
-	}
 }
 
 // oneMessage stands in for telegram.js, and hears one message.

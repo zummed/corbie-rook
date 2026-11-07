@@ -1,0 +1,16 @@
+# A filter for a message that does not name the bot: it answers true when the
+# text holds one of `words` as a whole word or phrase, ignoring case and spaces.
+# Its result is { reply: { answer } }, as an agent that includes
+# .rook/filters/model.yaml gives, so a conversation reads either the same way.
+# A project places it, and its conversation calls it with the words, as:
+#
+#   filter:
+#     when: "${input.message.unaddressed}"
+#     job: { call: { at: filters/words }, input: { text: "${input.message.text}", words: [build, deploy] } }
+flow: words
+description: Answers whether a text holds one of the words given, ignoring case.
+input: { text: string, words: list }
+stages:
+  match:
+    job: { script: ./words.js, input: { text: "${input.text}", words: "${input.words}" } }
+output: { reply: { answer: "${stages.match.output}" } }

@@ -1,5 +1,5 @@
 // Slack's script: input.do is hear, for listen.yaml, cut and say, for
-// say.yaml, ask, for ask.yaml, close, for close.yaml, history, for
+// say.yaml, ask, tell and close, for chat/ask.yaml, history, for
 // history.yaml, status, for status.yaml, attachments, for attachments.yaml, or
 // send, for send.yaml. It speaks Slack's Web API with the bot token SLACK_TOKEN
 // and listens with the app-level token SLACK_APP_TOKEN, holding each as a
@@ -224,7 +224,14 @@ if (input.do === "ask") {
   const [to, thread] = place.split("/")
   const channel = named(to)
   const posted = call("chat.postMessage", Object.assign({ channel: channel, text: input.text, blocks: blocks }, thread ? { thread_ts: thread } : {}))
-  return { sent: [{ channel: channel, ts: posted.ts }] }
+  return { sent: [{ channel: channel, ts: posted.ts, thread: thread || "" }] }
+}
+
+if (input.do === "tell") {
+  // input.text, shown only to the person who pressed a button of a question,
+  // input.answer.user, where the question was posted.
+  for (const m of input.sent) call("chat.postEphemeral", Object.assign({ channel: m.channel, user: input.answer.user, text: input.text }, m.thread ? { thread_ts: m.thread } : {}))
+  return {}
 }
 
 if (input.do === "close") {

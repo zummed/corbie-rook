@@ -607,28 +607,6 @@ func TestApprovalTimesOut(t *testing.T) {
 	}
 }
 
-// Two held calls in one turn are one question, and one Yes runs both.
-func TestTwoHeldCallsAreOneQuestion(t *testing.T) {
-	t.Skip("R2 revives this: approval, lookup and question")
-	tg := newTelegram(t)
-	w := newWorld(t)
-	dir, _ := houseProject(t, w, tg, nil)
-	tg.dm(1, "twice please")
-	w.sync(dir)
-	w.until("a question", func() bool { return len(tg.buttons()) >= 2 })
-	quiet()
-	if n := len(tg.buttons()); n != 2 {
-		t.Fatalf("%d buttons were sent", n)
-	}
-	if q := tg.texts("1")[0]; !strings.Contains(q, "first") || !strings.Contains(q, "second") {
-		t.Errorf("the question %q does not show both calls", q)
-	}
-	tg.tapOn(t, 0, 1, "yes")
-	tg.waitFor(w, "2", "first")
-	tg.waitFor(w, "3", "second")
-	tg.waitFor(w, "1", "twice gave")
-}
-
 // A tap whose choice is not one of the buttons (Telegram's callback data is
 // whatever the client sends) does not count, and the question waits for one
 // that does.
@@ -1003,34 +981,6 @@ func TestAttendThatFailsOrMisspeaks(t *testing.T) {
 	}
 }
 
-// reviewSays is review.yaml as a flow with no model that says one word.
-func reviewSays(word string) string {
-	return "flow: review\ninput: { context: string }\nstages:\n  x: { job: { script: ./ok.js } }\noutput: { reply: { says: " + word + ", note: because } }\n"
-}
-
-// An approver group that holds alice: she is asked, and her tap counts as the
-// group's.
-func TestApproverGroup(t *testing.T) {
-	t.Skip("R2 revives this: approval, lookup and question")
-	tg := newTelegram(t)
-	w := newWorld(t)
-	dir, _ := houseProject(t, w, tg, nil)
-	setSite(t, dir, "parts/house/part.yaml", "people: [alice]", "people: [team]")
-	tg.dm(1, "tell bob hello")
-	w.sync(dir)
-	w.until("questions to both", func() bool { return len(tg.buttons()) == 4 })
-	// bob answers, in his own chat: the team's answer.
-	tg.tapOn(t, 0, 2, "yes")
-	tg.waitFor(w, "2", "hello from alice")
-	tg.waitFor(w, "1", "tell gave")
-	w.until("both questions closed", func() bool { return len(tg.edited()) == 2 })
-	for _, e := range tg.edited() {
-		if !strings.HasSuffix(e, "bob said yes.") {
-			t.Errorf("a question shows %q", e)
-		}
-	}
-}
-
 // The model fails (status 500): alice is told it could not be answered, and her
 // next message starts afresh and is answered.
 func TestModelFails(t *testing.T) {
@@ -1262,33 +1212,6 @@ func TestPagePartAndAgent(t *testing.T) {
 	}
 }
 
-// A held tell to someone not in people.yaml is approved, then fails: the model
-// is told why, and alice gets a reply.
-func TestApprovedToolFails(t *testing.T) {
-	t.Skip("R2 revives this: approval, lookup and question")
-	tg := newTelegram(t)
-	w := newWorld(t)
-	dir, model := houseProject(t, w, tg, nil)
-	model.Answer = func(c llmstandin.Call) llmstandin.Reply {
-		_, results := turnOf(c)
-		switch len(results) {
-		case 0:
-			return calls("open", `{"toolkit": "house"}`)
-		case 1:
-			return calls("tell", `{"person": "zed", "text": "hi"}`)
-		}
-		return llmstandin.Reply{Text: "result " + results[len(results)-1]}
-	}
-	tg.dm(1, "tell zed hi")
-	w.sync(dir)
-	w.until("a question", func() bool { return len(tg.buttons()) == 2 })
-	tg.tapOn(t, 0, 1, "yes")
-	tg.waitFor(w, "1", "result")
-	if got := tg.texts("1")[1]; !strings.Contains(got, "zed") {
-		t.Errorf("alice was told %q", got)
-	}
-}
-
 // Two taps in a row from alice, Yes then No: the first is the answer; the
 // second is acknowledged and changes nothing.
 func TestDoubleTap(t *testing.T) {
@@ -1361,21 +1284,6 @@ func TestTwoQuestionsAnsweredOutOfOrder(t *testing.T) {
 	}
 }
 
-// Telegram ids written as numbers in people.yaml, without quotes, as a person
-// copying them would: alice is still known, asked and her tap counts.
-func TestUnquotedTelegramIds(t *testing.T) {
-	t.Skip("R2 revives this: approval, lookup and question")
-	tg := newTelegram(t)
-	w := newWorld(t)
-	dir, _ := houseProject(t, w, tg, nil)
-	write(t, dir, map[string]string{"people.yaml": "people:\n  alice: { telegram: 1 }\n  bob: { telegram: 2 }\ngroups: {}\n"})
-	tg.dm(1, "tell bob hello")
-	w.sync(dir)
-	w.until("a question", func() bool { return len(tg.buttons()) == 2 })
-	tg.tapOn(t, 0, 1, "yes")
-	tg.waitFor(w, "2", "hello from alice")
-}
-
 // A model that never stops calling a tool reaches the agent's limit of turns:
 // alice is told it could not be answered, and the next message is answered.
 func TestAgentRunsOutOfTurns(t *testing.T) {
@@ -1432,34 +1340,5 @@ func TestApprovalOutlivesTheChat(t *testing.T) {
 	}
 	if n := len(keyed(w, ".rook/blocks/conversation.yaml")["telegram:1:helper"]); n != 1 {
 		t.Errorf("%d conversations", n)
-	}
-}
-
-// people.yaml without its groups: line, as a person with no groups writes it:
-// alice is answered and the stranger refused.
-func TestPeopleWithoutGroups(t *testing.T) {
-	t.Skip("R2 revives this: approval, lookup and question")
-	tg := newTelegram(t)
-	w := newWorld(t)
-	dir := chatProject(t, w, tg, map[string]string{
-		"agents/helper.yaml": echoAgent("helper"),
-		"agents/turn.js":     turnJS,
-		"people.yaml":        "people:\n  alice: { telegram: \"1\" }\n",
-	})
-	tg.dm(1, "hello")
-	tg.dm(9, "hello")
-	w.sync(dir)
-	w.until("both routes ended", func() bool {
-		n := 0
-		for _, r := range stubs(t, w, "route") {
-			if w.show(r.ID).HasEnded() {
-				n++
-			}
-		}
-		return n == 2
-	})
-	quiet()
-	if a, s := tg.texts("1"), tg.texts("9"); !slices.Equal(a, []string{"helper to alice (1): hello"}) || !slices.Equal(s, []string{"This bot answers only the people it belongs to."}) {
-		t.Errorf("with no groups: in people.yaml alice was told %q and the stranger %q; failures: %q", a, s, failedRuns(t, w))
 	}
 }

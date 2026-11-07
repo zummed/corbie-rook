@@ -1,5 +1,5 @@
 // The bot's script: input.do is hear, for listen.yaml, say, for say.yaml,
-// ask, for ask.yaml, close, for close.yaml, status, for status.yaml,
+// ask, tell and close, for chat/ask.yaml, status, for status.yaml,
 // attachments, for attachments.yaml, or send, for send.yaml. It speaks
 // Telegram's Bot API with the token of the secret input.token names, which it
 // holds only as a handle.
@@ -137,6 +137,13 @@ if (input.do === "ask") {
   const buttons = input.choices.map((c) => ({ text: c[0].toUpperCase() + c.slice(1), callback_data: input.question + " " + c }))
   const m = call("sendMessage", { chat_id: input.to, text: input.text, reply_markup: { inline_keyboard: [buttons] } })
   return { sent: [{ chat: input.to, id: m.message_id }] }
+}
+
+if (input.do === "tell") {
+  // input.text, in the bot's own chat with the person who tapped a button of a
+  // question, input.answer.user.
+  call("sendMessage", { chat_id: input.answer.user, text: input.text })
+  return {}
 }
 
 if (input.do === "close") {
