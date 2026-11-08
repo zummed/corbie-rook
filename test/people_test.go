@@ -1,4 +1,4 @@
-package rook_test
+package test
 
 // Rook's lookup, placed at people/find: who someone is, by their email, from
 // the table people/scopes.yaml.

@@ -1,4 +1,4 @@
-package rook_test
+package test
 
 import (
 	"os"
@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	rook "github.com/zummed/corbie-rook"
+	rook "github.com/zummed/corbie-rook/rook"
 	"github.com/zummed/corbie/client"
 	"github.com/zummed/corbie/manual"
 )
@@ -23,7 +23,7 @@ var starts = regexp.MustCompile(`^    # ([\w./-]+\.(?:yaml|js|md)|\.corbieignore
 
 func examples(t *testing.T, page string) []example {
 	t.Helper()
-	text, err := os.ReadFile(filepath.Join("pages", page+".txt"))
+	text, err := os.ReadFile(filepath.Join("../rook/pages", page+".txt"))
 	if err != nil {
 		t.Fatal(err)
 	}

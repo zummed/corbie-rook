@@ -1,4 +1,4 @@
-package rook_test
+package test
 
 // Rook's approval and question: a held job waits for a press from someone
 // whose scopes hold the approvers, the asker's own press and a press without
@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	rook "github.com/zummed/corbie-rook"
+	rook "github.com/zummed/corbie-rook/rook"
 	"github.com/zummed/corbie/client"
 	"github.com/zummed/corbie/instance"
 	llmstandin "github.com/zummed/corbie/plugin/llm/standin"
@@ -669,13 +669,13 @@ func TestApprovalFitsEveryQuestion(t *testing.T) {
 		slices.Sort(out)
 		return fmt.Sprint(m["input"], "\n", strings.Join(out, "\n"))
 	}
-	approval := read("shipped/approval.yaml")
+	approval := read("../rook/shipped/approval.yaml")
 	given := approval["stages"].(map[string]any)["question"].(map[string]any)["job"].(map[string]any)["input"].(map[string]any)["question"].(map[string]any)
-	asks, _ := filepath.Glob("shipped/*/chat/ask.yaml")
+	asks, _ := filepath.Glob("../rook/shipped/*/chat/ask.yaml")
 	if len(asks) < 2 {
 		t.Fatalf("Rook ships questions only at %v", asks)
 	}
-	template := shape(read("shipped/slack/chat/ask.yaml"))
+	template := shape(read("../rook/shipped/slack/chat/ask.yaml"))
 	for _, name := range asks {
 		question := read(name)
 		input, _ := question["input"].(map[string]any)
@@ -692,7 +692,7 @@ func TestApprovalFitsEveryQuestion(t *testing.T) {
 			}
 		}
 		got := shape(question)
-		if name == "shipped/jira/chat/ask.yaml" {
+		if name == "../rook/shipped/jira/chat/ask.yaml" {
 			own := " && event.data.chat === states.asking.output.sent.in"
 			if !strings.Contains(got, own) {
 				t.Errorf("%s takes an answer written on any issue", name)

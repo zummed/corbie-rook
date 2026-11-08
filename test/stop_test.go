@@ -1,4 +1,4 @@
-package rook_test
+package test
 
 // A stop, /stop on Telegram or a press of Slack's stop button, cancels what a
 // conversation is answering: the agent's run, its tools' runs and the question

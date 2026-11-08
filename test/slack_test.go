@@ -1,4 +1,4 @@
-package rook_test
+package test
 
 // Slack's listener and calls against the stand-in: who sent a message, what its
 // thread held, reactions, stops, the question with its buttons, charts,

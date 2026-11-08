@@ -1,4 +1,4 @@
-package rook_test
+package test
 
 // The GitLab service against its stand-in: the listener's messages, changes
 // and answers, the calls, and the question.

@@ -1,4 +1,4 @@
-package rook_test
+package test
 
 // The Slack, GitLab and Jira services against their stand-ins: threads,
 // mentions, envelopes Slack sends again, files, hosts as values, questions

@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	rook "github.com/zummed/corbie-rook"
+	rook "github.com/zummed/corbie-rook/rook"
 	"github.com/zummed/corbie/client/cli"
 	"github.com/zummed/corbie/manual"
 

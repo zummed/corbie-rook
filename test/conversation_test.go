@@ -1,4 +1,4 @@
-package rook_test
+package test
 
 // The starting conversation: messages that come during a turn are answered
 // together in the next, each person in a thread has their own run, a failed
@@ -15,7 +15,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	rook "github.com/zummed/corbie-rook"
+	rook "github.com/zummed/corbie-rook/rook"
 	"github.com/zummed/corbie/client"
 	llmstandin "github.com/zummed/corbie/plugin/llm/standin"
 )

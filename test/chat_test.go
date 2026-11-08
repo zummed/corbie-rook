@@ -1,4 +1,4 @@
-package rook_test
+package test
 
 // Chats on Telegram, run against the stand-in for Telegram's Bot API: people,
 // agents with and without a model, approvals by a tap, filters, files,

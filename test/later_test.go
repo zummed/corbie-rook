@@ -1,4 +1,4 @@
-package rook_test
+package test
 
 import (
 	"net/http/httptest"

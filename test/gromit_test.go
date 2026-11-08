@@ -1,4 +1,4 @@
-package rook_test
+package test
 
 // The worked example, testdata/gromit, as a project: the bot gromit on Slack
 // and GitLab, the agent support with the toolkits orders and infra, the
@@ -23,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	rook "github.com/zummed/corbie-rook"
+	rook "github.com/zummed/corbie-rook/rook"
 	"github.com/zummed/corbie/client"
 	"github.com/zummed/corbie/machine"
 	llmstandin "github.com/zummed/corbie/plugin/llm/standin"

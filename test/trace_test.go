@@ -1,4 +1,4 @@
-package rook_test
+package test
 
 // A message followed from its chat to the conversation, the agent, each
 // tool's run and the question an approval asks, as corbie run show --record
@@ -18,7 +18,7 @@ import (
 	"strings"
 	"testing"
 
-	rook "github.com/zummed/corbie-rook"
+	rook "github.com/zummed/corbie-rook/rook"
 	"github.com/zummed/corbie/client"
 	"github.com/zummed/corbie/instance"
 	llmstandin "github.com/zummed/corbie/plugin/llm/standin"
