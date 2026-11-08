@@ -3,10 +3,10 @@
 # buttons. An agent's approval calls it from agents/. A machine elsewhere that
 # calls it, or whose ask: is the approval, such as a statechart with an
 # approve: job, calls it from its own location, which must be added to
-# receive:, or the call is refused. It calls the lookup at `lookup` for who
-# answered.
+# receive:, or the call is refused. It takes close from the ballot, and calls
+# the lookup at `lookup` for who answered.
 include: .rook/telegram/chat/ask.yaml
-receive: [BOT/telegram/BOT, agents/*]
+receive: [BOT/telegram/BOT, agents/*, ballot]
 input:
   properties:
     router: { const: BOT/telegram/BOT, default: BOT/telegram/BOT }

@@ -431,7 +431,7 @@ func TestGromitOneQuestionRunByRun(t *testing.T) {
 			id = run.Parent
 		}
 	}
-	if want := []string{"slack-chat-ask", "approval", "support", "turn", "conversation", "gromit"}; !slices.Equal(chain, want) {
+	if want := []string{"slack-chat-ask", "place", "approval", "support", "turn", "conversation", "gromit"}; !slices.Equal(chain, want) {
 		t.Errorf("from the question back, the runs are %v", chain)
 	}
 	if got := g.show(asks[0].ID).Output; fmt.Sprint(got) != "map[by:Bo choice:yes]" {

@@ -781,7 +781,7 @@ const slackMessages = `
 	instructions: Write to a person only when the asker asks you to.
 	ask:
 	  machine: .rook/approval.yaml
-	  input: { ask: gromit/slack/chat/ask, approvers: messages:approve, in: "#approvals", asker: "${input.asker.email}" }
+	  input: { ask: [{ at: gromit/slack/chat/ask, in: "#approvals" }], approvers: messages:approve, asker: "${input.asker.email}" }
 	tools:
 	  tell: { call: gromit/slack/chat/post, approve: true }
 `
@@ -869,8 +869,13 @@ func TestSlackApprovalByButtonCanBeFollowed(t *testing.T) {
 	if approval == "" || len(sent(agents[0].Run, instance.AskCall, location(bot+"/slack/chat/post"))) != 1 {
 		t.Fatalf("the agent's runs are %v, and it called %+v", runs, w.asked(agents[0].Run, instance.AskCall))
 	}
-	asked := sent(approval, instance.AskCall, location(bot+"/slack/chat/ask"))
-	if len(asked) != 1 || w.show(asked[0].Run).StartedBy != approval {
+	places, err := w.List(context.Background(), client.Filter{Parent: approval, Finished: true})
+	if err != nil || len(places) != 1 || places[0].Machine != "place" {
+		t.Fatalf("the approval's runs are %v: %v", places, err)
+	}
+	place := places[0].ID
+	asked := sent(place, instance.AskCall, location(bot+"/slack/chat/ask"))
+	if len(asked) != 1 || w.show(asked[0].Run).StartedBy != place {
 		t.Fatalf("the approval's record names the questions %+v", asked)
 	}
 	pressed := false
@@ -942,7 +947,7 @@ const slackApprovedToolkit = `
 	description: Messages to people on Slack.
 	ask:
 	  machine: .rook/approval.yaml
-	  input: { ask: gromit/slack/chat/ask, approvers: "messages:approve", in: U1, request: "${input.messages.map((m) => m.text).join('\\n')}" }
+	  input: { ask: [{ at: gromit/slack/chat/ask, in: U1 }], approvers: "messages:approve", request: "${input.messages.map((m) => m.text).join('\\n')}" }
 	tools:
 	  tell:
 	    description: Write a text to a person on Slack, by their member ID.

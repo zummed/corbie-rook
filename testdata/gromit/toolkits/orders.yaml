@@ -5,7 +5,7 @@ description: The orders app. How it is deployed, its settings, and changing them
 instructions: { include: ./orders.md }
 ask:
   machine: .rook/approval.yaml
-  input: { ask: gromit/slack/chat/ask, approvers: "orders:approve", in: "#orders-team", within: 1d, asker: "${input.asker.email}", request: "${input.messages.map((m) => (m.later != null ? '(a reminder the bot set) ' : '') + m.text).join('\\n')}" }
+  input: { ask: [{ at: gromit/slack/chat/ask, in: "#orders-team" }], approvers: "orders:approve", within: 1d, asker: "${input.asker.email}", request: "${input.messages.map((m) => (m.later != null ? '(a reminder the bot set) ' : '') + m.text).join('\\n')}" }
 tools:
   read_file: { call: gromit/gitlab/repository/files/read, input: { project: group/orders } }
   change_file:

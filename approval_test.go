@@ -3,7 +3,9 @@ package rook_test
 // Rook's approval and question: a held job waits for a press from someone
 // whose scopes hold the approvers, the asker's own press and a press without
 // the scope are refused and the presser told, the first press that counts
-// closes the question, and no press within `within` is no.
+// closes the question, and no press within `within` is no. An approval asked
+// in several places takes the first press that counts in any of them, and
+// its ballot closes the others.
 
 import (
 	"fmt"
@@ -294,7 +296,7 @@ func asker(service, input string) string {
 // location, beside the router and the agents.
 func receiveFrom(t *testing.T, dir, service, from string) {
 	t.Helper()
-	setSite(t, dir, "gromit/"+service+"/chat/ask.yaml", "receive: [gromit/"+service+"/gromit, agents/*]", "receive: [gromit/"+service+"/gromit, agents/*, "+from+"]")
+	setSite(t, dir, "gromit/"+service+"/chat/ask.yaml", "receive: [gromit/"+service+"/gromit, agents/*, ballot]", "receive: [gromit/"+service+"/gromit, agents/*, ballot, "+from+"]")
 }
 
 // With no press that counts within `within`, the question closes saying no one
@@ -407,7 +409,7 @@ func TestStatechartAsksForApproval(t *testing.T) {
 			allow: [send:ops/pipeline]
 			ask:
 			  machine: .rook/approval.yaml
-			  input: { ask: gromit/telegram/chat/ask, approvers: "messages:approve", in: "1", within: 1h, asker: "${input.email}", request: "${input.text}" }
+			  input: { ask: [{ at: gromit/telegram/chat/ask, in: "1" }], approvers: "messages:approve", within: 1h, asker: "${input.email}", request: "${input.text}" }
 			initial: waiting
 			states:
 			  waiting:
@@ -465,7 +467,7 @@ func TestApprovalQuestionIsShort(t *testing.T) {
 			map[string]any{"name": "restart", "input": map[string]any{"vm": "web-1", "opts": map[string]any{"force": true}}},
 			map[string]any{"name": "apply", "input": map[string]any{"diff": "-a\n+b"}},
 		},
-		"ask": bot + "/telegram/chat/ask", "approvers": "messages:approve", "in": "1", "request": "restart web-1",
+		"ask": []any{map[string]any{"at": bot + "/telegram/chat/ask", "in": "1"}}, "approvers": "messages:approve", "request": "restart web-1",
 	})
 	question := w.question(map[string]bool{})
 	want := "deploys wants to run restart, apply.\nrestart:\nopts.force: true · vm: web-1\n\napply:\ndiff:\n> -a\n> +b\n\n> restart web-1"
@@ -668,7 +670,7 @@ func TestApprovalFitsEveryQuestion(t *testing.T) {
 		return fmt.Sprint(m["input"], "\n", strings.Join(out, "\n"))
 	}
 	approval := read("shipped/approval.yaml")
-	given := approval["stages"].(map[string]any)["question"].(map[string]any)["job"].(map[string]any)["input"].(map[string]any)
+	given := approval["stages"].(map[string]any)["question"].(map[string]any)["job"].(map[string]any)["input"].(map[string]any)["question"].(map[string]any)
 	asks, _ := filepath.Glob("shipped/*/chat/ask.yaml")
 	if len(asks) < 2 {
 		t.Fatalf("Rook ships questions only at %v", asks)
@@ -716,7 +718,7 @@ func TestApprovalQuestionCutsALongLine(t *testing.T) {
 	w.start("agents/approve.yaml", map[string]any{
 		"asking": map[string]any{"machine": "fetcher"},
 		"jobs":   []any{map[string]any{"name": "fetch", "input": map[string]any{"url": link, "diff": lines}}},
-		"ask":    bot + "/telegram/chat/ask", "approvers": "messages:approve", "in": "1",
+		"ask":    []any{map[string]any{"at": bot + "/telegram/chat/ask", "in": "1"}}, "approvers": "messages:approve",
 	})
 	text := w.did(w.question(map[string]bool{}).ID, "ask")[0]["text"].(string)
 	if !strings.Contains(text, "url: "+link[:150]+" … (1000 characters, the middle left out) … "+link[850:]) || strings.Contains(text, link[:151]) {
@@ -758,5 +760,135 @@ func TestTelegramQuestionFitsTelegram(t *testing.T) {
 	w.until("the asker done", func() bool { return w.show(id).HasEnded() })
 	if got := tg.edited(); len(got) != 1 || len(got[0]) > 4096 || !strings.HasSuffix(got[0], "Deploy?\n\nalice said yes.") {
 		t.Fatalf("the question shows %q", got)
+	}
+}
+
+// twoPlaces starts an approval that asks on Telegram in chats a and b at
+// once, and gives the approval's run.
+func twoPlaces(w *world, dir, a, b string) string {
+	w.t.Helper()
+	write(w.t, dir, map[string]string{"agents/approve.yaml": "include: .rook/approval.yaml"})
+	w.sync(dir)
+	ask := func(in string) map[string]any { return map[string]any{"at": bot + "/telegram/chat/ask", "in": in} }
+	return w.start("agents/approve.yaml", map[string]any{
+		"asking":    map[string]any{"machine": "deploys"},
+		"jobs":      []any{map[string]any{"name": "restart", "input": map[string]any{"vm": "web-1"}}},
+		"ask":       []any{ask(a), ask(b)},
+		"approvers": "messages:approve",
+	})
+}
+
+// posted waits until a question posted in a chat waits for a press, and gives
+// it.
+func (w *world) posted(in string) *client.Run {
+	w.t.Helper()
+	var found *client.Run
+	w.until("the question in chat "+in, func() bool {
+		for _, run := range questions(w) {
+			if asked := w.did(run.ID, "ask"); len(asked) == 1 && asked[0]["in"] == in {
+				found = run
+			}
+		}
+		return found != nil
+	})
+	return found
+}
+
+// An approval asks in two places at once. The first press that counts is
+// the approval's answer, and the other question shows where it was answered
+// in place of its buttons, and ends marked elsewhere.
+func TestApprovalInTwoPlacesTakesTheFirstAnswer(t *testing.T) {
+	w := newWorld(t)
+	dir := approvalProject(t, w, noModel)
+	id := twoPlaces(w, dir, "1", "3")
+	first, second := w.posted("1"), w.posted("3")
+	w.press(first.ID, "1", "yes")
+	w.until("the approval to end", func() bool { return w.show(id).HasEnded() })
+	if out := fmt.Sprint(w.show(id).Output); out != "map[approved:[restart] note:alice said yes.]" {
+		t.Fatalf("the approval gave %s", out)
+	}
+	if out := fmt.Sprint(w.show(first.ID).Output); out != "map[by:alice choice:yes]" {
+		t.Errorf("the question answered gave %s", out)
+	}
+	if out := fmt.Sprint(w.show(second.ID).Output); out != "map[by:alice choice:yes elsewhere:true]" {
+		t.Errorf("the other question gave %s", out)
+	}
+	if closed := w.did(second.ID, "close"); len(closed) != 1 || !strings.HasSuffix(closed[0]["text"].(string), "\n\nalice said yes on Telegram.") {
+		t.Errorf("the other question was closed with %v", closed)
+	}
+	if closed := w.did(first.ID, "close"); len(closed) != 1 || !strings.HasSuffix(closed[0]["text"].(string), "\n\nalice said yes.") {
+		t.Errorf("the question answered was closed with %v", closed)
+	}
+	w.until("the ballot to end", func() bool {
+		runs := keyed(w, "ballot.yaml")[id]
+		return len(runs) == 1 && runs[0].HasEnded()
+	})
+	if runs := keyed(w, "ballot.yaml"); len(runs) != 1 || len(runs[id]) != 1 {
+		t.Errorf("the ballots are %v", runs)
+	}
+}
+
+// A press that does not count in one place closes nothing: both questions
+// still wait, and a later press that counts settles both.
+func TestApprovalInTwoPlacesIgnoresAPressThatDoesNotCount(t *testing.T) {
+	w := newWorld(t)
+	dir := approvalProject(t, w, noModel)
+	id := twoPlaces(w, dir, "1", "3")
+	first, second := w.posted("1"), w.posted("3")
+	w.press(first.ID, "3", "yes")
+	w.checked(first.ID, 1)
+	quiet()
+	for _, q := range []*client.Run{first, second} {
+		if run := w.show(q.ID); run.Status != "running" || len(w.did(q.ID, "close")) != 0 {
+			t.Fatalf("a press that does not count closed %s: %s", q.ID, run.Status)
+		}
+	}
+	w.press(second.ID, "1", "no")
+	w.until("the approval to end", func() bool { return w.show(id).HasEnded() })
+	if out := fmt.Sprint(w.show(id).Output); out != "map[approved:[] note:alice said no.]" {
+		t.Fatalf("the approval gave %s", out)
+	}
+	if closed := w.did(first.ID, "close"); len(closed) != 1 || !strings.HasSuffix(closed[0]["text"].(string), "\n\nalice said no on Telegram.") {
+		t.Errorf("the first question was closed with %v", closed)
+	}
+}
+
+// A place whose question cannot be posted fails alone: the other question
+// still asks, and its answer is the approval's.
+func TestApprovalPlaceThatFailsLeavesTheOthersAsking(t *testing.T) {
+	w := newWorld(t)
+	dir := approvalProject(t, w, noModel)
+	write(t, dir, map[string]string{".rook/telegram/telegram.js": `if (input.do === "ask" && input.in === "9") throw new Error("chat 9 is gone")` + "\n" + heard()})
+	id := twoPlaces(w, dir, "9", "1")
+	question := w.posted("1")
+	w.until("the question in chat 9 to fail", func() bool {
+		for _, run := range w.at(bot + "/telegram/chat/ask.yaml") {
+			if run.Status == "failed" {
+				return true
+			}
+		}
+		return false
+	})
+	if run := w.show(question.ID); run.Status != "running" {
+		t.Fatalf("the question in chat 1 is %s", run.Status)
+	}
+	w.press(question.ID, "1", "yes")
+	w.until("the approval to end", func() bool { return w.show(id).HasEnded() })
+	if run := w.show(id); run.Status != "done" || fmt.Sprint(run.Output) != "map[approved:[restart] note:alice said yes.]" {
+		t.Fatalf("the approval ended %s with %v: %s", run.Status, run.Output, run.Error)
+	}
+}
+
+// When no place can be asked, the approval approves nothing and says why.
+func TestApprovalNoPlaceAskedIsNo(t *testing.T) {
+	w := newWorld(t)
+	dir := approvalProject(t, w, noModel)
+	write(t, dir, map[string]string{".rook/telegram/telegram.js": `if (input.do === "ask") throw new Error("chat " + input.in + " is gone")` + "\n" + heard()})
+	id := twoPlaces(w, dir, "8", "9")
+	w.until("the approval to end", func() bool { return w.show(id).HasEnded() })
+	run := w.show(id)
+	note, _ := run.Output.(map[string]any)["note"].(string)
+	if run.Status != "done" || !strings.HasPrefix(note, "The question could not be asked: ") || !strings.Contains(note, "chat 8 is gone") || !strings.Contains(note, "chat 9 is gone") {
+		t.Fatalf("the approval ended %s with %v", run.Status, run.Output)
 	}
 }

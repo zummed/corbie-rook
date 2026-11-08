@@ -8,6 +8,9 @@
 # in their own chat with the bot, if they have one. No press that counts
 # within `within`, by default a week, is { choice: no }. A button holds this
 # run's ID without its client's name, since Telegram keeps 64 bytes of it.
+#
+# With `ballot`, it speaks to the ballot of an approval asked in several places
+# as Slack's chat/ask does, naming this place Telegram.
 statechart: telegram-chat-ask
 description: Asks a question on Telegram with a button for each choice, and gives the first choice pressed by someone whose scopes hold the approvers.
 title: "${input.text.split('\\n')[0]}"
@@ -26,6 +29,7 @@ input:
     within: { type: string }
     router: { type: string }
     lookup: { type: string }
+    ballot: { type: object }
 initial: asking
 states:
   asking:
@@ -35,7 +39,11 @@ states:
       input: { do: ask, token: TELEGRAM_TOKEN, in: "${input.in}", text: "${input.text}", choices: "${input.choices}", question: "${run.id.slice(run.id.indexOf('/') + 1)}" }
       allow: [net:api.telegram.org, "secret:TELEGRAM_TOKEN@net:api.telegram.org"]
       restart: { limit: 2 }
-    on: { done: open }
+    on: { done: [{ go: opening, when: "${input.ballot != null}" }, open] }
+  opening:
+    defer: [answer]
+    job: { send: { to: "${input.ballot}", event: opened }, allow: ["send:${input.ballot.at}"] }
+    on: { done: open, failed: open }
   open:
     timers: { unanswered: "${input.within || '7d'}" }
     initial: waiting
@@ -49,6 +57,7 @@ states:
           input: { answer: "${event.data}", lookup: "${input.lookup}", approvers: "${input.approvers}", asker: "${input.asker || ''}", choices: "${input.choices}" }
         on:
           done:
+            - { go: settling, when: "${event.data.counts && input.ballot != null}" }
             - { go: answered, when: "${event.data.counts}" }
             - { go: telling, when: "${event.data.tell !== ''}" }
             - waiting
@@ -60,7 +69,12 @@ states:
           input: { do: tell, token: TELEGRAM_TOKEN, sent: "${states.asking.output.sent}", answer: "${states.checking.output.answer}", text: "${states.checking.output.tell}" }
           allow: [net:api.telegram.org, "secret:TELEGRAM_TOKEN@net:api.telegram.org"]
         on: { done: waiting, failed: waiting }
-    on: { unanswered: unanswered }
+    on:
+      unanswered: unanswered
+      close: { go: closed, when: "${input.ballot != null && event.from.at === run.tree + '/' + input.ballot.at && event.from.key === input.ballot.key}" }
+  settling:
+    job: { send: { to: "${input.ballot}", event: settled, data: { choice: "${states.checking.output.choice}", by: "${states.checking.output.by}", where: Telegram } }, allow: ["send:${input.ballot.at}"] }
+    on: { done: answered, failed: answered }
   answered:
     job:
       script: .rook/telegram/telegram.js
@@ -69,6 +83,20 @@ states:
       restart: { limit: 2 }
     on: { done: over, failed: over }
   over: { end: done, output: { choice: "${states.checking.output.choice}", by: "${states.checking.output.by}" } }
+  # Keeps what the ballot's close gave, as this state's output.
+  closed:
+    initial: kept
+    states:
+      kept: { end: done, output: "${event.data}" }
+    on: { done: answered_elsewhere }
+  answered_elsewhere:
+    job:
+      script: .rook/telegram/telegram.js
+      input: { do: close, token: TELEGRAM_TOKEN, sent: "${states.asking.output.sent}", text: "${input.text + '\\n\\n' + states.closed.output.by + ' said ' + states.closed.output.choice + ' on ' + states.closed.output.where + '.'}" }
+      allow: [net:api.telegram.org, "secret:TELEGRAM_TOKEN@net:api.telegram.org"]
+      restart: { limit: 2 }
+    on: { done: elsewhere, failed: elsewhere }
+  elsewhere: { end: done, output: { choice: "${states.closed.output.choice}", by: "${states.closed.output.by}", elsewhere: true } }
   unanswered:
     job:
       script: .rook/telegram/telegram.js

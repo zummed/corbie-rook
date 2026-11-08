@@ -1,40 +1,64 @@
-# Rook's approval, which a toolkit or a machine names as its ask. It calls the
-# question at `ask`, a bot's placed chat/ask, with yes and no, naming the
-# machine that asks, each held job, who asked and what was asked. Corbie gives it
-# `asking` and `jobs`; the ask's input gives the rest:
+# Rook's approval, which a toolkit or a machine names as its ask. It asks the
+# question in every place of `ask` at once, each a bot's placed chat/ask, with
+# yes and no, naming the machine that asks, each held job, who asked and what
+# was asked. Corbie gives it `asking` and `jobs`; the ask's input gives the rest:
 #
-#   ask        the location of the question, such as gromit/slack/chat/ask
+#   ask        the places, each { at, in }: the question's location, such as
+#              gromit/slack/chat/ask, and where it is posted there: a channel,
+#              a thread or a chat
 #   approvers  the scope a press needs to count
-#   in         where the question is posted: a channel, a thread or a chat
 #   within     how long it waits, by default 7d; no press in time is no
 #   asker      the email of the person who asked, shown, and whose own press is refused
 #   request    what was asked, shown quoted
+#
+# Each question is given the ballot { at: ballot, key: <this run's ID> }, so
+# the first answer that counts closes the others. That answer is the
+# approval's; with none, the answer is no. A place whose question fails
+# leaves the others asking.
 flow: approval
-description: Asks people whether held jobs may run, and gives the jobs approved.
+description: Asks people in one or more places whether held jobs may run, and gives the jobs approved.
 title: "Approve ${(Array.isArray(input.jobs) ? input.jobs : []).map((j) => j.name).join(', ')}"
 input:
   asking: any
   jobs: any
-  ask: string
+  ask: list
   approvers: string
-  in: string
   within: "string?"
   asker: "string?"
   request: "string?"
-allow: ["send:${input.ask}"]
+allow: [send:ballot]
 stages:
   brief:
     job: { script: ./approval.js, input: { jobs: "${input.jobs}", asker: "${input.asker || ''}", request: "${input.request}" } }
   question:
+    each: "${input.ask}"
     job:
-      call: { at: "${input.ask}" }
+      machine:
+        flow: place
+        input: { at: string, question: map }
+        allow: ["send:${input.at}"]
+        stages:
+          asking: { job: { call: { at: "${input.at}" }, input: "${input.question}" } }
+        output: ${stages.asking.output}
       input:
-        in: "${input.in}"
-        text: "${(input.asking || {}).machine || 'A machine'} wants to run ${stages.brief.output.names.join(', ')}.\n${stages.brief.output.context}"
-        choices: ["yes", "no"]
-        approvers: "${input.approvers}"
-        asker: "${input.asker || ''}"
-        within: "${input.within || '7d'}"
+        at: "${item.at}"
+        question:
+          in: "${item.in}"
+          text: "${(input.asking || {}).machine || 'A machine'} wants to run ${stages.brief.output.names.join(', ')}.\n${stages.brief.output.context}"
+          choices: ["yes", "no"]
+          approvers: "${input.approvers}"
+          asker: "${input.asker || ''}"
+          within: "${input.within || '7d'}"
+          ballot: { at: ballot, key: "${run.id}" }
+  # Ends the ballot once every question has ended.
+  over:
+    follows: [question]
+    job: { send: { to: { at: ballot, key: "${run.id}" }, event: over } }
 output: >-
-  ${{ approved: stages.question.output.choice === 'yes' ? stages.brief.output.names : [],
-      note: stages.question.output.by ? stages.question.output.by + ' said ' + stages.question.output.choice + '.' : 'No one answered in time, so the answer is no.' }}
+  ${((answer, places) => ({
+      approved: answer && answer.choice === 'yes' ? stages.brief.output.names : [],
+      note: answer ? answer.by + ' said ' + answer.choice + '.'
+        : places.every((p) => p.error) ? 'The question could not be asked: ' + places.map((p) => p.error).join('; ')
+        : 'No one answered in time, so the answer is no.' }))(
+    stages.question.output.map((p) => p.output).find((o) => o && o.by && !o.elsewhere),
+    stages.question.output)}

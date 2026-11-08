@@ -645,7 +645,7 @@ func approvingOnJira(t *testing.T, j *jira, in, within string) (*world, string) 
 	tick(w, j.asked)
 	input := map[string]any{
 		"asking": map[string]any{}, "jobs": []any{map[string]any{"name": "restart", "asked": map[string]any{"description": "Restarts a VM.", "args": map[string]any{"vm": "web-1"}, "said": "Restarting it."}}},
-		"ask": bot + "/jira/chat/ask", "approvers": "messages:approve", "in": in, "asker": "bob@example.com", "request": "please restart web-1",
+		"ask": []any{map[string]any{"at": bot + "/jira/chat/ask", "in": in}}, "approvers": "messages:approve", "asker": "bob@example.com", "request": "please restart web-1",
 	}
 	if within != "" {
 		input["within"] = within

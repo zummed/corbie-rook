@@ -346,7 +346,7 @@ func TestProjectReads(t *testing.T) {
 	}
 	want := map[string][]string{
 		"singleton": {"/project/gromit/gitlab/gromit", "/project/gromit/jira/gromit", "/project/gromit/slack/gromit", "/project/gromit/telegram/gromit"},
-		"keyed":     {"/project/conversation", "/project/later", "/project/placed/later"},
+		"keyed":     {"/project/ballot", "/project/conversation", "/project/later", "/project/placed/ballot", "/project/placed/later"},
 	}
 	for life, locations := range want {
 		slices.Sort(lifetimes[life])
@@ -392,7 +392,7 @@ func TestInitWritesTheTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		".corbieignore", ".mcp.json", "AGENTS.md", "CLAUDE.md", "conversation.yaml",
+		".corbieignore", ".mcp.json", "AGENTS.md", "CLAUDE.md", "ballot.yaml", "conversation.yaml",
 		"gromit/gitlab/chat/ask.yaml", "gromit/gitlab/chat/post.yaml", "gromit/gitlab/files/get.yaml", "gromit/gitlab/gromit.yaml",
 		"gromit/slack/assistant/status.yaml", "gromit/slack/chat/ask.yaml", "gromit/slack/chat/post.yaml", "gromit/slack/files/get.yaml", "gromit/slack/gromit.yaml",
 		"later.yaml", "people/find.yaml", "people/scopes.yaml",

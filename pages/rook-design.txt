@@ -23,6 +23,7 @@ machine at its path under `/my-bot`, without `.yaml`. For a bot named
   /my-bot/gromit/slack/assistant/status   called to show a status under a thread
   /my-bot/gromit/slack/files/get          called to download a message's files
   /my-bot/later                           keyed, one for each reminder the agent's tool later sets
+  /my-bot/ballot                          keyed, one for each approval: closes its other questions once one is answered
 
 A run uses the secrets and values set at its location or above. `init` prints
 the commands that set a service's at `/my-bot/gromit/<service>`, where the
@@ -54,7 +55,7 @@ that run names the run that started it.
 
 1. In the router's record, each message is a send to `/my-bot/conversation#<key>`, naming the conversation's run.
 2. In the conversation's record, each turn is a child run, and the turn's call to `/my-bot/agents/assistant` names the agent's run.
-3. The agent's record shows each tool as a job, a held tool as `hold <tool> for the ask`, and the approval as a child run, whose call to the bot's `chat/ask` names the question's run.
+3. The agent's record shows each tool as a job, a held tool as `hold <tool> for the ask`, and the approval as a child run, with a child run `place` for each place it asks, whose call to the bot's `chat/ask` names the question's run.
 4. The question's record shows each press checked, and what the lookup gave for the presser.
 
 These are the records of a message on Telegram whose agent opens the toolkit
@@ -70,11 +71,12 @@ shown without its time and run, and a name in angle brackets, such as
     corbie run show <agent> --record
       step 6  -> hold tell for the ask
       step 6  -> job ask: a machine, <approval>
-      step 2  -> job question: a call to /my-bot/gromit/telegram/chat/ask, <question>
+      step 2  -> job question.0: a machine, <place>
+      step 1  -> job asking: a call to /my-bot/gromit/telegram/chat/ask, <question>
       step 7  <- done from ask {"approved":["tell"],"note":"alice said yes."}
       step 7  -> job tell: a call to /my-bot/gromit/telegram/chat/post, <tell>
     corbie run show <question> --record
-      step 3  -> job checking: a machine, <press>
+      step 4  -> job checking: a machine, <press>
       step 2  <- done from who {"email":"alice@example.com","name":"alice","scopes":["messages","messages:approve"]}
 
 Who may talk to whom
@@ -89,9 +91,10 @@ and every other tree and client is refused.
   .rook/<service>/listen.yaml      receive: []: no location; it sends its router only what its service gave
   conversation.yaml                receive: { message: [gromit/*/gromit, later], stop: [gromit/*/gromit] }: a router, and a reminder
   later.yaml                       receive: [agents/*]: only an agent's tool later
+  ballot.yaml                      no receive:, so every location of the project
   deploys.yaml                     receive: [gromit/slack/gromit]: only the router that sends to it
   .rook/agent.yaml                 receive: [conversation]; an agent a second conversation calls writes its own, naming both
-  gromit/<service>/chat/ask.yaml   receive: [gromit/<service>/gromit, agents/*]; an answer only from its router
+  gromit/<service>/chat/ask.yaml   receive: [gromit/<service>/gromit, agents/*, ballot]; an answer only from its router, close only from its ballot
 
 A child run is addressed by its ID at its parent's location, and only its
 own `receive:` applies to it, so a child of a trusted run writes its own, as
@@ -101,7 +104,8 @@ A sender needs `send:` for the location in its `allow:`.
 
   gromit/<service>/gromit.yaml     send:conversation, send:gromit/<service>/chat/ask
   conversation.yaml                in its turn, send:people/find, send:agents/assistant, and the bot's files/get and status; in its reply, send:gromit/*/chat/post and send:gromit/slack/assistant/status
-  .rook/approval.yaml              send: for the question its ask names
+  .rook/approval.yaml              send:ballot, and in each place, send: for that place's question
+  .rook/ballot.yaml                send:**, used only to answer a question that sent it opened
   .rook/agent.yaml                 in its tool progress, send:*/*/chat/post; in its tool later, send:later
   .rook/later.yaml                 send: for the conversation the agent's input names
   .rook/shared/press.yaml          send: for the question's lookup
@@ -110,6 +114,7 @@ A sender needs `send:` for the location in its `allow:`.
 - The lookup's answer is trusted because only the conversation calls the agent, only a router and `later` send to the conversation, and a router takes events only from its listener.
 - A reminder acts for the person of the turn that set it: the tool `later` fixes the message's service, chat and user and the conversation's run from the agent's input, and the model chooses only the minutes and the note.
 - A question trusts an answer from its router for the same reason: no location can send to the router or its listener, so each answer the router sends on came from the service.
+- A ballot can only close a question as answered elsewhere, which the approval does not count, so a send to a ballot can make an approval no and never yes.
 - A gateway is a client, so a gateway whose client submitted the project can call any of its locations with any input. Submit the project from a client no gateway uses.
 
 The project's files
@@ -119,13 +124,14 @@ The project's files
 and never one that is there. In a directory that is no project it writes them
 all, but `conversation.yaml` only with `--bot`, and the files under
 `<bot>/<service>/` only for the services `--services` names. In a project it
-writes only `AGENTS.md`, `.corbieignore`, `later.yaml`, and with `--bot` the conversation
+writes only `AGENTS.md`, `.corbieignore`, `ballot.yaml`, `later.yaml`, and with `--bot` the conversation
 and the files of the services named, each when it is missing.
 
   .corbieignore                      .rook/ and people/scopes.yaml; init adds each when missing
   conversation.yaml                  keyed: one person, one thread and the agent
   people/find.yaml                   the lookup: include: .rook/people/file.yaml
   later.yaml                         keyed: a reminder; include: .rook/later.yaml
+  ballot.yaml                        keyed: an approval asked in several places; include: .rook/ballot.yaml
   people/scopes.yaml                 each email's name and scopes, which the lookup reads
   <bot>/<service>/<bot>.yaml         singleton: the router, and Rook's listener as its child
   <bot>/<service>/chat/post.yaml     include: .rook/<service>/chat/post.yaml
@@ -148,6 +154,7 @@ services the project has.
   .rook/people/file.yaml, file.js    the lookup that reads people/scopes.yaml
   .rook/agent.yaml                   included by an agent: its input, prompt, conversation, receive: and the tools progress and later
   .rook/later.yaml                   the reminder that later.yaml places
+  .rook/ballot.yaml                  the ballot that ballot.yaml places
   .rook/filters/                     words.yaml and words.js, a filter; model.yaml, included by an agent that is one
   .rook/shared/                      the scripts the conversation and the services share, and press.yaml
   .rook/AGENTS.md                    the page corbie rook manual rook, for a model
@@ -363,7 +370,7 @@ Asking a person
 
 A question is a run of the bot's placed `chat/ask`, the same statechart on
 every service. A machine calls it with `{ in, text, choices, approvers,
-asker, within }`, and it gives `{ choice, by }`.
+asker, within, ballot }`, and it gives `{ choice, by }`.
 
 1. It posts `text` in `in` with a button for each of `choices`, each holding its run's ID.
 2. For each press the router sends it, it runs `.rook/shared/press.yaml`, which calls the lookup for the presser.
@@ -381,15 +388,26 @@ so no caller gives them, as the file with deploys added below shows.
   router   the router, gromit/slack/gromit: the question drops an answer whose sender, event.from, is any other location
   lookup   the lookup the question calls for who pressed, people/find
 
-Rook's approval, `.rook/approval.yaml`, is an ask, which a toolkit or a
-machine names under `ask:`. It calls the question with yes and no, naming
-the asker by email and each held call with its arguments, and quoting what was
-asked and what the agent said. An argument of one line over 300 characters is
-shown as its first and last 150 characters, with its length. It gives `{ approved, note }`.
+`ballot` is the address `{ at, key }` of a run of `ballot`, which lets one
+approval ask in several places at once.
 
-  ask         the question's location, such as gromit/slack/chat/ask
+1. Each question sends the ballot `opened` once it has posted.
+2. The first whose press counts sends it `settled`, `{ choice, by, where }`, `where` naming the service, such as Slack.
+3. The ballot sends each other question `close`, with the same data, including one that posts later.
+4. That question shows "<by> said <choice> on <where>." in place of its buttons, and ends with `{ choice, by, elsewhere: true }`.
+
+A later `settled` is dropped. The ballot ends when its approval sends it
+`over`, or a day after it settled.
+
+Rook's approval, `.rook/approval.yaml`, is an ask, which a toolkit or a
+machine names under `ask:`. It asks the question in every place of `ask` at
+once, with yes and no, naming the asker by email and each held call with its
+arguments, and quoting what was asked and what the agent said. An argument of
+one line over 300 characters is shown as its first and last 150 characters,
+with its length. It gives `{ approved, note }`.
+
+  ask         the places, each { at, in }: the question's location, such as gromit/slack/chat/ask, and where it is posted there: a channel, a thread or a chat
   approvers   the scope a press needs to count
-  in          where the question is posted: a channel, a thread or a chat
   within      how long it waits; 7d by default, and no press in time is no
   asker       the email of the person who asked, shown in the question, whose own press is refused; left out, they may approve their own request
   request     what was asked, shown quoted
@@ -407,7 +425,7 @@ presses yes.
     allow: [send:gromit/gitlab/pipeline/create, send:gromit/slack/chat/post]
     ask:
       machine: .rook/approval.yaml
-      input: { ask: gromit/slack/chat/ask, approvers: "deploy:approve", in: "${input.chat}", within: 1h, asker: "${input.email}", request: "${input.text}" }
+      input: { ask: [{ at: gromit/slack/chat/ask, in: "${input.chat}" }], approvers: "deploy:approve", within: 1h, asker: "${input.email}", request: "${input.text}" }
     initial: waiting
     states:
       waiting:
@@ -433,13 +451,14 @@ presses yes.
 
     # gromit/slack/chat/ask.yaml, with deploys added
     include: .rook/slack/chat/ask.yaml
-    receive: [gromit/slack/gromit, agents/*, deploys]
+    receive: [gromit/slack/gromit, agents/*, ballot, deploys]
     input:
       properties:
         router: { const: gromit/slack/gromit, default: gromit/slack/gromit }
         lookup: { const: people/find, default: people/find }
 
 - The approval runs at the asking machine's location, so the question's `receive:` lists that location, or the call is refused.
+- The approval gives each question the ballot `{ at: ballot, key: <the approval's run ID> }`. Its answer is the first that counts in any place; a place whose question fails leaves the others asking.
 - A held call that is not approved fails as `denied`, which goes back to a model as the tool's result.
 - The router sends the thread's messages to `deploys`, as `corbie rook manual rook-project` shows under Common changes.
 

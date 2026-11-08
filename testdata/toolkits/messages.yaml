@@ -5,9 +5,8 @@ instructions: Write to a person only when the asker asks you to.
 ask:
   machine: .rook/approval.yaml
   input:
-    ask: gromit/telegram/chat/ask
+    ask: [{ at: gromit/telegram/chat/ask, in: "1" }]
     approvers: messages:approve
-    in: "1"
     asker: "${input.asker.email}"
     request: "${input.messages.map((m) => (m.later != null ? '(a reminder the bot set) ' : '') + m.text).join('\\n')}"
 tools:

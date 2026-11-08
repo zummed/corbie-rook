@@ -1,0 +1,42 @@
+# Rook's ballot, which settles an approval asked in several places at once:
+# the first answer that counts ends the question everywhere else. The
+# approval gives each question it asks the address { at: ballot, key: <the
+# approval's run ID> }, and a question with that address sends it:
+#
+#   opened    once the question is posted
+#   settled   { choice, by, where } when an answer counts, `where` naming the place
+#
+# On the first settled, the ballot sends close with the same data to every
+# other question that opened, and to each that opens later. A later settled
+# is dropped. It ends when the approval sends over, once all its questions
+# have ended, or a day after it settled.
+#
+# It sends only to the runs that sent it opened.
+statechart: ballot
+description: Ends the other questions of an approval asked in several places, once one is answered.
+lifetime: keyed
+allow: ["send:**"]
+title: A question asked in several places
+initial: open
+states:
+  open:
+    defer: [opened]
+    on:
+      settled: settling
+      over: over
+  # Keeps the first settled's sender and data, as this state's output.
+  settling:
+    defer: [opened]
+    initial: kept
+    states:
+      kept: { end: done, output: { from: "${event.from}", answer: "${event.data}" } }
+    on: { done: closing }
+  closing:
+    timers: { quiet: 1d }
+    on:
+      opened:
+        when: "${event.from.run !== states.settling.output.from.run}"
+        send: { to: "${event.from}", event: close, data: "${states.settling.output.answer}" }
+      over: over
+      quiet: over
+  over: { end: done }

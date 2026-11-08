@@ -67,7 +67,7 @@ func traceHelper(address, system string) map[string]string {
 			description: Messages to the people this bot knows, and the time.
 			ask:
 			  machine: .rook/approval.yaml
-			  input: { ask: gromit/telegram/chat/ask, approvers: "messages:approve", in: "1" }
+			  input: { ask: [{ at: gromit/telegram/chat/ask, in: "1" }], approvers: "messages:approve" }
 			tools:
 			  clock:
 			    description: Give the time in a zone.
@@ -260,9 +260,15 @@ func TestTraceMessageToToolsAndApproval(t *testing.T) {
 	if run := w.show(approval); run.Machine != "approval" || run.Title != "Approve tell" {
 		t.Errorf("the approval is %+v", run)
 	}
-	asked := lastOf(t, "question", w.sentFrom(approval, instance.AskCall, location(bot+"/telegram/chat/ask")))
-	if asked != question.ID || w.show(asked).StartedBy != approval {
-		t.Errorf("the approval called %s, and the question is %s", asked, question.ID)
+	// The approval asks in each place with a child run, place, which calls
+	// the question.
+	var place string
+	for _, a := range w.ownAsks(approval, instance.AskChild) {
+		place = a.Child
+	}
+	asked := lastOf(t, "question", w.sentFrom(place, instance.AskCall, location(bot+"/telegram/chat/ask")))
+	if asked != question.ID || w.show(asked).StartedBy != place || w.show(place).Parent != approval {
+		t.Errorf("the approval's place called %s, and the question is %s", asked, question.ID)
 	}
 	var answer any
 	var press string
@@ -278,7 +284,7 @@ func TestTraceMessageToToolsAndApproval(t *testing.T) {
 	// prints for these runs.
 	recordsAsThePageShows(t, w, map[string]string{
 		"router": router, "conversation": conversation, "turn": turn, "agent": agent,
-		"approval": approval, "question": asked, "press": press, "tell": told,
+		"approval": approval, "place": place, "question": asked, "press": press, "tell": told,
 		"find": lastOf(t, "lookup", w.sentFrom(turn, instance.AskCall, location("people/find"))),
 	})
 }
@@ -601,7 +607,7 @@ func TestTrailWalksBackwardsFromTheQuestion(t *testing.T) {
 		}
 		id = next
 	}
-	want := []string{"telegram-chat-ask", "approval", "assistant", "turn", "conversation", "gromit"}
+	want := []string{"telegram-chat-ask", "place", "approval", "assistant", "turn", "conversation", "gromit"}
 	if !slices.Equal(chain, want) {
 		t.Errorf("walking back from the question gives %v", chain)
 	}

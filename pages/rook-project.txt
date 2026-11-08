@@ -49,6 +49,7 @@ and still exits 0. In a new project these are the agent, and the calls the
 conversation makes only for a message from a service the project is not on.
 
     corbie test .
+      ballot.yaml                         ok
       conversation.yaml                   ok
       gromit/slack/assistant/status.yaml  ok
       gromit/slack/chat/ask.yaml          ok
@@ -75,9 +76,9 @@ takes the first one's messages.
   a value                                   a listener reads it when it starts: corbie run cancel /my-bot/gromit/<service>/gromit, then submit
 
 After updating Rook, run `corbie rook init .` in the project. It rewrites
-`.rook/`, writes `AGENTS.md` or `.corbieignore` when the project lacks one,
-adds `.rook/` and `people/scopes.yaml` to `.corbieignore` when it lacks them,
-and names the project's files that are not as this version starts a project.
+`.rook/`, writes `AGENTS.md`, `.corbieignore`, `ballot.yaml` or `later.yaml`
+when the project lacks one, adds `.rook/` and `people/scopes.yaml` to
+`.corbieignore` when it lacks them, and names the project's files that are not as this version starts a project.
 `corbie rook manual rook-starter` shows those files as this version writes
 them. Copy what you want, then run the two commands above.
 
@@ -153,7 +154,7 @@ To add the agent:
     instructions: { include: ./orders.md }
     ask:
       machine: .rook/approval.yaml
-      input: { ask: gromit/slack/chat/ask, approvers: "orders:approve", in: "#orders-team", within: 1d, asker: "${input.asker.email}", request: "${input.messages.map((m) => (m.later != null ? '(a reminder the bot set) ' : '') + m.text).join('\\n')}" }
+      input: { ask: [{ at: gromit/slack/chat/ask, in: "#orders-team" }], approvers: "orders:approve", within: 1d, asker: "${input.asker.email}", request: "${input.messages.map((m) => (m.later != null ? '(a reminder the bot set) ' : '') + m.text).join('\\n')}" }
     tools:
       read_file: { call: gromit/gitlab/repository/files/read, input: { project: group/orders } }
       change_file:

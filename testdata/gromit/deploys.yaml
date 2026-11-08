@@ -8,7 +8,7 @@ receive: [gromit/slack/gromit]
 allow: [send:gromit/gitlab/pipeline/create, send:gromit/slack/chat/post]
 ask:
   machine: .rook/approval.yaml
-  input: { ask: gromit/slack/chat/ask, approvers: "deploy:approve", in: "${input.chat}", within: 1h, asker: "${input.email}", request: "${input.text}" }
+  input: { ask: [{ at: gromit/slack/chat/ask, in: "${input.chat}" }], approvers: "deploy:approve", within: 1h, asker: "${input.email}", request: "${input.text}" }
 initial: waiting
 states:
   waiting:

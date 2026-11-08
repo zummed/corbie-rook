@@ -1,9 +1,10 @@
 # Rook's question. It takes calls only from the locations in receive:, and an
 # answer only from the router at `router`, which sends it each press of its
 # buttons. An agent's approval calls it from agents/, and the approval of
-# deploys from deploys. It calls the lookup at `lookup` for who answered.
+# deploys from deploys. It takes close from the ballot, and calls the lookup
+# at `lookup` for who answered.
 include: .rook/slack/chat/ask.yaml
-receive: [gromit/slack/gromit, agents/*, deploys]
+receive: [gromit/slack/gromit, agents/*, ballot, deploys]
 input:
   properties:
     router: { const: gromit/slack/gromit, default: gromit/slack/gromit }

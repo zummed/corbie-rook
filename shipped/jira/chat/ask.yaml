@@ -12,6 +12,9 @@
 # question with a comment, and the run ends with { choice, by }. No answer that
 # counts within `within`, by default a week, closes it and ends with
 # { choice: no }.
+#
+# With `ballot`, it speaks to the ballot of an approval asked in several places
+# as Slack's chat/ask does, naming this place Jira.
 statechart: jira-chat-ask
 description: Asks a question in a comment on a Jira issue, and gives the first choice answered by someone whose scopes hold the approvers.
 title: "${input.in}: ${input.text.split('\\n')[0]}"
@@ -30,6 +33,7 @@ input:
     within: { type: string }
     router: { type: string }
     lookup: { type: string }
+    ballot: { type: object }
 initial: asking
 states:
   asking:
@@ -40,7 +44,11 @@ states:
       input: { do: ask, in: "${input.in}", text: "${input.text}", choices: "${input.choices}", question: "${run.id.slice(run.id.indexOf('/') + 1)}", site: "${values.JIRA_SITE}", email: "${values.JIRA_EMAIL}" }
       allow: ["net:${values.JIRA_SITE}", "secret:JIRA_TOKEN@net:${values.JIRA_SITE}"]
       restart: { limit: 2 }
-    on: { done: open }
+    on: { done: [{ go: opening, when: "${input.ballot != null}" }, open] }
+  opening:
+    defer: [answer]
+    job: { send: { to: "${input.ballot}", event: opened }, allow: ["send:${input.ballot.at}"] }
+    on: { done: open, failed: open }
   open:
     timers: { unanswered: "${input.within || '7d'}" }
     initial: waiting
@@ -54,6 +62,7 @@ states:
           input: { answer: "${Object.assign({}, event.data, { choice: input.choices.find((c) => String(c).toLowerCase() === String(event.data.choice).toLowerCase()) ?? event.data.choice })}", lookup: "${input.lookup}", approvers: "${input.approvers}", asker: "${input.asker || ''}", choices: "${input.choices}" }
         on:
           done:
+            - { go: settling, when: "${event.data.counts && input.ballot != null}" }
             - { go: answered, when: "${event.data.counts}" }
             - { go: telling, when: "${event.data.tell !== ''}" }
             - waiting
@@ -66,7 +75,12 @@ states:
           input: { do: tell, sent: "${states.asking.output.sent}", answer: "${states.checking.output.answer}", text: "${states.checking.output.tell}", site: "${values.JIRA_SITE}", email: "${values.JIRA_EMAIL}" }
           allow: ["net:${values.JIRA_SITE}", "secret:JIRA_TOKEN@net:${values.JIRA_SITE}"]
         on: { done: waiting, failed: waiting }
-    on: { unanswered: unanswered }
+    on:
+      unanswered: unanswered
+      close: { go: closed, when: "${input.ballot != null && event.from.at === run.tree + '/' + input.ballot.at && event.from.key === input.ballot.key}" }
+  settling:
+    job: { send: { to: "${input.ballot}", event: settled, data: { choice: "${states.checking.output.choice}", by: "${states.checking.output.by}", where: Jira } }, allow: ["send:${input.ballot.at}"] }
+    on: { done: answered, failed: answered }
   answered:
     job:
       script: .rook/jira/jira.js
@@ -76,6 +90,21 @@ states:
       restart: { limit: 2 }
     on: { done: over, failed: over }
   over: { end: done, output: { choice: "${states.checking.output.choice}", by: "${states.checking.output.by}" } }
+  # Keeps what the ballot's close gave, as this state's output.
+  closed:
+    initial: kept
+    states:
+      kept: { end: done, output: "${event.data}" }
+    on: { done: answered_elsewhere }
+  answered_elsewhere:
+    job:
+      script: .rook/jira/jira.js
+      files: [.rook/jira/api.js, .rook/shared/rich.js]
+      input: { do: close, sent: "${states.asking.output.sent}", text: "${states.closed.output.by + ' said ' + states.closed.output.choice + ' on ' + states.closed.output.where + '.'}", site: "${values.JIRA_SITE}", email: "${values.JIRA_EMAIL}" }
+      allow: ["net:${values.JIRA_SITE}", "secret:JIRA_TOKEN@net:${values.JIRA_SITE}"]
+      restart: { limit: 2 }
+    on: { done: elsewhere, failed: elsewhere }
+  elsewhere: { end: done, output: { choice: "${states.closed.output.choice}", by: "${states.closed.output.by}", elsewhere: true } }
   unanswered:
     job:
       script: .rook/jira/jira.js

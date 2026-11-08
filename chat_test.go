@@ -239,7 +239,7 @@ const houseToolkit = `
 	description: The house, and messages to its people.
 	ask:
 	  machine: .rook/approval.yaml
-	  input: { ask: gromit/telegram/chat/ask, approvers: "house:approve", in: "1", request: "${input.messages.map((m) => m.text).join('\\n')}" }
+	  input: { ask: [{ at: gromit/telegram/chat/ask, in: "1" }], approvers: "house:approve", request: "${input.messages.map((m) => m.text).join('\\n')}" }
 	tools:
 	  lights:
 	    description: Which lights are on.
@@ -482,7 +482,7 @@ func TestOwnRequestIsNotApprovedByTheAsker(t *testing.T) {
 	tg := newTelegram(t)
 	w := newWorld(t)
 	dir, _ := houseProject(t, w, tg, map[string]string{
-		"toolkits/house.yaml": strings.Replace(houseToolkit, `in: "1",`, `in: "1", asker: "${input.asker.email}",`, 1),
+		"toolkits/house.yaml": strings.Replace(houseToolkit, `approvers: "house:approve",`, `approvers: "house:approve", asker: "${input.asker.email}",`, 1),
 	})
 	write(t, dir, map[string]string{"people/scopes.yaml": strings.Replace(scenarioPeople, "carol, scopes: [house]", "carol, scopes: [house, house:approve]", 1)})
 	tg.dm(1, "tell bob hello")
