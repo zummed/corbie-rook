@@ -182,7 +182,7 @@ To add the agent:
 - Ana is offered `orders` with both tools. Di is offered `orders` with `read_file` only, since she lacks `orders:write`, and her press on a question counts, since she holds `orders:approve`.
 - A person `people/scopes.yaml` does not hold is answered by the agent with no toolkit.
 - The model is given `instructions:` when it opens the toolkit.
-- A tool written `call:` takes its description and arguments from the machine at its location, without the names its `input:` fixes, so the model never names the project.
+- A tool written `call:` takes its description and arguments from the machine at its location, without the names its `input:` fixes, so the model never names the project. A schedule, another machine or a client can run that machine without the agent.
 - `change_file` waits until someone with `orders:approve`, who did not ask, presses yes in `#orders-team`. A no, or no press within a day, goes back to the model as `denied`.
 - Any machine at `agents/assistant` with the same input and output answers in its place, a flow with no model included, as `corbie rook manual rook-design` says under The agent.
 
