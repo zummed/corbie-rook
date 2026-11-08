@@ -8,7 +8,7 @@
 #   messages      this turn's messages, oldest first, each as a listener sends it
 #   thread        the thread before the first of them, as text
 #   attachments   the files sent with the messages, as blobs
-#   medium        the service the reply is shown on: slack, telegram, gitlab or jira
+#   medium        the service the reply is shown on: slack, telegram, gitlab, jira or console
 #   format        how to write for that service, which the agent's system text holds as ${input.format}
 #   asker         { name, email, scopes } of the person asking, from the lookup
 #   conversation  the conversation so far
