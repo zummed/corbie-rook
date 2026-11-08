@@ -2,7 +2,7 @@
 //
 //   hear              listen.yaml
 //   say               issue/comment/create.yaml
-//   ask, tell, close  chat/ask.yaml: the question, a comment on an answer that does not count, the closing comment
+//   ask, tell, close  chat/show.yaml: the question, a comment on an answer that does not count, the closing comment
 //   history           issue/comment/list.yaml
 //   attachments       attachment/get.yaml
 //   send              issue/attachments/create.yaml
@@ -168,7 +168,7 @@ if (input.do === "hear") {
   // question's run ID. A comment that holds only such a line answers the
   // question, with chat, the issue it was written on, which the question
   // matches against its own.
-  const answer = (text) => /^(.+?)\s+(\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{10})$/.exec(text.trim().replace(/^(\{\{|`)|(\}\}|`)$/g, "").trim())
+  const answer = (text) => /^(.+?)\s+([\w.-]+\/\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{10})$/.exec(text.trim().replace(/^(\{\{|`)|(\}\}|`)$/g, "").trim())
   const heard = []
   // hear keeps a message that names the bot, and with overhear one that does
   // not, marked unaddressed. before is the comment's ID, or null for the issue.
@@ -284,7 +284,7 @@ if (input.do === "ask") {
   const key = call("GET", "/issue/" + encodeURIComponent(String(input.in)), { query: { fields: "key" } }).key
   const lines = input.choices.map((c) => "- `" + c + " " + input.question + "`")
   say(key, input.text + "\n\nTo answer, write a comment that holds only one of these lines:\n\n" + lines.join("\n"))
-  return { sent: { in: key, question: input.question } }
+  return { sent: { in: key, question: input.question }, where: "Jira" }
 }
 
 if (input.do === "tell") {
@@ -297,7 +297,7 @@ if (input.do === "tell") {
 
 if (input.do === "close") {
   // A comment on the question's issue that closes the question.
-  say(input.sent.in, input.text)
+  say(input.sent.in, input.said)
   return {}
 }
 

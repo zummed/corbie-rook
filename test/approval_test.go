@@ -81,12 +81,12 @@ func tellCarol() []llmstandin.ToolCall {
 	}
 }
 
-// did gives the input of each script job of a run's own, whose do is the one
-// given, in order.
+// did gives the input of each call a question made to its service's
+// chat/show, whose do is the one given, in order.
 func (w *world) did(id, do string) []map[string]any {
 	w.t.Helper()
 	var out []map[string]any
-	for _, a := range w.ownAsks(id, instance.AskScript) {
+	for _, a := range w.ownAsks(id, instance.AskCall) {
 		if in, _ := a.Job.Input.(map[string]any); in["do"] == do {
 			out = append(out, in)
 		}
@@ -168,13 +168,13 @@ func TestHeldCallWaitsForItsApprovers(t *testing.T) {
 	if runs := stubs(t, w, "telegram-chat-post"); len(runs) != 0 {
 		t.Errorf("the held call ran after a no: %v", runs)
 	}
-	if closed := w.did(question.ID, "close"); len(closed) != 1 || !strings.HasSuffix(closed[0]["text"].(string), "\n\nalice said no.") {
+	if closed := w.did(question.ID, "close"); len(closed) != 1 || closed[0]["said"] != "alice said no." {
 		t.Errorf("the question was closed with %v", closed)
 	}
 	if out := fmt.Sprint(w.show(question.ID).Output); out != "map[by:alice choice:no]" {
 		t.Errorf("the question gave %s", out)
 	}
-	w.titled(map[string][]string{"approval": {"Approve tell"}, "telegram-chat-ask": {"assistant wants to run tell."}, "press": {"Alice pressed no", "Bob pressed yes", "Carol pressed yes"}})
+	w.titled(map[string][]string{"approval": {"Approve tell"}, "chat-ask": {"assistant wants to run tell."}, "press": {"Alice pressed no", "Bob pressed yes", "Carol pressed yes"}})
 }
 
 // A yes runs the held call, and the approval's result, in the agent's record,
@@ -231,7 +231,7 @@ func TestTwoHeldCallsAreOneQuestion(t *testing.T) {
 	if !slices.Equal(said, []string{"1: first", "3: second"}) {
 		t.Errorf("the held calls ran as %q", said)
 	}
-	if n := len(stubs(t, w, "telegram-chat-ask")); n != 1 {
+	if n := len(stubs(t, w, "chat-ask")); n != 1 {
 		t.Errorf("%d questions were asked", n)
 	}
 }
@@ -316,7 +316,7 @@ func TestQuestionUnansweredWithinIsNo(t *testing.T) {
 	if run := w.show(id); run.Status != "done" || fmt.Sprint(run.Output) != "map[choice:no]" {
 		t.Fatalf("the asker ended %s with %v: %s", run.Status, run.Output, run.Error)
 	}
-	if closed := w.did(question.ID, "close"); len(closed) != 1 || closed[0]["text"] != "Deploy?\n\nNo one answered in time, so the answer is no." {
+	if closed := w.did(question.ID, "close"); len(closed) != 1 || closed[0]["said"] != "No one answered in time, so the answer is no." {
 		t.Errorf("the question was closed with %v", closed)
 	}
 }
@@ -372,7 +372,7 @@ func TestPressThatCannotBeCheckedDoesNotCount(t *testing.T) {
 	id := w.start("on/asker.yaml", nil)
 	question := w.question(map[string]bool{})
 	w.press(question.ID, "3", "yes")
-	w.press(question.ID, "1", "YES")
+	w.press(question.ID, "1", "maybe")
 	w.checked(question.ID, 2)
 	quiet()
 	if got := w.told(question.ID); !slices.Equal(got, []string{"3: Your answer could not be checked, so it does not count."}) {
@@ -632,14 +632,10 @@ func TestTelegramQuestionAnswersEachTap(t *testing.T) {
 	}
 }
 
-// Each service's chat/ask takes what the approval gives it: no field the
-// approval does not give is required but router and lookup, which the placed
-// file gives, and every field the approval gives is declared.
-// Each is Slack's statechart: the same input, states and transitions, with
-// its own service's script. Jira's also drops an answer written on any issue
-// but the question's, since a comment there names the question's run in the
-// open.
-func TestApprovalFitsEveryQuestion(t *testing.T) {
+// The approval gives the question every field it requires but those its
+// placed file fixes, and nothing it does not take. Every service's chat/show
+// takes each field the question gives it.
+func TestApprovalFitsTheQuestion(t *testing.T) {
 	read := func(name string) map[string]any {
 		text, err := os.ReadFile(name)
 		if err != nil {
@@ -651,56 +647,55 @@ func TestApprovalFitsEveryQuestion(t *testing.T) {
 		}
 		return m
 	}
-	// shape gives a question's input, and each state's transitions and
-	// timers, by the state's name.
-	shape := func(m map[string]any) string {
-		var out []string
-		var walk func(states map[string]any)
-		walk = func(states map[string]any) {
-			for name, s := range states {
-				state := s.(map[string]any)
-				out = append(out, fmt.Sprint(name, " on ", state["on"], " timers ", state["timers"], " end ", state["end"], " output ", state["output"], " defer ", state["defer"]))
-				if inner, ok := state["states"].(map[string]any); ok {
-					walk(inner)
-				}
-			}
-		}
-		walk(m["states"].(map[string]any))
-		slices.Sort(out)
-		return fmt.Sprint(m["input"], "\n", strings.Join(out, "\n"))
-	}
 	approval := read("../rook/shipped/approval.yaml")
 	given := approval["stages"].(map[string]any)["question"].(map[string]any)["job"].(map[string]any)["input"].(map[string]any)["question"].(map[string]any)
-	asks, _ := filepath.Glob("../rook/shipped/*/chat/ask.yaml")
-	if len(asks) < 2 {
-		t.Fatalf("Rook ships questions only at %v", asks)
+	question := read("../rook/shipped/chat/ask.yaml")
+	input := question["input"].(map[string]any)
+	properties := input["properties"].(map[string]any)
+	for _, field := range input["required"].([]any) {
+		if given[field.(string)] == nil && field != "router" && field != "lookup" && field != "show" {
+			t.Errorf("the question requires %s, which the approval does not give", field)
+		}
 	}
-	template := shape(read("../rook/shipped/slack/chat/ask.yaml"))
-	for _, name := range asks {
-		question := read(name)
-		input, _ := question["input"].(map[string]any)
-		properties, _ := input["properties"].(map[string]any)
-		required, _ := input["required"].([]any)
-		for _, field := range required {
-			if given[field.(string)] == nil && field != "router" && field != "lookup" {
-				t.Errorf("%s requires %s, which the approval does not give", name, field)
+	for field := range given {
+		if properties[field] == nil {
+			t.Errorf("the question does not take %s, which the approval gives", field)
+		}
+	}
+	// Each call the question makes to chat/show, by the fields it gives.
+	var calls [][]string
+	var walk func(states map[string]any)
+	walk = func(states map[string]any) {
+		for _, s := range states {
+			state := s.(map[string]any)
+			if job, _ := state["job"].(map[string]any); job != nil && job["call"] != nil {
+				var fields []string
+				for field := range job["input"].(map[string]any) {
+					fields = append(fields, field)
+				}
+				calls = append(calls, fields)
+			}
+			if inner, ok := state["states"].(map[string]any); ok {
+				walk(inner)
 			}
 		}
-		for field := range given {
-			if properties[field] == nil {
-				t.Errorf("%s does not take %s, which the approval gives", name, field)
+	}
+	walk(question["states"].(map[string]any))
+	if len(calls) != 5 {
+		t.Fatalf("the question calls chat/show %d times", len(calls))
+	}
+	shows, _ := filepath.Glob("../rook/shipped/*/chat/show.yaml")
+	if len(shows) != len(rook.Services()) {
+		t.Fatalf("Rook ships chat/show only at %v", shows)
+	}
+	for _, name := range shows {
+		takes := read(name)["input"].(map[string]any)
+		for _, fields := range calls {
+			for _, field := range fields {
+				if takes[field] == nil {
+					t.Errorf("%s does not take %s, which the question gives", name, field)
+				}
 			}
-		}
-		got := shape(question)
-		if name == "../rook/shipped/jira/chat/ask.yaml" {
-			own := " && event.data.chat === states.asking.output.sent.in"
-			if !strings.Contains(got, own) {
-				t.Errorf("%s takes an answer written on any issue", name)
-			}
-			got = strings.Replace(got, own, "", 1)
-		}
-		if got != template {
-			t.Errorf("%s is not Slack's question:\n%s\nSlack's:\n%s", name, got, template)
 		}
 	}
 }
@@ -813,17 +808,17 @@ func TestApprovalInTwoPlacesTakesTheFirstAnswer(t *testing.T) {
 	if out := fmt.Sprint(w.show(second.ID).Output); out != "map[by:alice choice:yes elsewhere:true]" {
 		t.Errorf("the other question gave %s", out)
 	}
-	if closed := w.did(second.ID, "close"); len(closed) != 1 || !strings.HasSuffix(closed[0]["text"].(string), "\n\nalice said yes on Telegram.") {
+	if closed := w.did(second.ID, "close"); len(closed) != 1 || closed[0]["said"] != "alice said yes on Telegram." {
 		t.Errorf("the other question was closed with %v", closed)
 	}
-	if closed := w.did(first.ID, "close"); len(closed) != 1 || !strings.HasSuffix(closed[0]["text"].(string), "\n\nalice said yes.") {
+	if closed := w.did(first.ID, "close"); len(closed) != 1 || closed[0]["said"] != "alice said yes." {
 		t.Errorf("the question answered was closed with %v", closed)
 	}
 	w.until("the ballot to end", func() bool {
-		runs := keyed(w, "ballot.yaml")[id]
+		runs := keyed(w, "ballot.yaml")[id+"/0"]
 		return len(runs) == 1 && runs[0].HasEnded()
 	})
-	if runs := keyed(w, "ballot.yaml"); len(runs) != 1 || len(runs[id]) != 1 {
+	if runs := keyed(w, "ballot.yaml"); len(runs) != 1 || len(runs[id+"/0"]) != 1 {
 		t.Errorf("the ballots are %v", runs)
 	}
 }
@@ -848,8 +843,74 @@ func TestApprovalInTwoPlacesIgnoresAPressThatDoesNotCount(t *testing.T) {
 	if out := fmt.Sprint(w.show(id).Output); out != "map[approved:[] note:alice said no.]" {
 		t.Fatalf("the approval gave %s", out)
 	}
-	if closed := w.did(first.ID, "close"); len(closed) != 1 || !strings.HasSuffix(closed[0]["text"].(string), "\n\nalice said no on Telegram.") {
+	if closed := w.did(first.ID, "close"); len(closed) != 1 || closed[0]["said"] != "alice said no on Telegram." {
 		t.Errorf("the first question was closed with %v", closed)
+	}
+}
+
+// An agent's held calls go to people by their toolkit or tool. The approval
+// asks about restart, of the toolkit infra, in chat 3, about tell, whose tool
+// has its own entry, in chat 1, and about open of orders, which names no
+// entry, where the approval asks; each is answered apart.
+func TestApprovalAsksByToolkitOrTool(t *testing.T) {
+	w := newWorld(t)
+	dir := approvalProject(t, w, noModel)
+	write(t, dir, map[string]string{"agents/approve.yaml": "include: .rook/approval.yaml"})
+	w.sync(dir)
+	place := func(in string) []any { return []any{map[string]any{"at": bot + "/telegram/chat/ask", "in": in}} }
+	id := w.start("agents/approve.yaml", map[string]any{
+		"asking": map[string]any{"machine": "assistant"},
+		"jobs": []any{
+			map[string]any{"name": "restart", "asked": map[string]any{"tool": "restart", "toolkit": "infra", "args": map[string]any{"vm": "web-1"}}},
+			map[string]any{"name": "tell", "asked": map[string]any{"tool": "tell", "toolkit": "infra", "args": map[string]any{"chat": "2"}}},
+			map[string]any{"name": "open", "asked": map[string]any{"tool": "open", "toolkit": "orders"}},
+		},
+		"ask":       place("2"),
+		"approvers": "messages:approve",
+		"by": map[string]any{
+			"infra": map[string]any{"ask": place("3"), "within": "1h"},
+			"tell":  map[string]any{"ask": place("1")},
+		},
+	})
+	infra, tell, orders := w.posted("3"), w.posted("1"), w.posted("2")
+	for q, want := range map[*client.Run]string{infra: "assistant wants to run restart.", tell: "assistant wants to run tell.", orders: "assistant wants to run open."} {
+		if text := w.did(q.ID, "ask")[0]["text"].(string); !strings.HasPrefix(text, want+"\n") {
+			t.Errorf("a question asks %q", text)
+		}
+	}
+	w.press(infra.ID, "1", "yes")
+	w.press(tell.ID, "1", "no")
+	w.press(orders.ID, "1", "yes")
+	w.until("the approval to end", func() bool { return w.show(id).HasEnded() })
+	if out := fmt.Sprint(w.show(id).Output); out != "map[approved:[restart open] note:alice said yes. alice said no. alice said yes.]" {
+		t.Fatalf("the approval gave %s", out)
+	}
+	if runs := keyed(w, "ballot.yaml"); len(runs) != 3 || len(runs[id+"/0"]) != 1 || len(runs[id+"/2"]) != 1 {
+		t.Errorf("the ballots are %v", runs)
+	}
+}
+
+// An entry of by that gives a field the approval does not take, and a held
+// call left with no place to ask, approve nothing, and the error says why.
+func TestApprovalByRefusesWhatItCannotAsk(t *testing.T) {
+	w := newWorld(t)
+	dir := approvalProject(t, w, noModel)
+	write(t, dir, map[string]string{"agents/approve.yaml": "include: .rook/approval.yaml"})
+	w.sync(dir)
+	restart := []any{map[string]any{"name": "restart", "asked": map[string]any{"tool": "restart", "toolkit": "infra"}}}
+	for by, want := range map[string]string{
+		`{"infra": {"approvers": "infra:approve", "in": "#infra"}}`: "by.infra gives in: an entry of by gives ask, approvers or within",
+		`{"orders": {"approvers": "orders:approve"}}`:               "No one is asked about restart: give the approval's ask and approvers, or an entry of by for its tool or toolkit",
+	} {
+		var entries map[string]any
+		if err := yaml.Unmarshal([]byte(by), &entries); err != nil {
+			t.Fatal(err)
+		}
+		id := w.start("agents/approve.yaml", map[string]any{"asking": map[string]any{"machine": "assistant"}, "jobs": restart, "by": entries})
+		w.until("the approval to end", func() bool { return w.show(id).HasEnded() })
+		if run := w.show(id); run.Status != "failed" || !strings.Contains(run.Error, want) {
+			t.Errorf("by %s: the approval ended %s: %s", by, run.Status, run.Error)
+		}
 	}
 }
 

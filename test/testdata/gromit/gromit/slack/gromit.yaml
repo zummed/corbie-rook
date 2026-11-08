@@ -25,4 +25,4 @@ states:
       stop:
         send: { to: { at: conversation, key: "${'slack:' + event.data.chat + ':' + event.data.user + ':support'}" }, event: stop, data: "${event.data}" }
       answer:
-        send: { to: { at: gromit/slack/chat/ask, run: "${run.id.slice(0, run.id.indexOf('/') + 1) + event.data.run}" }, event: answer, data: "${event.data}" }
+        send: { to: { at: gromit/slack/chat/ask, run: "${event.data.run}" }, event: answer, data: "${event.data}" }

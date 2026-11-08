@@ -23,10 +23,10 @@ import (
 	"github.com/zummed/corbie/secret"
 	"github.com/zummed/corbie/store"
 
-	_ "github.com/zummed/corbie/agent"
-	_ "github.com/zummed/corbie/flow"
+	_ "github.com/zummed/corbie/machine/agent"
+	_ "github.com/zummed/corbie/machine/flow"
+	_ "github.com/zummed/corbie/machine/statechart"
 	_ "github.com/zummed/corbie/plugin/bundled"
-	_ "github.com/zummed/corbie/statechart"
 )
 
 // The test binary stands in for the process a runner starts for a job.

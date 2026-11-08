@@ -54,6 +54,7 @@ conversation makes only for a message from a service the project is not on.
       gromit/slack/assistant/status.yaml  ok
       gromit/slack/chat/ask.yaml          ok
       gromit/slack/chat/post.yaml         ok
+      gromit/slack/chat/show.yaml         ok
       gromit/slack/files/get.yaml         ok
       gromit/slack/gromit.yaml            ok
       later.yaml                          ok
@@ -146,15 +147,15 @@ To add the agent:
       chat: answer in a few short sentences, in everyday words.
 
       ${input.format}
+    ask:
+      machine: .rook/approval.yaml
+      input: { ask: [{ at: gromit/slack/chat/ask, in: "#orders-team" }], approvers: "orders:approve", within: 1d, asker: "${input.asker.email}", request: "${input.messages.map((m) => (m.later != null ? '(a reminder the bot set) ' : '') + m.text).join('\\n')}" }
     toolkits:
       orders: { include: toolkits/orders.yaml, when: "${input.asker.scopes.includes('orders:read')}" }
 
     # toolkits/orders.yaml
     description: The orders app, its settings, and changing them.
     instructions: { include: ./orders.md }
-    ask:
-      machine: .rook/approval.yaml
-      input: { ask: [{ at: gromit/slack/chat/ask, in: "#orders-team" }], approvers: "orders:approve", within: 1d, asker: "${input.asker.email}", request: "${input.messages.map((m) => (m.later != null ? '(a reminder the bot set) ' : '') + m.text).join('\\n')}" }
     tools:
       read_file: { call: gromit/gitlab/repository/files/read, input: { project: group/orders } }
       change_file:
@@ -183,7 +184,7 @@ To add the agent:
 - A person `people/scopes.yaml` does not hold is answered by the agent with no toolkit.
 - The model is given `instructions:` when it opens the toolkit.
 - A tool written `call:` takes its description and arguments from the machine at its location, without the names its `input:` fixes, so the model never names the project. A schedule, another machine or a client can run that machine without the agent.
-- `change_file` waits until someone with `orders:approve`, who did not ask, presses yes in `#orders-team`. A no, or no press within a day, goes back to the model as `denied`.
+- `change_file` waits for the agent's `ask:`, until someone with `orders:approve`, who did not ask, presses yes in `#orders-team`. A no, or no press within a day, goes back to the model as `denied`.
 - Any machine at `agents/assistant` with the same input and output answers in its place, a flow with no model included, as `corbie rook manual rook-design` says under The agent.
 
 Common changes
@@ -192,6 +193,7 @@ Common changes
   The bot should                                    Change
   look something up, or do something, when asked    a tool in a toolkit, calling a machine you place or write
   let some people do more                           a toolkit's or a tool's when:, and their scopes
+  ask other people about one toolkit or tool        an entry of by: in the agent's ask
   answer in one channel with other toolkits         a second agent and conversation, and a rule in the router
   answer some messages with steps of its own        a keyed statechart, and a rule in the router
   answer some messages that do not name it          overhear: true, a rule in the router, and a filter stage
@@ -216,6 +218,17 @@ Common changes
 - To answer some of those, add a stage that calls a filter to the turn in `conversation.yaml`, as its comment shows, and place `.rook/filters/words.yaml`, or write an agent that includes `.rook/filters/model.yaml`.
 - To clean a reply posted outside a direct message, add a stage that calls a redactor of your own, as the comment in `conversation.yaml` shows, and `send:redact` to the turn's `allow:`. The model still sees every tool's whole result.
 - To hear every public issue and comment on GitLab or Jira, add `overhear: true` to the listener's input, and to wait until an opened issue is finished, `settle: 2m`. On GitLab, `group: <path>` reads every project of a group with one ask.
+- To ask other people about one toolkit or tool, give the approval an entry of `by:` under its name. A held call of that toolkit or tool goes to the entry's `ask`, `approvers` and `within`, and every other to the approval's own:
+
+      ask:
+        machine: .rook/approval.yaml
+        input:
+          ask: [{ at: gromit/slack/chat/ask, in: "#orders-team" }]
+          approvers: orders:approve
+          asker: "${input.asker.email}"
+          by:
+            infra: { ask: [{ at: gromit/slack/chat/ask, in: "#infra" }], approvers: "infra:approve", within: 1h }
+
 - To post from a machine, call the bot's `chat/post` with `{ in, text }`, as `corbie rook manual rook-design` shows under Rook's calls.
 - To find people somewhere else, write `people/find.yaml` as a machine of your own that takes `{ service, user, name, email }` and gives `{ name, email, scopes }`.
 - To add a service, run `corbie rook init . --bot gromit --services <name>`, set the secrets and values it names, and submit. The conversation answers every service already.

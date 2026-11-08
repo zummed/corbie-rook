@@ -4,10 +4,11 @@
 # calls it, or whose ask: is the approval, such as a statechart with an
 # approve: job, calls it from its own location, which must be added to
 # receive:, or the call is refused. It takes close from the ballot, and calls
-# the lookup at `lookup` for who answered.
-include: .rook/slack/chat/ask.yaml
+# the lookup at `lookup` for who answered, and its service's part at `show`.
+include: .rook/chat/ask.yaml
 receive: [BOT/slack/BOT, agents/*, ballot]
 input:
   properties:
     router: { const: BOT/slack/BOT, default: BOT/slack/BOT }
     lookup: { const: people/find, default: people/find }
+    show: { const: BOT/slack/chat/show, default: BOT/slack/chat/show }

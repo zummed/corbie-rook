@@ -61,10 +61,8 @@ func TestLaterBringsTheConversationBack(t *testing.T) {
 	w.until("the first reply", func() bool { return len(tg.texts("1")) == 1 })
 	var waiting bool
 	w.until("the reminder waiting", func() bool {
-		for _, runs := range keyed(w, "later.yaml") {
-			for _, run := range runs {
-				waiting = waiting || w.show(run.ID).Timers == 1
-			}
+		for _, run := range w.at("later.yaml") {
+			waiting = waiting || w.show(run.ID).Timers == 1
 		}
 		return waiting
 	})
@@ -100,7 +98,7 @@ func TestLaterOfNoMinutesIsStillAReminder(t *testing.T) {
 	tg.says(map[string]any{"text": "fetch the film"})
 	w.sync(dir)
 	w.until("the first reply", func() bool { return len(tg.texts("1")) == 1 })
-	w.until("the reminder waiting", func() bool { return len(keyed(w, "later.yaml")) == 1 })
+	w.until("the reminder waiting", func() bool { return len(w.at("later.yaml")) == 1 })
 	w.set(w.now().Add(2 * time.Minute))
 	w.until("the reminder answered", func() bool { return len(tg.texts("1")) == 2 })
 	if got := tg.texts("1")[1]; got != "The download is done." {

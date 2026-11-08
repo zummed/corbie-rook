@@ -39,7 +39,7 @@ const telegramScript = `
 	  emit("message", { service: "telegram", text: "hello", chat: "9", user: "9", name: "Stranger", place: "dm", answers: "9:13" })
 	  return { cursor: 1 }
 	}
-	if (input.do === "ask") return { sent: [{ chat: input.in, id: 101 }] }
+	if (input.do === "ask") return { sent: [{ chat: input.in, id: 101 }], where: "Telegram" }
 	if (input.do === "post") return { sent: [input.answers || ""] }
 	return {}
 `
@@ -167,7 +167,7 @@ func heard(events ...map[string]any) string {
 		  ` + strings.Join(emits, "\n\t\t  ") + `
 		  return { cursor: 1 }
 		}
-		if (input.do === "ask") return { sent: [{ chat: input.in, id: 101 }] }
+		if (input.do === "ask") return { sent: [{ chat: input.in, id: 101 }], where: "Telegram" }
 		if (input.do === "send") return { sent: input.in + ":1" }
 		if (input.do === "post") return { sent: [input.answers || ""] }
 		return {}
@@ -204,7 +204,7 @@ func removeListenerOf(t *testing.T, dir, service string) {
 // listener does, and the router sends it to the question.
 func (w *world) answer(service, question string, data map[string]any) {
 	w.t.Helper()
-	data["run"] = question[strings.Index(question, "/")+1:]
+	data["run"] = question
 	w.send(w.kept(router(service)), "answer", data)
 }
 
@@ -292,10 +292,10 @@ func TestAskPersonIsAnsweredByATap(t *testing.T) {
 	if got := w.show(id).Output; got != "no" {
 		t.Fatalf("the choice was %v", got)
 	}
-	if run := w.show(question.ID); run.StartedBy == "" || !reflect.DeepEqual(run.Output, map[string]any{"choice": "no", "by": "bob"}) {
+	if run := w.show(question.ID); run.Cause.Run == "" || !reflect.DeepEqual(run.Output, map[string]any{"choice": "no", "by": "bob"}) {
 		t.Errorf("the question does not name the run that called it, or gave %v: %+v", run.Output, run)
 	}
-	w.titled(map[string][]string{"telegram-chat-ask": {"Well?"}})
+	w.titled(map[string][]string{"chat-ask": {"Well?"}})
 }
 
 // A project with a bot on every service reads: the routers are singletons
@@ -346,7 +346,7 @@ func TestProjectReads(t *testing.T) {
 	}
 	want := map[string][]string{
 		"singleton": {"/project/gromit/gitlab/gromit", "/project/gromit/jira/gromit", "/project/gromit/slack/gromit", "/project/gromit/telegram/gromit"},
-		"keyed":     {"/project/ballot", "/project/conversation", "/project/later", "/project/placed/ballot", "/project/placed/later"},
+		"keyed":     {"/project/ballot", "/project/conversation", "/project/placed/ballot"},
 	}
 	for life, locations := range want {
 		slices.Sort(lifetimes[life])
@@ -393,8 +393,8 @@ func TestInitWritesTheTree(t *testing.T) {
 	}
 	want := []string{
 		".corbieignore", ".mcp.json", "AGENTS.md", "CLAUDE.md", "ballot.yaml", "conversation.yaml",
-		"gromit/gitlab/chat/ask.yaml", "gromit/gitlab/chat/post.yaml", "gromit/gitlab/files/get.yaml", "gromit/gitlab/gromit.yaml",
-		"gromit/slack/assistant/status.yaml", "gromit/slack/chat/ask.yaml", "gromit/slack/chat/post.yaml", "gromit/slack/files/get.yaml", "gromit/slack/gromit.yaml",
+		"gromit/gitlab/chat/ask.yaml", "gromit/gitlab/chat/post.yaml", "gromit/gitlab/chat/show.yaml", "gromit/gitlab/files/get.yaml", "gromit/gitlab/gromit.yaml",
+		"gromit/slack/assistant/status.yaml", "gromit/slack/chat/ask.yaml", "gromit/slack/chat/post.yaml", "gromit/slack/chat/show.yaml", "gromit/slack/files/get.yaml", "gromit/slack/gromit.yaml",
 		"later.yaml", "people/find.yaml", "people/scopes.yaml",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -627,7 +627,7 @@ const oneMessage = `
 	  emit("message", { service: "telegram", text: "one", chat: "1", user: "1", name: "Alice", place: "dm", answers: "1:10" })
 	  return { cursor: 1 }
 	}
-	if (input.do === "ask") return { sent: [{ chat: input.in, id: 101 }] }
+	if (input.do === "ask") return { sent: [{ chat: input.in, id: 101 }], where: "Telegram" }
 	if (input.do === "post") return { sent: [input.answers || ""] }
 	return {}
 `

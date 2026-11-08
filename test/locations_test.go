@@ -104,12 +104,11 @@ func TestTapReachesOnlyAWaitingQuestion(t *testing.T) {
 	question := w.question(map[string]bool{}).ID
 	w.tap(question, "2", "yes")
 	w.until("the question answered", func() bool { return w.show(id).HasEnded() })
-	own := func(id string) string { return id[strings.Index(id, "/")+1:] }
 	write(t, dir, map[string]string{".rook/telegram/telegram.js": `
 		if (input.do === "hear") {
 		  if (input.cursor !== null) throw new Error("nothing more")
-		  emit("answer", { service: "telegram", run: "` + own(conversation) + `", user: "2", choice: "yes" })
-		  emit("answer", { service: "telegram", run: "` + own(question) + `", user: "2", choice: "no" })
+		  emit("answer", { service: "telegram", run: "` + conversation + `", user: "2", choice: "yes" })
+		  emit("answer", { service: "telegram", run: "` + question + `", user: "2", choice: "no" })
 		  return { cursor: 1 }
 		}
 		return {}

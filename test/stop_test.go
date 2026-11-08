@@ -57,7 +57,7 @@ func stopProject(t *testing.T, w *world, tg *telegram) string {
 	t.Helper()
 	_, address := standin(t, w, stopModel)
 	return chatProject(t, w, tg, map[string]string{
-		"agents/assistant.yaml":    modelAgent("assistant", address, "toolkits:\n  house: { include: toolkits/house.yaml }\n  slow: { include: toolkits/slow.yaml }\n"),
+		"agents/assistant.yaml":    modelAgent("assistant", address, houseAsk+"toolkits:\n  house: { include: toolkits/house.yaml }\n  slow: { include: toolkits/slow.yaml }\n"),
 		"toolkits/house.yaml":      houseToolkit,
 		"toolkits/house/lights.js": `return { on: ["kitchen", "hall"] }`,
 		"toolkits/slow.yaml":       slowToolkit,

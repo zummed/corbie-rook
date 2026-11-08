@@ -615,7 +615,7 @@ func TestJiraPostWritesWikiMarkup(t *testing.T) {
 }
 
 // questionIn gives the run ID a question's comment shows, once the bot has
-// written it.
+// written it and the question waits for an answer.
 func questionIn(w *world, j *jira) string {
 	w.t.Helper()
 	var id string
@@ -627,6 +627,7 @@ func questionIn(w *world, j *jira) string {
 		}
 		return id != ""
 	})
+	w.until("the question waiting", func() bool { return w.show(id).Timers == 1 })
 	return id
 }
 
@@ -689,7 +690,7 @@ func TestJiraQuestionIsAnsweredByAComment(t *testing.T) {
 	if got := j.saying(); len(got) != said {
 		t.Errorf("a choice that is none of the question's was told %q", got[said:])
 	}
-	answer("14", "acc-a", " {{Yes "+question+"}} ", "alice answered yes.")
+	answer("14", "acc-a", " {{Yes "+question+"}} ", "alice said yes.")
 	out := ended(w, approval).(map[string]any)
 	if !slices.Equal(out["approved"].([]any), []any{"restart"}) || out["note"] != "alice said yes." {
 		t.Errorf("the approval gave %v", out)
@@ -731,7 +732,7 @@ func TestJiraAnswerOnAnotherIssueDoesNotCount(t *testing.T) {
 	j.comment("11", "acc-a", "yes "+question, at.Add(2*time.Second))
 	tick(w, j.asked)
 	w.until("the question closed", func() bool { return len(j.saying()) > said })
-	if got := j.saying()[said]; got != "alice answered yes." {
+	if got := j.saying()[said]; got != "alice said yes." {
 		t.Errorf("the bot said %q", got)
 	}
 	if out := ended(w, approval).(map[string]any); !slices.Equal(out["approved"].([]any), []any{"restart"}) {
@@ -751,7 +752,7 @@ func TestJiraQuestionInAnyCaseOrByIDIsAnswered(t *testing.T) {
 			j.comment("11", "acc-a", "yes "+question, time.Now().Add(time.Second))
 			tick(w, j.asked)
 			w.until("the question closed", func() bool { return len(j.saying()) > said })
-			if got := j.saying()[said]; got != "alice answered yes." {
+			if got := j.saying()[said]; got != "alice said yes." {
 				t.Errorf("the bot said %q", got)
 			}
 			if out := ended(w, approval).(map[string]any); !slices.Equal(out["approved"].([]any), []any{"restart"}) {

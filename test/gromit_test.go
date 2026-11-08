@@ -287,7 +287,7 @@ func (g *gromit) press(question map[string]any, user, choice string) {
 }
 
 // question waits for the n-th question, from 1, gromit posted in a channel,
-// and gives it.
+// until its run, which its buttons name, waits for a press, and gives it.
 func (g *gromit) question(channel string, n int) map[string]any {
 	g.t.Helper()
 	var found map[string]any
@@ -302,6 +302,8 @@ func (g *gromit) question(channel string, n int) map[string]any {
 		}
 		return found != nil
 	})
+	run := strings.TrimSuffix(value(g.t, found, "yes"), " yes")
+	g.until("the question waiting", func() bool { return g.show(run).Timers == 1 })
 	return found
 }
 
@@ -419,7 +421,7 @@ func TestGromitOneQuestionRunByRun(t *testing.T) {
 	}
 
 	// The runs, from the question back to the router, and the restart's.
-	asks := stubs(t, g.world, "slack-chat-ask")
+	asks := stubs(t, g.world, "chat-ask")
 	if len(asks) != 1 {
 		t.Fatalf("%d questions", len(asks))
 	}
@@ -427,11 +429,11 @@ func TestGromitOneQuestionRunByRun(t *testing.T) {
 	for id := asks[0].ID; id != ""; {
 		run := g.show(id)
 		chain = append(chain, run.Machine)
-		if id = run.StartedBy; id == "" {
+		if id = run.Cause.Run; id == "" {
 			id = run.Parent
 		}
 	}
-	if want := []string{"slack-chat-ask", "place", "approval", "support", "turn", "conversation", "gromit"}; !slices.Equal(chain, want) {
+	if want := []string{"chat-ask", "place", "approval", "support", "turn", "conversation", "gromit"}; !slices.Equal(chain, want) {
 		t.Errorf("from the question back, the runs are %v", chain)
 	}
 	if got := g.show(asks[0].ID).Output; fmt.Sprint(got) != "map[by:Bo choice:yes]" {
@@ -439,7 +441,7 @@ func TestGromitOneQuestionRunByRun(t *testing.T) {
 	}
 	agent := stubs(t, g.world, "support")[0]
 	restarts := g.at("infra/vms/restart.yaml")
-	if len(restarts) != 1 || restarts[0].StartedBy != agent.ID || restarts[0].Status != "done" {
+	if len(restarts) != 1 || restarts[0].Cause.Run != agent.ID || restarts[0].Status != "done" {
 		t.Errorf("the restart's runs are %+v", restarts)
 	}
 	conversations := keyed(g.world, "conversation.yaml")
@@ -505,7 +507,7 @@ func TestGromitOwnRequestIsNotApprovedByTheAsker(t *testing.T) {
 	}
 	g.press(question, "UED", "yes")
 	g.replied("CSUP", "10.0", "Restarted orders-1.")
-	if got := fmt.Sprint(g.show(stubs(t, g.world, "slack-chat-ask")[0].ID).Output); got != "map[by:Ed choice:yes]" {
+	if got := fmt.Sprint(g.show(stubs(t, g.world, "chat-ask")[0].ID).Output); got != "map[by:Ed choice:yes]" {
 		t.Errorf("the question gave %s", got)
 	}
 }
@@ -715,7 +717,7 @@ func TestGromitDeploys(t *testing.T) {
 		return len(runs) == 1 && runs[0].Status == "done"
 	})
 	quiet()
-	if n := len(stubs(t, g.world, "slack-chat-ask")); n != 1 || len(g.postsIn("CDEP", "21.0")) != 0 {
+	if n := len(stubs(t, g.world, "chat-ask")); n != 1 || len(g.postsIn("CDEP", "21.0")) != 0 {
 		t.Errorf("deploy x asked %d questions, or posted %v", n-1, g.postsIn("CDEP", "21.0"))
 	}
 	if g.calls("Ana", "deploy") != nil {
@@ -826,7 +828,7 @@ toolkits:
 	})
 	g.say("UCY", "CSUP", "10.0", "", "<@UBOT> orders-2 is stuck, can you restart it?")
 	question := g.question("CINF", 1)
-	asks := stubs(t, g.world, "slack-chat-ask")
+	asks := stubs(t, g.world, "chat-ask")
 	cy := g.calls("Cy", "orders-2 is stuck")
 	got := results(cy[2])
 	for i, name := range []string{"SLACK_TOKEN", "HYPERVISOR_KEY"} {
@@ -849,7 +851,7 @@ toolkits:
 			listener = run.ID
 		}
 	}
-	impostor := g.start("agents/impostor.yaml", map[string]any{"listener": listener, "question": asks[0].ID[strings.Index(asks[0].ID, "/")+1:]})
+	impostor := g.start("agents/impostor.yaml", map[string]any{"listener": listener, "question": asks[0].ID})
 	g.until("the impostor done", func() bool { return g.show(impostor).Status == "done" })
 	got = undelivered(g.world, impostor)
 	if len(got) != 2 {

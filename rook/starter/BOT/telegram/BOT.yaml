@@ -20,4 +20,4 @@ states:
       stop:
         send: { to: { at: conversation, key: "${'telegram:' + event.data.chat + ':' + event.data.user + ':assistant'}" }, event: stop, data: "${event.data}" }
       answer:
-        send: { to: { at: BOT/telegram/chat/ask, run: "${run.id.slice(0, run.id.indexOf('/') + 1) + event.data.run}" }, event: answer, data: "${event.data}" }
+        send: { to: { at: BOT/telegram/chat/ask, run: "${event.data.run}" }, event: answer, data: "${event.data}" }

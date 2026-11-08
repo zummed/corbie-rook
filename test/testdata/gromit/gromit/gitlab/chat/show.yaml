@@ -1,0 +1,3 @@
+# The GitLab part of Rook's question, which only the question calls.
+include: .rook/gitlab/chat/show.yaml
+receive: [gromit/gitlab/chat/ask]

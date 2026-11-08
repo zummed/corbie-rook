@@ -837,7 +837,7 @@ func TestGitLabQuestionIsAnsweredByAComment(t *testing.T) {
 	}
 	said := gl.said()
 	if len(said) != 4 || said[1] != "Al, you asked for this, so someone else must answer it." || said[2] != "Stranger, only someone with the scope infra:approve can answer this." ||
-		!strings.HasPrefix(said[3], "Bo answered yes.\n\n<!-- rook answered ") {
+		!strings.HasPrefix(said[3], "Bo said yes.\n\n<!-- rook answered ") {
 		t.Fatalf("the bot said %q", said)
 	}
 	answers := listened(w, "answer")
@@ -944,7 +944,7 @@ func TestGitLabQuestionNobodyAnswersIsNo(t *testing.T) {
 	gitlabProject(t, w, gl, "", nil)
 	id := w.start("gromit/gitlab/chat/ask.yaml", map[string]any{"in": "group/project#7", "text": "Restart web?", "choices": []string{"yes", "no"},
 		"approvers": "infra:approve", "within": "1h"})
-	w.until("the question", func() bool { return len(gl.said()) >= 1 })
+	w.until("the question", func() bool { return len(gl.said()) >= 1 && w.show(id).Timers == 1 })
 	w.set(w.now().Add(61 * time.Minute))
 	run, err := w.Wait(context.Background(), id, interval)
 	if err != nil {

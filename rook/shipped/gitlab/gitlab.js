@@ -1,7 +1,7 @@
 // GitLab's script. Each machine runs it with its own input.do:
 //
 //   hear              listen.yaml
-//   ask, tell, close  chat/ask.yaml: the question, a comment on an answer that does not count, the closing comment
+//   ask, tell, close  chat/show.yaml: the question, a comment on an answer that does not count, the closing comment
 //   note              issues/notes/create.yaml
 //   notes             issues/notes/list.yaml
 //   issue             issues/read.yaml
@@ -70,7 +70,7 @@ if (input.do === "ask") {
   const line = "<!-- rook question " + input.question + " " + choices.map(encodeURIComponent).join(" ") + " -->"
   const body = unmarked(input.text) + "\n\nAnswer with a comment that says " + choices.map((c) => "`" + c + "`").join(" or ") + ".\n\n" + line
   call("POST", issuePath(project, iid) + "/notes", { json: { body: body } })
-  return { sent: { in: input.in, question: input.question } }
+  return { sent: { in: input.in, question: input.question }, where: "GitLab" }
 }
 
 if (input.do === "tell") {
@@ -85,7 +85,7 @@ if (input.do === "tell") {
 if (input.do === "close") {
   // A comment on the question's issue that closes the question.
   const { project, iid } = chatOf(input.sent.in)
-  const body = unmarked(input.text) + "\n\n<!-- rook answered " + input.sent.question + " -->"
+  const body = unmarked(input.said) + "\n\n<!-- rook answered " + input.sent.question + " -->"
   call("POST", issuePath(project, iid) + "/notes", { json: { body: body } })
   return {}
 }

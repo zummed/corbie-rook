@@ -154,7 +154,7 @@ func TestToolkitIsNotOfferedWithoutItsScope(t *testing.T) {
 	write(t, dir, map[string]string{"people/scopes.yaml": "bob@example.com: { name: bob, scopes: [house] }\n"})
 	w.sync(dir)
 	w.until("bob answered", func() bool { return sayings(t, w)["I could not"] != nil })
-	for _, m := range []string{"approval", "telegram-chat-ask"} {
+	for _, m := range []string{"approval", "chat-ask"} {
 		if runs := stubs(t, w, m); len(runs) != 0 {
 			t.Errorf("%s ran for bob: %v", m, runs)
 		}
@@ -203,7 +203,7 @@ func TestToolkitNotGivenCannotBeUsed(t *testing.T) {
 	})
 	w.sync(dir)
 	w.until("the answer", func() bool { return sayings(t, w)["finished"] != nil })
-	for _, m := range []string{"approval", "telegram-chat-ask"} {
+	for _, m := range []string{"approval", "chat-ask"} {
 		if runs := stubs(t, w, m); len(runs) != 0 {
 			t.Errorf("%s ran: %v", m, runs)
 		}
@@ -379,7 +379,7 @@ func TestForgedSendsFromAnotherTreeAreRefused(t *testing.T) {
 	if n := len(w.at(bot + "/telegram/chat/ask.yaml")); n == 0 {
 		t.Fatal("no question")
 	}
-	for _, in := range inputs(t, w, "telegram-chat-ask") {
+	for _, in := range inputs(t, w, "chat-ask") {
 		if in["text"] == "Your password?" {
 			t.Errorf("another tree asked alice a question")
 		}
@@ -657,7 +657,7 @@ func TestARouterTakesNoSendFromALocation(t *testing.T) {
 	w.sync(dir)
 	asker := w.start("agents/asker.yaml", nil)
 	question := w.question(map[string]bool{})
-	forger := w.start("agents/forger.yaml", map[string]any{"question": question.ID[strings.Index(question.ID, "/")+1:]})
+	forger := w.start("agents/forger.yaml", map[string]any{"question": question.ID})
 	w.until("the forger done", func() bool { return w.show(forger).Status == "done" })
 	got := undelivered(w, forger)
 	if len(got) != 2 {
@@ -712,7 +712,7 @@ func TestAListenerTakesNoSendFromALocation(t *testing.T) {
 	})
 	asker := w.start("agents/asker.yaml", nil)
 	question := w.question(map[string]bool{})
-	forger := w.start("agents/forger.yaml", map[string]any{"listener": listener, "question": question.ID[strings.Index(question.ID, "/")+1:]})
+	forger := w.start("agents/forger.yaml", map[string]any{"listener": listener, "question": question.ID})
 	w.until("the forger done", func() bool { return w.show(forger).Status == "done" })
 	got := undelivered(w, forger)
 	if len(got) != 2 {

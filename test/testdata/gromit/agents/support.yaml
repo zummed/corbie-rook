@@ -1,5 +1,8 @@
 # The agent the conversation calls for each turn. It offers orders to a person
 # whose scopes hold orders:read, and infra to one whose scopes hold infra:read.
+# A held call of orders waits for a yes in #orders-team from someone with
+# orders:approve who did not ask, for a day; one of infra in #infra from
+# someone with infra:approve, for an hour. No press in time is no.
 agent: support
 description: Answers questions in #support, in direct messages and on orders issues.
 include: .rook/agent.yaml
@@ -7,6 +10,14 @@ model: { name: claude-sonnet-5-5, service: anthropic, secret: ANTHROPIC_KEY }
 system:
   - { include: ./support.md }
   - ${input.format}
+ask:
+  machine: .rook/approval.yaml
+  input:
+    asker: "${input.asker.email}"
+    request: "${input.messages.map((m) => (m.later != null ? '(a reminder the bot set) ' : '') + m.text).join('\\n')}"
+    by:
+      orders: { ask: [{ at: gromit/slack/chat/ask, in: "#orders-team" }], approvers: "orders:approve", within: 1d }
+      infra: { ask: [{ at: gromit/slack/chat/ask, in: "#infra" }], approvers: "infra:approve", within: 1h }
 toolkits:
   orders: { include: toolkits/orders.yaml, when: "${input.asker.scopes.includes('orders:read')}" }
   infra: { include: toolkits/infra.yaml, when: "${input.asker.scopes.includes('infra:read')}" }

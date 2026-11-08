@@ -12,6 +12,7 @@ import (
 	"maps"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
@@ -774,14 +775,11 @@ func TestSlackLongAnswerIsNotSaidTwice(t *testing.T) {
 	}
 }
 
-// slackMessages is a toolkit whose one tool posts on Slack, and waits for a
-// yes in #approvals from someone who holds messages:approve.
+// slackMessages is a toolkit whose one tool posts on Slack, and waits for the
+// agent's ask.
 const slackMessages = `
 	description: Messages to people on Slack.
 	instructions: Write to a person only when the asker asks you to.
-	ask:
-	  machine: .rook/approval.yaml
-	  input: { ask: [{ at: gromit/slack/chat/ask, in: "#approvals" }], approvers: messages:approve, asker: "${input.asker.email}" }
 	tools:
 	  tell: { call: gromit/slack/chat/post, approve: true }
 `
@@ -795,7 +793,16 @@ func TestSlackApprovalByButtonCanBeFollowed(t *testing.T) {
 	s := newSlack(t)
 	w := newWorld(t)
 	dir, model := slackAgentProject(t, w, s)
-	write(t, dir, map[string]string{"toolkits/messages.yaml": slackMessages})
+	// The agent's ask asks for a yes in #approvals from someone who holds
+	// messages:approve.
+	agent, err := os.ReadFile(filepath.Join(dir, "agents/assistant.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	write(t, dir, map[string]string{
+		"toolkits/messages.yaml": slackMessages,
+		"agents/assistant.yaml":  strings.Replace(string(agent), `ask: [{ at: gromit/telegram/chat/ask, in: "1" }]`, `ask: [{ at: gromit/slack/chat/ask, in: "#approvals" }]`, 1),
+	})
 	replies := []llmstandin.Reply{
 		{Calls: []llmstandin.ToolCall{{ID: "c1", Name: "open", Args: `{"toolkit": "messages"}`}}},
 		{Calls: []llmstandin.ToolCall{{ID: "c2", Name: "tell", Args: `{"in": "U2", "text": "hello bob"}`}}},
@@ -875,7 +882,7 @@ func TestSlackApprovalByButtonCanBeFollowed(t *testing.T) {
 	}
 	place := places[0].ID
 	asked := sent(place, instance.AskCall, location(bot+"/slack/chat/ask"))
-	if len(asked) != 1 || w.show(asked[0].Run).StartedBy != place {
+	if len(asked) != 1 || w.show(asked[0].Run).Cause.Run != place {
 		t.Fatalf("the approval's record names the questions %+v", asked)
 	}
 	pressed := false
@@ -940,14 +947,10 @@ func TestEveryServiceAtOnce(t *testing.T) {
 	}
 }
 
-// slackApprovedToolkit is a toolkit whose tell posts on Slack, held for a yes
-// on Slack, in alice's direct message, from someone who holds
-// messages:approve.
+// slackApprovedToolkit is a toolkit whose tell posts on Slack, held for the
+// agent's ask.
 const slackApprovedToolkit = `
 	description: Messages to people on Slack.
-	ask:
-	  machine: .rook/approval.yaml
-	  input: { ask: [{ at: gromit/slack/chat/ask, in: U1 }], approvers: "messages:approve", request: "${input.messages.map((m) => m.text).join('\\n')}" }
 	tools:
 	  tell:
 	    description: Write a text to a person on Slack, by their member ID.
@@ -977,7 +980,9 @@ func TestGitLabRequestApprovedOnSlack(t *testing.T) {
 		return llmstandin.Reply{Text: "told"}
 	})
 	write(t, dir, map[string]string{
-		"agents/assistant.yaml": modelAgent("assistant", url, "toolkits:\n  slack: { include: toolkits/slack.yaml }\n"),
+		// The agent's ask is a yes on Slack, in alice's direct message, from
+		// someone who holds messages:approve.
+		"agents/assistant.yaml": modelAgent("assistant", url, "ask:\n  machine: .rook/approval.yaml\n  input: { ask: [{ at: gromit/slack/chat/ask, in: U1 }], approvers: \"messages:approve\", request: \"${input.messages.map((m) => m.text).join('\\\\n')}\" }\ntoolkits:\n  slack: { include: toolkits/slack.yaml }\n"),
 		"toolkits/slack.yaml":   slackApprovedToolkit,
 	})
 	w.sync(dir)

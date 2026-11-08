@@ -1,0 +1,3 @@
+# The Telegram part of Rook's question, which only the question calls.
+include: .rook/telegram/chat/show.yaml
+receive: [BOT/telegram/chat/ask]

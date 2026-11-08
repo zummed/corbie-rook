@@ -60,14 +60,14 @@ func traceHelper(address, system string) map[string]string {
 			include: .rook/agent.yaml
 			model: { name: test-model, service: anthropic, address: "` + address + `", secret: TEST_KEY }
 			system: ` + system + `
+			ask:
+			  machine: .rook/approval.yaml
+			  input: { ask: [{ at: gromit/telegram/chat/ask, in: "1" }], approvers: "messages:approve" }
 			toolkits:
 			  messages: { include: toolkits/messages.yaml }
 		`,
 		"toolkits/messages.yaml": `
 			description: Messages to the people this bot knows, and the time.
-			ask:
-			  machine: .rook/approval.yaml
-			  input: { ask: [{ at: gromit/telegram/chat/ask, in: "1" }], approvers: "messages:approve" }
 			tools:
 			  clock:
 			    description: Give the time in a zone.
@@ -202,7 +202,7 @@ func TestTraceMessageToToolsAndApproval(t *testing.T) {
 	router := w.kept(router("telegram"))
 	// 1. router -> conversation
 	conversation := lastOf(t, "conversation", w.sentFrom(router, instance.AskEvent, location("conversation")))
-	if run := w.show(conversation); run.StartedBy != router || run.Key != "telegram:1:1:assistant" || run.Title != "telegram dm: tell bob the build is green" {
+	if run := w.show(conversation); run.Cause.Run != router || run.Key != "telegram:1:1:assistant" || run.Title != "telegram dm: tell bob the build is green" {
 		t.Errorf("the conversation is %+v", run)
 	}
 	// 2. conversation -> its turn, and the turn -> the agent, by its call
@@ -213,7 +213,7 @@ func TestTraceMessageToToolsAndApproval(t *testing.T) {
 		}
 	}
 	agent := lastOf(t, "agent", w.sentFrom(turn, instance.AskCall, location("agents/assistant")))
-	if run := w.show(agent); run.StartedBy != turn || run.Location != location("agents/assistant") || run.Title != "alice: tell bob the build is green" {
+	if run := w.show(agent); run.Cause.Run != turn || run.Location != location("agents/assistant") || run.Title != "alice: tell bob the build is green" {
 		t.Errorf("the agent is %+v", run)
 	}
 	// 3. agent -> each tool: its name and input as asked, and its result
@@ -267,7 +267,7 @@ func TestTraceMessageToToolsAndApproval(t *testing.T) {
 		place = a.Child
 	}
 	asked := lastOf(t, "question", w.sentFrom(place, instance.AskCall, location(bot+"/telegram/chat/ask")))
-	if asked != question.ID || w.show(asked).StartedBy != place || w.show(place).Parent != approval {
+	if asked != question.ID || w.show(asked).Cause.Run != place || w.show(place).Parent != approval {
 		t.Errorf("the approval's place called %s, and the question is %s", asked, question.ID)
 	}
 	var answer any
@@ -391,10 +391,10 @@ func TestNoModelFlowAgentIsFollowed(t *testing.T) {
 	if len(desk) != 1 {
 		t.Fatalf("the desk ran %d times", len(desk))
 	}
-	if asked := lastOf(t, "question", w.sentFrom(desk[0].ID, instance.AskCall, location(bot+"/telegram/chat/ask"))); asked != question.ID || w.show(asked).StartedBy != desk[0].ID {
+	if asked := lastOf(t, "question", w.sentFrom(desk[0].ID, instance.AskCall, location(bot+"/telegram/chat/ask"))); asked != question.ID || w.show(asked).Cause.Run != desk[0].ID {
 		t.Errorf("the desk called %s, the question is %s", asked, question.ID)
 	}
-	if w.show(w.show(desk[0].ID).StartedBy).Machine != "turn" {
+	if w.show(w.show(desk[0].ID).Cause.Run).Machine != "turn" {
 		t.Errorf("the desk was not started by a conversation's turn")
 	}
 }
@@ -601,13 +601,13 @@ func TestTrailWalksBackwardsFromTheQuestion(t *testing.T) {
 	for id := question.ID; id != ""; {
 		run := w.show(id)
 		chain = append(chain, run.Machine)
-		next := run.StartedBy
+		next := run.Cause.Run
 		if next == "" {
 			next = run.Parent
 		}
 		id = next
 	}
-	want := []string{"telegram-chat-ask", "place", "approval", "assistant", "turn", "conversation", "gromit"}
+	want := []string{"chat-ask", "place", "approval", "assistant", "turn", "conversation", "gromit"}
 	if !slices.Equal(chain, want) {
 		t.Errorf("walking back from the question gives %v", chain)
 	}

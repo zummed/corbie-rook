@@ -1,5 +1,5 @@
 // Telegram's script: input.do is hear, for listen.yaml, post, for
-// chat/post.yaml, ask, tell and close, for chat/ask.yaml, status, for
+// chat/post.yaml, ask, tell and close, for chat/show.yaml, status, for
 // chat/status.yaml, get, for files/get.yaml, or send, for files/send.yaml. It
 // speaks Telegram's Bot API with the token of the secret input.token names,
 // which it holds only as a handle.
@@ -118,7 +118,7 @@ if (input.do === "hear") {
       // logged, answered here with nothing, and starts nothing. Telegram
       // refuses an answer to an old tap, and a refusal must not stop the
       // cursor passing this update.
-      if (at > 0 && /^\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{10}$/.test(question)) {
+      if (at > 0 && /^[\w.-]+\/\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{10}$/.test(question)) {
         emit("answer", { service: "telegram", run: question, user: String(q.from.id), name: named(q.from), choice: choice, tap: q.id })
         return null
       }
@@ -242,11 +242,15 @@ function fit(text) {
 }
 
 if (input.do === "ask") {
-  // A question with a button for each choice. A button holds the question
-  // and the choice, which a tap names; Telegram takes at most 64 bytes.
+  // A question with a button for each choice. A button holds the question's
+  // run ID and the choice, which a tap names; Telegram takes at most 64 bytes.
   const buttons = input.choices.map((c) => ({ text: c[0].toUpperCase() + c.slice(1), callback_data: input.question + " " + c }))
+  for (const b of buttons) {
+    const size = encodeURIComponent(b.callback_data).replace(/%[0-9A-F]{2}/g, "x").length
+    if (size > 64) throw new Error("Telegram takes at most 64 bytes in a button, and the run's ID with the choice " + b.text + " is " + size)
+  }
   const m = call("sendMessage", { chat_id: input.in, text: fit(input.text), reply_markup: { inline_keyboard: [buttons] } })
-  return { sent: [{ chat: input.in, id: m.message_id }] }
+  return { sent: [{ chat: input.in, id: m.message_id }], where: "Telegram" }
 }
 
 if (input.do === "tell") {
@@ -268,10 +272,10 @@ if (input.do === "tell") {
 }
 
 if (input.do === "close") {
-  // Each message a question posted shows input.text, with no buttons. The tap
-  // that counted, input.answer.tap, is answered with nothing; Telegram
-  // refuses an old tap, which is logged.
-  for (const m of input.sent) call("editMessageText", { chat_id: m.chat, message_id: m.id, text: fit(input.text) })
+  // Each message a question posted shows its text, input.text, and then
+  // input.said, with no buttons. The tap that counted, input.answer.tap, is
+  // answered with nothing; Telegram refuses an old tap, which is logged.
+  for (const m of input.sent) call("editMessageText", { chat_id: m.chat, message_id: m.id, text: fit(input.text + "\n\n" + input.said) })
   if (input.answer && input.answer.tap) {
     try {
       call("answerCallbackQuery", { callback_query_id: input.answer.tap })

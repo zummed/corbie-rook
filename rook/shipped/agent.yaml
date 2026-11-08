@@ -56,7 +56,7 @@ tools:
     when: "${!!input.back}"
     job:
       send:
-        to: { at: later, key: "${run.id.slice(run.id.indexOf('/') + 1) + ':' + Array.from(String(args.minutes) + ':' + args.note).reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 0)}" }
+        to: { at: later }
         event: wait
         data:
           minutes: "${args.minutes}"

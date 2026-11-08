@@ -1535,9 +1535,9 @@ func TestSlackQuestionIsAnsweredByAPress(t *testing.T) {
 	if post["channel"] != "D9" {
 		t.Fatalf("the question went to %v", post)
 	}
-	// A button names the question's run by its ID without its client's name.
+	// A button names the question's run by its ID.
 	question := w.at(bot + "/slack/chat/ask.yaml")[0].ID
-	value := question[strings.Index(question, "/")+1:] + " no"
+	value := question + " no"
 	blocks, _ := json.Marshal(post["blocks"])
 	if !strings.Contains(string(blocks), `"value":"`+value+`"`) {
 		t.Fatalf("the buttons are %s", blocks)

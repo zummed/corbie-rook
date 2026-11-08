@@ -1,7 +1,7 @@
-# Rook's approval, which a toolkit or a machine names as its ask. It asks the
-# question in every place of `ask` at once, each a bot's placed chat/ask, with
-# yes and no, naming the machine that asks, each held job, who asked and what
-# was asked. Corbie gives it `asking` and `jobs`; the ask's input gives the rest:
+# Rook's approval, which a machine names as its ask. It asks the question in
+# every place of `ask` at once, each a bot's placed chat/ask, with yes and no,
+# naming the machine that asks, each held job, who asked and what was asked.
+# Corbie gives it `asking` and `jobs`; the ask's input gives the rest:
 #
 #   ask        the places, each { at, in }: the question's location, such as
 #              gromit/slack/chat/ask, and where it is posted there: a channel,
@@ -10,28 +10,32 @@
 #   within     how long it waits, by default 7d; no press in time is no
 #   asker      the email of the person who asked, shown, and whose own press is refused
 #   request    what was asked, shown quoted
+#   by         by a tool's or a toolkit's name, the ask, approvers or within
+#              of its held calls, in place of the approval's own
 #
-# Each question is given the ballot { at: ballot, key: <this run's ID> }, so
-# the first answer that counts closes the others. That answer is the
-# approval's; with none, the answer is no. A place whose question fails
-# leaves the others asking.
+# The held calls of one tool or toolkit of `by` are asked about together, apart
+# from the rest. Each question about them is given the ballot
+# { at: ballot, key: <this run's ID>/<n> }, so the first answer that counts
+# closes the others. That answer is the approval's for those calls; with none,
+# the answer is no. A place whose question fails leaves the others asking.
 flow: approval
 description: Asks people in one or more places whether held jobs may run, and gives the jobs approved.
 title: "Approve ${(Array.isArray(input.jobs) ? input.jobs : []).map((j) => j.name).join(', ')}"
 input:
   asking: any
   jobs: any
-  ask: list
-  approvers: string
+  ask: "list?"
+  approvers: "string?"
   within: "string?"
   asker: "string?"
   request: "string?"
+  by: "map?"
 allow: [send:ballot]
 stages:
   brief:
-    job: { script: ./approval.js, input: { jobs: "${input.jobs}", asker: "${input.asker || ''}", request: "${input.request}" } }
+    job: { script: ./approval.js, input: { jobs: "${input.jobs}", asker: "${input.asker || ''}", request: "${input.request}", ask: "${input.ask}", approvers: "${input.approvers}", within: "${input.within}", by: "${input.by}", ballot: "${run.id}" } }
   question:
-    each: "${input.ask}"
+    each: "${stages.brief.output.places}"
     job:
       machine:
         flow: place
@@ -44,21 +48,24 @@ stages:
         at: "${item.at}"
         question:
           in: "${item.in}"
-          text: "${(input.asking || {}).machine || 'A machine'} wants to run ${stages.brief.output.names.join(', ')}.\n${stages.brief.output.context}"
+          text: "${(input.asking || {}).machine || 'A machine'} wants to run ${stages.brief.output.groups[item.group].names.join(', ')}.\n${stages.brief.output.groups[item.group].context}"
           choices: ["yes", "no"]
-          approvers: "${input.approvers}"
+          approvers: "${stages.brief.output.groups[item.group].approvers}"
           asker: "${input.asker || ''}"
-          within: "${input.within || '7d'}"
-          ballot: { at: ballot, key: "${run.id}" }
-  # Ends the ballot once every question has ended.
+          within: "${stages.brief.output.groups[item.group].within}"
+          ballot: { at: ballot, key: "${stages.brief.output.groups[item.group].ballot}" }
+  # Ends each ballot once every question has ended.
   over:
     follows: [question]
-    job: { send: { to: { at: ballot, key: "${run.id}" }, event: over } }
+    each: "${stages.brief.output.groups}"
+    job: { send: { to: { at: ballot, key: "${item.ballot}" }, event: over } }
+# Each group's answer is the first that counts in any of its places.
 output: >-
-  ${((answer, places) => ({
-      approved: answer && answer.choice === 'yes' ? stages.brief.output.names : [],
+  ${((answers) => ({ approved: answers.flatMap((a) => a.approved), note: answers.map((a) => a.note).join(' ') }))(
+    stages.brief.output.groups.map((g, n) => ((places) => ((answer) => ({
+      approved: answer && answer.choice === 'yes' ? g.names : [],
       note: answer ? answer.by + ' said ' + answer.choice + '.'
         : places.every((p) => p.error) ? 'The question could not be asked: ' + places.map((p) => p.error).join('; ')
         : 'No one answered in time, so the answer is no.' }))(
-    stages.question.output.map((p) => p.output).find((o) => o && o.by && !o.elsewhere),
-    stages.question.output)}
+      places.map((p) => p.output).find((o) => o && o.by && !o.elsewhere)))(
+      stages.question.output.filter((p, i) => stages.brief.output.places[i].group === n))))}

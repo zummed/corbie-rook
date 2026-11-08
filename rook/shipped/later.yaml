@@ -12,12 +12,9 @@
 #             message the reminder was set in
 #
 # A conversation that ended in the meantime starts again with the reminder,
-# and no earlier turns. At most 20 reminders wait at once in a project, and a
-# stop does not cancel one.
+# and no earlier turns. A stop does not cancel a reminder.
 statechart: later
 description: Brings a conversation back after a wait, with a note of what to do then.
-lifetime: keyed
-limits: { runs: 20 }
 receive: [agents/*]
 allow: ["send:${input.back.at}"]
 title: "${'In ' + input.minutes + ' minutes: ' + input.note}"

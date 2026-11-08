@@ -1,5 +1,6 @@
 # The agent for the person who runs this directory. It is offered the toolkit
-# messages when the asker holds the scope messages.
+# messages when the asker holds the scope messages. A held call waits for a yes
+# from someone who holds messages:approve and did not ask for it.
 agent: helper
 description: Helps the person who runs this computer.
 include: .rook/agent.yaml
@@ -13,5 +14,12 @@ system: |
   before it runs.
 
   ${input.format}
+ask:
+  machine: .rook/approval.yaml
+  input:
+    ask: [{ at: gromit/telegram/chat/ask, in: "1" }]
+    approvers: messages:approve
+    asker: "${input.asker.email}"
+    request: "${input.messages.map((m) => (m.later != null ? '(a reminder the bot set) ' : '') + m.text).join('\\n')}"
 toolkits:
   messages: { include: toolkits/messages.yaml, when: "${input.asker.scopes.includes('messages')}" }

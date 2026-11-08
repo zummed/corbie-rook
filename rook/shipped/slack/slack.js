@@ -2,9 +2,9 @@
 //
 //   hear      listen.yaml
 //   post, cut chat/post.yaml
-//   ask       chat/ask.yaml, which posts the question
-//   tell      chat/ask.yaml, which tells one person why their press does not count
-//   close     chat/ask.yaml, which shows the answer in place of the question
+//   ask       chat/show.yaml, which posts the question
+//   tell      chat/show.yaml, which tells one person why their press does not count
+//   close     chat/show.yaml, which shows the answer in place of the question
 //   status    assistant/status.yaml
 //   download  files/get.yaml
 //   upload    files/upload.yaml
@@ -17,9 +17,8 @@
 const api = "https://slack.com/api"
 const listenFor = 4 * 60 * 1000
 const longest = 12000
-// question is the form of a question's run ID without its client's name, which
-// a button holds.
-const question = /^\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{10}$/
+// question is the form of a question's run ID, which a button holds.
+const question = /^[\w.-]+\/\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{10}$/
 // A message's history holds at most 20 entries and 8000 characters.
 const mostLines = 20
 const mostChars = 8000
@@ -329,7 +328,7 @@ if (input.do === "ask") {
   const blocks = [{ type: "section", text: { type: "mrkdwn", text: input.text } }, { type: "actions", elements: buttons }]
   const where = place(input.in)
   const posted = call("chat.postMessage", Object.assign({ channel: where.channel, text: input.text, blocks: blocks }, where.thread ? { thread_ts: where.thread } : {}))
-  return { sent: [Object.assign({ channel: where.channel, ts: posted.ts }, where.thread ? { thread: where.thread } : {})] }
+  return { sent: [Object.assign({ channel: where.channel, ts: posted.ts }, where.thread ? { thread: where.thread } : {})], where: "Slack" }
 }
 
 if (input.do === "tell") {
@@ -340,9 +339,10 @@ if (input.do === "tell") {
 }
 
 if (input.do === "close") {
-  // Each message a question posted shows input.text in place of the question,
-  // with no buttons.
-  for (const m of input.sent) call("chat.update", { channel: m.channel, ts: m.ts, text: input.text, blocks: [] })
+  // Each message a question posted shows its text, input.text, and then
+  // input.said, with no buttons.
+  const text = input.text + "\n\n" + input.said
+  for (const m of input.sent) call("chat.update", { channel: m.channel, ts: m.ts, text: text, blocks: [] })
   return {}
 }
 

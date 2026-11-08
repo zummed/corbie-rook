@@ -1,0 +1,16 @@
+# Telegram's part of Rook's question, which only the question calls. ask
+# posts `text` in the chat `in` with a button for each of `choices`; tell
+# shows a presser `text` in an alert over the chat or, once Telegram no longer
+# takes one, in their own chat with the bot; close shows the question's `text`
+# and `said` in place of the buttons.
+flow: telegram-chat-show
+description: Posts a question on Telegram with a button for each choice, tells a presser why a press does not count, and closes the question.
+input: { do: string, in: "string?", text: "string?", choices: "list?", question: "string?", sent: "any?", answer: "map?", by: "string?", said: "string?" }
+stages:
+  show:
+    job:
+      script: .rook/telegram/telegram.js
+      input: "${Object.assign({ token: 'TELEGRAM_TOKEN' }, input)}"
+      allow: [net:api.telegram.org, "secret:TELEGRAM_TOKEN@net:api.telegram.org"]
+      restart: { limit: 2 }
+output: ${stages.show.output}
