@@ -2,7 +2,7 @@
 # answer only from the router at `router`, which sends it each press of its
 # buttons. An agent's approval calls it from agents/, and the approval of
 # deploys from deploys. It takes close from the ballot, and calls the lookup
-# at `lookup` for who answered.
+# at `lookup` for who answered, and its service's part at `show`.
 include: .rook/chat/ask.yaml
 receive: [gromit/slack/gromit, agents/*, ballot, deploys]
 input:
