@@ -1,4 +1,5 @@
-// Who is asked about the jobs an approval holds, and what they are shown.
+// The approval's script. Its do: is brief, for who is asked about the jobs an
+// approval holds and what they are shown, or answer, for the approval's answer.
 //
 // The jobs go in groups: a job whose tool or, failing that, toolkit names an
 // entry of `by` goes with that entry's group, and every other job with the
@@ -46,6 +47,20 @@ const context = (jobs) => {
   if (input.request) request.push(quoted(input.request))
   if (request.length) blocks.push(request.join("\n"))
   return blocks.join("\n\n")
+}
+
+// answer gives each group the first answer that counts in any of its places,
+// given the groups and the question stage's output, an item for each place.
+// A yes approves the group's jobs; with no answer, the answer is no.
+if (input.do === "answer") {
+  const answers = input.groups.map((g, n) => {
+    const places = input.asked.filter((p) => p.item.group === n)
+    const answer = places.map((p) => p.output).find((o) => o && o.by && !o.elsewhere)
+    if (answer) return { approved: answer.choice === "yes" ? g.names : [], note: answer.by + " said " + answer.choice + "." }
+    if (places.every((p) => p.error)) return { approved: [], note: "The question could not be asked: " + places.map((p) => p.error).join("; ") }
+    return { approved: [], note: "No one answered in time, so the answer is no." }
+  })
+  return { approved: answers.flatMap((a) => a.approved), note: answers.map((a) => a.note).join(" ") }
 }
 
 const by = input.by || {}

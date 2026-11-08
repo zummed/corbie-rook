@@ -224,7 +224,7 @@ Common changes
         machine: .rook/approval.yaml
         input:
           ask: [{ at: gromit/slack/chat/ask, in: "#orders-team" }]
-          approvers: orders:approve
+          approvers: "orders:approve"
           asker: "${input.asker.email}"
           by:
             infra: { ask: [{ at: gromit/slack/chat/ask, in: "#infra" }], approvers: "infra:approve", within: 1h }

@@ -11,7 +11,8 @@
 #   asker      the email of the person who asked, shown, and whose own press is refused
 #   request    what was asked, shown quoted
 #   by         by a tool's or a toolkit's name, the ask, approvers or within
-#              of its held calls, in place of the approval's own
+#              of its held calls, in place of the approval's own; tools of
+#              one name in two toolkits share an entry
 #
 # The held calls of one tool or toolkit of `by` are asked about together, apart
 # from the rest. Each question about them is given the ballot
@@ -33,7 +34,7 @@ input:
 allow: [send:ballot]
 stages:
   brief:
-    job: { script: ./approval.js, input: { jobs: "${input.jobs}", asker: "${input.asker || ''}", request: "${input.request}", ask: "${input.ask}", approvers: "${input.approvers}", within: "${input.within}", by: "${input.by}", ballot: "${run.id}" } }
+    job: { script: ./approval.js, input: { do: brief, jobs: "${input.jobs}", asker: "${input.asker || ''}", request: "${input.request}", ask: "${input.ask}", approvers: "${input.approvers}", within: "${input.within}", by: "${input.by}", ballot: "${run.id}" } }
   question:
     each: "${stages.brief.output.places}"
     job:
@@ -59,13 +60,7 @@ stages:
     follows: [question]
     each: "${stages.brief.output.groups}"
     job: { send: { to: { at: ballot, key: "${item.ballot}" }, event: over } }
-# Each group's answer is the first that counts in any of its places.
-output: >-
-  ${((answers) => ({ approved: answers.flatMap((a) => a.approved), note: answers.map((a) => a.note).join(' ') }))(
-    stages.brief.output.groups.map((g, n) => ((places) => ((answer) => ({
-      approved: answer && answer.choice === 'yes' ? g.names : [],
-      note: answer ? answer.by + ' said ' + answer.choice + '.'
-        : places.every((p) => p.error) ? 'The question could not be asked: ' + places.map((p) => p.error).join('; ')
-        : 'No one answered in time, so the answer is no.' }))(
-      places.map((p) => p.output).find((o) => o && o.by && !o.elsewhere)))(
-      stages.question.output.filter((p, i) => stages.brief.output.places[i].group === n))))}
+  # The first answer that counts in each group's places.
+  answer:
+    job: { script: ./approval.js, input: { do: answer, groups: "${stages.brief.output.groups}", asked: "${stages.question.output}" } }
+output: ${stages.answer.output}

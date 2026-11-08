@@ -421,9 +421,9 @@ with its length. It gives `{ approved, note }`.
   within      how long it waits; 7d by default, and no press in time is no
   asker       the email of the person who asked, shown in the question, whose own press is refused; left out, they may approve their own request
   request     what was asked, shown quoted
-  by          by a tool's or a toolkit's name, its own ask, approvers or within
+  by          by a tool's or a toolkit's name, its own ask, approvers or within; tools of one name in two toolkits share an entry
 
-An agent has one ask, which Corbie shows each held call's `tool` and
+An agent has one ask, which is shown each held call's `tool` and
 `toolkit`. A held call whose tool's name, or else whose toolkit's name, is an
 entry of `by` is asked about apart from the other calls, with that entry's
 fields in place of the approval's. A call left with no place to ask, or no
