@@ -614,7 +614,7 @@ func TestJiraPostWritesWikiMarkup(t *testing.T) {
 	}
 }
 
-// questionIn gives the run ID a question's comment shows, once the bot has
+// questionIn gives the key a question's comment shows, once the bot has
 // written it and the question waits for an answer.
 func questionIn(w *world, j *jira) string {
 	w.t.Helper()
@@ -627,7 +627,7 @@ func questionIn(w *world, j *jira) string {
 		}
 		return id != ""
 	})
-	w.until("the question waiting", func() bool { return w.show(id).Timers == 1 })
+	w.until("the question waiting", func() bool { return w.asking(id) != "" && w.show(w.asking(id)).Timers == 1 })
 	return id
 }
 

@@ -149,14 +149,14 @@ func cut(t *testing.T, dir, text string) {
 }
 
 // heard stands in for telegram.js: its listener hears these once, then rests.
-// One with a run is a tap, and any other a message. A question gives the
+// One with a question is a tap, and any other a message. A question gives the
 // message it posted, so a close has something to close.
 func heard(events ...map[string]any) string {
 	var emits []string
 	for _, e := range events {
 		data, _ := json.Marshal(e)
 		name := "message"
-		if _, ok := e["run"]; ok {
+		if _, ok := e["question"]; ok {
 			name = "answer"
 		}
 		emits = append(emits, "emit(\""+name+"\", "+string(data)+")")
@@ -200,12 +200,33 @@ func removeListenerOf(t *testing.T, dir, service string) {
 	setSite(t, dir, router(service), "    job: { machine: .rook/"+service+"/listen.yaml, restart: { after: always } }\n", "")
 }
 
-// answer sends an answer to a question to the router of a service, as its
-// listener does, and the router sends it to the question.
+// answer sends an answer to the question with a run's ID to the router of a
+// service, as its listener does, and the router sends it to the question.
 func (w *world) answer(service, question string, data map[string]any) {
 	w.t.Helper()
-	data["run"] = question
+	data["question"] = w.key(question)
 	w.send(w.kept(router(service)), "answer", data)
+}
+
+// asking gives the run ID of the question whose buttons hold a key: the run
+// whose send started the run of answers at that key, or nothing before then.
+func (w *world) asking(key string) string {
+	w.t.Helper()
+	runs := keyed(w, "answers.yaml")[key]
+	if len(runs) == 0 {
+		return ""
+	}
+	return w.show(runs[0].ID).Cause.Run
+}
+
+// key gives the key the question with a run's ID posted in its buttons.
+func (w *world) key(question string) string {
+	w.t.Helper()
+	asked := w.did(question, "ask")
+	if len(asked) == 0 {
+		w.t.Fatalf("the question %s has posted nothing", question)
+	}
+	return asked[0]["question"].(string)
 }
 
 // keyed gives the runs of a keyed location of the project by their key.
@@ -346,7 +367,7 @@ func TestProjectReads(t *testing.T) {
 	}
 	want := map[string][]string{
 		"singleton": {"/project/gromit/gitlab/gromit", "/project/gromit/jira/gromit", "/project/gromit/slack/gromit", "/project/gromit/telegram/gromit"},
-		"keyed":     {"/project/ballot", "/project/conversation", "/project/placed/ballot"},
+		"keyed":     {"/project/answers", "/project/ballot", "/project/conversation", "/project/placed/answers", "/project/placed/ballot"},
 	}
 	for life, locations := range want {
 		slices.Sort(lifetimes[life])
@@ -392,7 +413,7 @@ func TestInitWritesTheTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		".corbieignore", ".mcp.json", "AGENTS.md", "CLAUDE.md", "ballot.yaml", "conversation.yaml",
+		".corbieignore", ".mcp.json", "AGENTS.md", "CLAUDE.md", "answers.yaml", "ballot.yaml", "conversation.yaml",
 		"gromit/gitlab/chat/ask.yaml", "gromit/gitlab/chat/post.yaml", "gromit/gitlab/chat/show.yaml", "gromit/gitlab/files/get.yaml", "gromit/gitlab/gromit.yaml",
 		"gromit/slack/assistant/status.yaml", "gromit/slack/chat/ask.yaml", "gromit/slack/chat/post.yaml", "gromit/slack/chat/show.yaml", "gromit/slack/files/get.yaml", "gromit/slack/gromit.yaml",
 		"later.yaml", "people/find.yaml", "people/scopes.yaml",

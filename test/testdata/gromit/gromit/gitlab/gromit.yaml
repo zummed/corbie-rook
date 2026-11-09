@@ -2,15 +2,16 @@
 # reading group/orders. It sends each change to an issue to issue-log, keyed by
 # the issue, and each comment and opened issue that names the bot to the
 # conversation, keyed by the issue, the person and the agent support. It drops
-# the bot's own comments. It sends an answer to a question to that question.
-# The host is the value GITLAB_SITE and the token the secret GITLAB_TOKEN, set
-# at /<project>/gromit/gitlab. It takes events only from its listener:
-# `receive: []`, here and in the listener, refuses a send from any location.
+# the bot's own comments. It sends an answer to a question to `answers`, which
+# sends it on to that question. The host is the value GITLAB_SITE and the token
+# the secret GITLAB_TOKEN, set at /<project>/gromit/gitlab. It takes events
+# only from its listener: `receive: []`, here and in the listener, refuses a
+# send from any location.
 statechart: gromit
 description: The router of gromit on GitLab.
 lifetime: singleton
 receive: []
-allow: [send:conversation, send:issue-log, send:gromit/gitlab/chat/ask]
+allow: [send:conversation, send:issue-log, send:answers]
 initial: listening
 states:
   listening:
@@ -25,4 +26,4 @@ states:
         - when: "${!event.data.unaddressed && !event.data.own}"
           send: { to: { at: conversation, key: "${'gitlab:' + event.data.chat + ':' + event.data.user + ':support'}" }, event: message, data: "${event.data}" }
       answer:
-        send: { to: { at: gromit/gitlab/chat/ask, run: "${event.data.run}" }, event: answer, data: "${event.data}" }
+        send: { to: { at: answers, key: "${event.data.question}" }, event: answer, data: "${event.data}" }

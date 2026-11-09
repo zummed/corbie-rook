@@ -136,8 +136,8 @@ func TestStopCancelsALongTool(t *testing.T) {
 
 // /stop while a held call waits for alice's yes: the question, its approval
 // and the agent are cancelled, and alice is told "Stopped.". A tap on the
-// question afterwards runs nothing, and the router's record notes it as
-// undelivered.
+// question afterwards runs nothing, and the record of the question's run of
+// answers notes it as undelivered.
 func TestStopCancelsAQuestion(t *testing.T) {
 	tg := newTelegram(t)
 	w := newWorld(t)
@@ -150,10 +150,10 @@ func TestStopCancelsAQuestion(t *testing.T) {
 	tg.dm(1, "/stop")
 	tg.waitFor(w, "1", "Stopped.")
 	cancelled(w, question.ID, approval, agent)
+	answers := keyed(w, "answers.yaml")[w.key(question.ID)][0].ID
 	tg.tapOn(t, 0, 1, "yes")
 	w.until("the tap heard", tg.consumed)
-	router := w.kept(router("telegram"))
-	w.until("the tap noted as undelivered", func() bool { return len(undelivered(w, router)) == 1 })
+	w.until("the tap noted as undelivered", func() bool { return len(undelivered(w, answers)) == 1 })
 	quiet()
 	if got := tg.texts("2"); len(got) != 0 {
 		t.Errorf("bob was told %q after the stop", got)

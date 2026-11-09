@@ -1,19 +1,20 @@
 # The router of BOT on GitLab. It runs Rook's GitLab listener as a child, and
 # sends each comment that names the bot, and each opened issue that does, to
 # the conversation, keyed by the issue, the person and the agent. It drops the
-# bot's own comments and the changes. It sends an answer to a question to that
-# question. The host is the value GITLAB_SITE and the token the secret
-# GITLAB_TOKEN, set at /<project>/BOT/gitlab. Set the projects the listener
-# reads, or `group: <group's path>` for every project of a group. Add
-# `settle: 2m` to its input to hear an opened issue once nobody has changed it
-# for two minutes, and `overhear: true` to hear every issue and comment, marked
-# unaddressed, which this router drops. It takes events only from its listener:
-# `receive: []`, here and in the listener, refuses a send from any location.
+# bot's own comments and the changes. It sends an answer to a question to
+# `answers`, which sends it on to that question. The host is the value
+# GITLAB_SITE and the token the secret GITLAB_TOKEN, set at
+# /<project>/BOT/gitlab. Set the projects the listener reads, or `group:
+# <group's path>` for every project of a group. Add `settle: 2m` to its input
+# to hear an opened issue once nobody has changed it for two minutes, and
+# `overhear: true` to hear every issue and comment, marked unaddressed, which
+# this router drops. It takes events only from its listener: `receive: []`,
+# here and in the listener, refuses a send from any location.
 statechart: BOT
 description: The router of BOT on GitLab.
 lifetime: singleton
 receive: []
-allow: [send:conversation, send:BOT/gitlab/chat/ask]
+allow: [send:conversation, send:answers]
 initial: listening
 states:
   listening:
@@ -26,4 +27,4 @@ states:
         when: "${!event.data.unaddressed && !event.data.change && !event.data.own}"
         send: { to: { at: conversation, key: "${'gitlab:' + event.data.chat + ':' + event.data.user + ':assistant'}" }, event: message, data: "${event.data}" }
       answer:
-        send: { to: { at: BOT/gitlab/chat/ask, run: "${event.data.run}" }, event: answer, data: "${event.data}" }
+        send: { to: { at: answers, key: "${event.data.question}" }, event: answer, data: "${event.data}" }

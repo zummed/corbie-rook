@@ -118,8 +118,8 @@ if (input.do === "hear") {
       // logged, answered here with nothing, and starts nothing. Telegram
       // refuses an answer to an old tap, and a refusal must not stop the
       // cursor passing this update.
-      if (at > 0 && /^[\w.-]+\/\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{10}$/.test(question)) {
-        emit("answer", { service: "telegram", run: question, user: String(q.from.id), name: named(q.from), choice: choice, tap: q.id })
+      if (at > 0 && /^[0-9a-z]{12}$/.test(question)) {
+        emit("answer", { service: "telegram", question: question, user: String(q.from.id), name: named(q.from), choice: choice, tap: q.id })
         return null
       }
       log("a tap names no question: " + q.data.slice(0, 100))
@@ -243,11 +243,11 @@ function fit(text) {
 
 if (input.do === "ask") {
   // A question with a button for each choice. A button holds the question's
-  // run ID and the choice, which a tap names; Telegram takes at most 64 bytes.
+  // key and the choice, which a tap names; Telegram takes at most 64 bytes.
   const buttons = input.choices.map((c) => ({ text: c[0].toUpperCase() + c.slice(1), callback_data: input.question + " " + c }))
   for (const b of buttons) {
     const size = encodeURIComponent(b.callback_data).replace(/%[0-9A-F]{2}/g, "x").length
-    if (size > 64) throw new Error("Telegram takes at most 64 bytes in a button, and the run's ID with the choice " + b.text + " is " + size)
+    if (size > 64) throw new Error("Telegram takes at most 64 bytes in a button, and the question's key with the choice " + b.text + " is " + size)
   }
   const m = call("sendMessage", { chat_id: input.in, text: fit(input.text), reply_markup: { inline_keyboard: [buttons] } })
   return { sent: [{ chat: input.in, id: m.message_id }], where: "Telegram" }

@@ -55,12 +55,18 @@ type world struct {
 
 func newWorld(t *testing.T) *world {
 	t.Helper()
+	return newWorldAs(t, "client")
+}
+
+// newWorldAs is newWorld with the client that submits the project named.
+func newWorldAs(t *testing.T, name string) *world {
+	t.Helper()
 	w := &world{t: t}
 	mem := store.NewMemory()
 	w.mem = mem
 	ctl, err1 := identity.New("controller", identity.Controller)
 	run, err2 := identity.New("runner", identity.Runner)
-	me, err3 := identity.New("client", identity.Client)
+	me, err3 := identity.New(name, identity.Client)
 	for _, err := range []error{err1, err2, err3} {
 		if err != nil {
 			t.Fatal(err)

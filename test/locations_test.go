@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/zummed/corbie/client"
+	"github.com/zummed/corbie/instance"
 )
 
 // These tests are of what a project's tree gives Rook: who may send to its
@@ -85,9 +86,9 @@ func TestAnotherClientCannotCallAService(t *testing.T) {
 	}
 }
 
-// A tap that names a conversation's run, or a question that has ended, is
-// noted as undelivered in the router's record, and reaches no run: the router
-// sends a tap only to a question at the bot's chat/ask.
+// A tap that names a conversation's key, or the key of a question that has
+// ended, reaches no run: the router sends a tap only to `answers`, whose run
+// at that key ends at once, since no question opened it, and sends nothing.
 func TestTapReachesOnlyAWaitingQuestion(t *testing.T) {
 	w := newWorld(t)
 	dir := copyStarter(t)
@@ -102,20 +103,34 @@ func TestTapReachesOnlyAWaitingQuestion(t *testing.T) {
 	conversation := keyed(w, "conversation.yaml")["telegram:1:1:assistant"][0].ID
 	id := w.start("agents/asker.yaml", nil)
 	question := w.question(map[string]bool{}).ID
+	key := w.key(question)
 	w.tap(question, "2", "yes")
 	w.until("the question answered", func() bool { return w.show(id).HasEnded() })
+	w.until("its answers run ended", func() bool { return keyed(w, "answers.yaml")[key][0].HasEnded() })
 	write(t, dir, map[string]string{".rook/telegram/telegram.js": `
 		if (input.do === "hear") {
 		  if (input.cursor !== null) throw new Error("nothing more")
-		  emit("answer", { service: "telegram", run: "` + conversation + `", user: "2", choice: "yes" })
-		  emit("answer", { service: "telegram", run: "` + question + `", user: "2", choice: "no" })
+		  emit("answer", { service: "telegram", question: "telegram:1:1:assistant", user: "2", choice: "yes" })
+		  emit("answer", { service: "telegram", question: "` + key + `", user: "2", choice: "no" })
 		  return { cursor: 1 }
 		}
 		return {}
 	`})
 	w.sync(dir)
-	router := w.kept(router("telegram"))
-	w.until("both taps noted undelivered", func() bool { return len(undelivered(w, router)) == 2 })
+	w.until("both taps' runs ended", func() bool {
+		runs := keyed(w, "answers.yaml")
+		return len(runs["telegram:1:1:assistant"]) == 1 && runs["telegram:1:1:assistant"][0].HasEnded() && len(runs[key]) == 2 && runs[key][0].HasEnded() && runs[key][1].HasEnded()
+	})
+	// Only the run the question opened sent anything: the first tap.
+	sent := 0
+	for _, runs := range keyed(w, "answers.yaml") {
+		for _, run := range runs {
+			sent += len(w.ownAsks(run.ID, instance.AskEvent))
+		}
+	}
+	if sent != 1 {
+		t.Errorf("the runs of answers sent %d answers", sent)
+	}
 	for _, e := range w.record(conversation) {
 		for _, ev := range e.Events {
 			if ev.Name == "answer" {

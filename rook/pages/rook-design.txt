@@ -25,6 +25,7 @@ machine at its path under `/my-bot`, without `.yaml`. For a bot named
   /my-bot/gromit/slack/files/get          called to download a message's files
   /my-bot/later                           transient: one run for each reminder the agent's tool later sets
   /my-bot/ballot                          keyed, one for each question an approval asks in several places: closes the others once one is answered
+  /my-bot/answers                         keyed, one for each question: sends the question each press its router sends there
 
 A run uses the secrets and values set at its location or above. `init` prints
 the commands that set a service's at `/my-bot/gromit/<service>`, where the
@@ -93,9 +94,10 @@ and every other tree and client is refused.
   conversation.yaml                receive: { message: [gromit/*/gromit, later], stop: [gromit/*/gromit] }: a router, and a reminder
   later.yaml                       receive: [agents/*]: only an agent's tool later
   ballot.yaml                      no receive:, so every location of the project
+  answers.yaml                     no receive:, so every location of the project
   deploys.yaml                     receive: [gromit/slack/gromit]: only the router that sends to it
   .rook/agent.yaml                 receive: [conversation]; an agent a second conversation calls writes its own, naming both
-  gromit/<service>/chat/ask.yaml   receive: [gromit/<service>/gromit, agents/*, ballot]; an answer only from its router, close only from its ballot
+  gromit/<service>/chat/ask.yaml   receive: [answers, agents/*, ballot]; an answer only from answers at its key, close only from its ballot
   gromit/<service>/chat/show.yaml  receive: [gromit/<service>/chat/ask]: only the question
 
 A child run is addressed by its ID at its parent's location, and only its
@@ -104,11 +106,12 @@ each listener does.
 
 A sender needs `send:` for the location in its `allow:`.
 
-  gromit/<service>/gromit.yaml     send:conversation, send:gromit/<service>/chat/ask
+  gromit/<service>/gromit.yaml     send:conversation, send:answers
   conversation.yaml                in its turn, send:people/find, send:agents/assistant, and the bot's files/get and status; in its reply, send:gromit/*/chat/post and send:gromit/slack/assistant/status
   .rook/approval.yaml              send:ballot, and in each place, send: for that place's question
-  .rook/chat/ask.yaml              send: for its service's chat/show, and for its ballot
+  .rook/chat/ask.yaml              send: for its service's chat/show, for its ballot, and send:answers
   .rook/ballot.yaml                send:**, used only to answer a question that sent it opened
+  .rook/answers.yaml               send:**, used only to send an answer on to the question that sent it open
   .rook/agent.yaml                 in its tool progress, send:*/*/chat/post; in its tool later, send:later
   .rook/later.yaml                 send: for the conversation the agent's input names
   .rook/shared/press.yaml          send: for the question's lookup
@@ -116,7 +119,7 @@ A sender needs `send:` for the location in its `allow:`.
 
 - The lookup's answer is trusted because only the conversation calls the agent, only a router and `later` send to the conversation, and a router takes events only from its listener.
 - A reminder acts for the person of the turn that set it: the tool `later` fixes the message's service, chat and user and the conversation's run from the agent's input, and the model chooses only the minutes and the note.
-- A question trusts an answer from its router for the same reason: no location can send to the router or its listener, so each answer the router sends on came from the service.
+- A question trusts an answer from its router for the same reason: no location can send to the router or its listener, so each answer the router sends on came from the service. The run of `answers` at the question's key sends on only an answer from the question's router, and the question takes an answer only from that run.
 - A ballot can only close a question as answered elsewhere, which the approval does not count, so a send to a ballot can make an approval no and never yes.
 - A gateway is a client, so a gateway whose client submitted the project can call any of its locations with any input. Submit the project from a client no gateway uses.
 
@@ -127,14 +130,16 @@ The project's files
 and never one that is there. In a directory that is no project it writes them
 all, but `conversation.yaml` only with `--bot`, and the files under
 `<bot>/<service>/` only for the services `--services` names. In a project it
-writes only `AGENTS.md`, `.corbieignore`, `ballot.yaml`, `later.yaml`, and with `--bot` the conversation
-and the files of the services named, each when it is missing.
+writes only `AGENTS.md`, `.corbieignore`, `answers.yaml`, `ballot.yaml`,
+`later.yaml`, and with `--bot` the conversation and the files of the services
+named, each when it is missing.
 
   .corbieignore                      .rook/ and people/scopes.yaml; init adds each when missing
   conversation.yaml                  keyed: one person, one thread and the agent
   people/find.yaml                   the lookup: include: .rook/people/file.yaml
   later.yaml                         a reminder; include: .rook/later.yaml
   ballot.yaml                        keyed: an approval asked in several places; include: .rook/ballot.yaml
+  answers.yaml                       keyed: one question's presses; include: .rook/answers.yaml
   people/scopes.yaml                 each email's name and scopes, which the lookup reads
   <bot>/<service>/<bot>.yaml         singleton: the router, and Rook's listener as its child
   <bot>/<service>/chat/post.yaml     include: .rook/<service>/chat/post.yaml
@@ -160,6 +165,7 @@ services the project has.
   .rook/agent.yaml                   included by an agent: its input, prompt, conversation, receive: and the tools progress and later
   .rook/later.yaml                   the reminder that later.yaml places
   .rook/ballot.yaml                  the ballot that ballot.yaml places
+  .rook/answers.yaml                 the run for each question that answers.yaml places
   .rook/filters/                     words.yaml and words.js, a filter; model.yaml, included by an agent that is one
   .rook/shared/                      the scripts the conversation and the services share, and press.yaml
   .rook/AGENTS.md                    the page corbie rook manual rook, for a model
@@ -177,7 +183,7 @@ goes.
     description: The router of gromit on Slack.
     lifetime: singleton
     receive: []
-    allow: [send:conversation, send:gromit/slack/chat/ask]
+    allow: [send:conversation, send:answers]
     initial: listening
     states:
       listening:
@@ -189,10 +195,10 @@ goes.
           stop:
             send: { to: { at: conversation, key: "${'slack:' + event.data.chat + ':' + event.data.user + ':assistant'}" }, event: stop, data: "${event.data}" }
           answer:
-            send: { to: { at: gromit/slack/chat/ask, run: "${event.data.run}" }, event: answer, data: "${event.data}" }
+            send: { to: { at: answers, key: "${event.data.question}" }, event: answer, data: "${event.data}" }
 
 - A rule can only send, and a send goes only to a statechart: a singleton's run, or a keyed run, which it starts. A post or a lookup is a call, so the conversation makes it.
-- An answer goes only to a run at the bot's `chat/ask`, whatever the button holds.
+- An answer goes only to a run of `answers`, whatever the button holds, which sends it on only to the question that opened it.
 - `receive: []`, in the router and in Rook's listener, refuses a send from any location, so the router takes events only from its listener, and the listener sends only what its service gave.
 - `restart: { after: always }` starts the listener again when it ends. A listener whose read fails waits, then reads again.
 - A listener reads a value when it starts. After changing one, run `corbie run cancel /my-bot/gromit/<service>/gromit`, then `corbie run submit .`.
@@ -246,7 +252,7 @@ A message is one mapping, the same from every service.
 - `history` holds at most 20 entries and 8000 characters, and on Jira the issue and its latest 50 public comments. It is an empty list when nothing came before.
 - A Slack reaction's text is the emoji, such as `:eyes:`, its `at` the message reacted to, and its history the thread before the reaction, that message included.
 - A GitLab change's text says what changed, such as `labels +bug`, and an opened issue is a message whose text is its title and description.
-- An answer holds `service`, `run`, `user`, `name`, `email` and `choice`, on Telegram `tap`, and on Jira `chat`, the issue it was written on. A stop holds `service`, `place`, `chat`, `user`, `name` and `email`.
+- An answer holds `service`, `question`, the key its button or line holds, `user`, `name`, `email` and `choice`, on Telegram `tap`, and on Jira `chat`, the issue it was written on. A stop holds `service`, `place`, `chat`, `user`, `name` and `email`.
 
 Telegram's Bot API keeps no history a bot can read, so Telegram's listener
 keeps the person's messages it heard, never the bot's replies. `complete` says
@@ -315,7 +321,7 @@ stop button Slack shows under a thread while the bot works there.
 - A stop goes only to the sender's own conversation, so nobody can stop another person's agent.
 - A stop that comes while a message is added cancels the turn as it starts. A stop with no turn coming is dropped.
 - A Slack direct message outside a thread shows no status, so it has no stop button.
-- A question that is cancelled keeps its buttons. A press on one is noted as undelivered in the router's record, and runs nothing.
+- A question that is cancelled keeps its buttons. A press on one is noted as undelivered in the record of its run of `answers`, and runs nothing.
 
 The agent
 ---------
@@ -349,8 +355,8 @@ and `receive: [conversation]`, and names no model.
   later      { minutes, note }: after 1 to 1440 minutes, the note comes back as a message; offered when the conversation gives back
 
 A reminder whose conversation ended in the meantime starts it again, with no
-earlier turns, so the note says in full what to do. A stop does not cancel a
-reminder.
+earlier turns, so the note says in full what to do. At most 20 reminders wait
+at once in a project, and a stop does not cancel one.
 
 An agent's toolkits are listed under `toolkits:`, each with a `when:` on the
 agent's input, so only a person whose scopes allow it is offered one. A tool
@@ -378,10 +384,16 @@ A question is a run of the bot's placed `chat/ask`, which includes
 it with `{ in, text, choices, approvers, asker, within, ballot }`, and it
 gives `{ choice, by }`.
 
-1. It calls the service's `chat/show` to post `text` in `in` with a button for each of `choices`, each holding its run's ID.
-2. For each press the router sends it, it runs `.rook/shared/press.yaml`, which calls the lookup for the presser. A choice is matched in any case.
-3. A press from someone whose scopes lack `approvers`, or whose email is `asker`, is refused. `chat/show` tells the presser why, and the buttons stay.
-4. The first press that counts ends it with `{ choice, by }`, and `chat/show` shows who answered in place of the buttons. With none within `within`, by default 7d, it ends with `{ choice: no }`.
+1. It makes its key, 12 random letters and digits, and sends `open` to the run of `answers` at that key.
+2. It calls the service's `chat/show` to post `text` in `in` with a button for each of `choices`, each holding the key.
+3. For each press its router sends to `answers` at that key, it runs `.rook/shared/press.yaml`, which calls the lookup for the presser. A choice is matched in any case.
+4. A press from someone whose scopes lack `approvers`, or whose email is `asker`, is refused. `chat/show` tells the presser why, and the buttons stay.
+5. The first press that counts ends it with `{ choice, by }`, and `chat/show` shows who answered in place of the buttons. With none within `within`, by default 7d, it ends with `{ choice: no }`.
+
+A button holds the key, and not the question's run ID, which grows with the
+client's name: Telegram keeps 64 bytes of a button. The run of `answers` ends
+when the question sends it `shut`, as it takes no more answers, or `within`
+after `open`.
 
 A service's `chat/show` is the one part that differs: a flow of one job that
 runs the service's script, with the service's `allow:`.
@@ -389,12 +401,12 @@ runs the service's script, with the service's `allow:`.
   Slack       tells a refused presser in a message only they see, in the question's thread
   Telegram    tells a refused presser in an alert, or in their own chat with the bot; cuts a question over 4096 characters in its middle
   GitLab      asks in a comment on the issue; a comment that is only a choice is the answer
-  Jira        shows a line for each choice, <choice> <run>; a comment on the question's issue that holds only such a line is the answer
+  Jira        shows a line for each choice, <choice> <key>; a comment on the question's issue that holds only such a line is the answer
 
 The placed file fixes three fields of the input with `const:` and `default:`,
 so no caller gives them, as the file with deploys added below shows.
 
-  router   the router, gromit/slack/gromit: the question drops an answer whose sender, event.from, is any other location
+  router   the router, gromit/slack/gromit: answers drops an answer whose sender, event.from, is any other location
   lookup   the lookup the question calls for who pressed, people/find
   show     the service's chat/show, gromit/slack/chat/show
 
@@ -468,7 +480,7 @@ presses yes.
 
     # gromit/slack/chat/ask.yaml, with deploys added
     include: .rook/chat/ask.yaml
-    receive: [gromit/slack/gromit, agents/*, ballot, deploys]
+    receive: [answers, agents/*, ballot, deploys]
     input:
       properties:
         router: { const: gromit/slack/gromit, default: gromit/slack/gromit }

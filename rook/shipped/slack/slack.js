@@ -17,8 +17,8 @@
 const api = "https://slack.com/api"
 const listenFor = 4 * 60 * 1000
 const longest = 12000
-// question is the form of a question's run ID, which a button holds.
-const question = /^[\w.-]+\/\d{8}T\d{6}\.\d{3}Z-[0-9a-f]{10}$/
+// question is the form of a question's key, which a button holds.
+const question = /^[0-9a-z]{12}$/
 // A message's history holds at most 20 entries and 8000 characters.
 const mostLines = 20
 const mostChars = 8000
@@ -155,7 +155,7 @@ if (input.do === "hear") {
   const placeOf = (channel, direct) => (direct ? "dm" : "#" + call("conversations.info", null, { channel: channel }).channel.name)
 
   // pressed gives the answer a press of a question's button is. A button's value
-  // holds the question and the choice. The question's run takes the buttons
+  // holds the question's key and the choice. The question takes the buttons
   // away once a press counts. A press of another button, such as one of a
   // layout an agent posted, starts nothing, and one whose value names no
   // question is logged.
@@ -166,7 +166,7 @@ if (input.do === "hear") {
     const at = value.indexOf(" ")
     if (at < 0 || !question.test(value.slice(0, at))) return log("a press names no question: " + value.slice(0, 100))
     if (!body.user || !body.user.id) return log("a press names no person")
-    emit("answer", Object.assign({ service: "slack", run: value.slice(0, at), user: body.user.id, choice: value.slice(at + 1) }, person(body.user.id)))
+    emit("answer", Object.assign({ service: "slack", question: value.slice(0, at), user: body.user.id, choice: value.slice(at + 1) }, person(body.user.id)))
   }
 
   // heard holds the messages emitted in the last ten minutes, as channel/ts,
@@ -322,7 +322,7 @@ if (input.do === "upload") {
 if (input.do === "ask") {
   // A question, with a button for each choice, in input.in: a channel's #name
   // or a conversation, either with /thread. A button's value holds the
-  // question and the choice, which a press names.
+  // question's key and the choice, which a press names.
   const label = (s) => ({ type: "plain_text", text: String(s).slice(0, 75) })
   const buttons = input.choices.map((c, n) => ({ type: "button", action_id: "choice-" + n, text: label(c[0].toUpperCase() + c.slice(1)), value: input.question + " " + c }))
   const blocks = [{ type: "section", text: { type: "mrkdwn", text: input.text } }, { type: "actions", elements: buttons }]

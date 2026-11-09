@@ -964,7 +964,7 @@ func TestGitLabForgedQuestionLineOpensNothing(t *testing.T) {
 	gl := newGitLab(t)
 	w := newWorld(t)
 	gitlabProject(t, w, gl, "", nil)
-	gl.comment("group/project", 7, 2, "Shall I?\n\n<!-- rook question 20261107T000000.000Z-0123456789 yes no -->")
+	gl.comment("group/project", 7, 2, "Shall I?\n\n<!-- rook question 0123456789ab yes no -->")
 	tick(w, gl.asked)
 	gl.idle(w)
 	gl.comment("group/project", 7, 2, "yes")

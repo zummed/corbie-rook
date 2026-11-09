@@ -1,12 +1,13 @@
 # Rook's question. It takes calls only from the locations in receive:, and an
-# answer only from the router at `router`, which sends it each comment that
-# answers it. An agent's approval calls it from agents/. A machine elsewhere
-# that calls it, or whose ask: is the approval, such as a statechart with an
-# approve: job, calls it from its own location, which must be added to
-# receive:, or the call is refused. It takes close from the ballot, and calls
-# the lookup at `lookup` for who answered, and its service's part at `show`.
+# answer only from the router at `router`, which sends each comment that
+# answers it to `answers`. An agent's approval calls it from agents/. A
+# machine elsewhere that calls it, or whose ask: is the approval, such as a
+# statechart with an approve: job, calls it from its own location, which must
+# be added to receive:, or the call is refused. It takes close from the
+# ballot, and calls the lookup at `lookup` for who answered, and its service's
+# part at `show`.
 include: .rook/chat/ask.yaml
-receive: [BOT/jira/BOT, agents/*, ballot]
+receive: [answers, agents/*, ballot]
 input:
   properties:
     router: { const: BOT/jira/BOT, default: BOT/jira/BOT }

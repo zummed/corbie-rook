@@ -350,7 +350,7 @@ func TestSlackListenerLeavesAFailedEnvelopeForSlackToSendAgain(t *testing.T) {
 	s.says("b", in("C8", "5.0"))
 	s.says("c", in("C9", "6.0"))
 	s.send(map[string]any{"envelope_id": "d", "type": "interactive", "payload": map[string]any{
-		"type": "block_actions", "actions": []any{map[string]any{"action_id": "choice-0", "value": "20260101T000000.000Z-0123456789 yes"}},
+		"type": "block_actions", "actions": []any{map[string]any{"action_id": "choice-0", "value": "0123456789ab yes"}},
 	}})
 	w.until("the press with no user acknowledged", func() bool { return acked("d") })
 	time.Sleep(10 * interval)
@@ -788,7 +788,7 @@ const slackMessages = `
 // Slack's buttons, alice's press lets the tool run, and the message can be
 // followed: the router, the conversation, the agent, its approval and the
 // question, which names the approval that called it, and the press the router
-// sent to it.
+// sent to answers, which sent it on to the question.
 func TestSlackApprovalByButtonCanBeFollowed(t *testing.T) {
 	s := newSlack(t)
 	w := newWorld(t)
@@ -885,12 +885,18 @@ func TestSlackApprovalByButtonCanBeFollowed(t *testing.T) {
 	if len(asked) != 1 || w.show(asked[0].Run).Cause.Run != place {
 		t.Fatalf("the approval's record names the questions %+v", asked)
 	}
-	pressed := false
-	for _, ask := range w.asked(router, instance.AskEvent) {
-		pressed = pressed || ask.To == asked[0].Run
+	// The router sends the press to answers at the question's key, which
+	// sends it on to the question.
+	pressed := sent(router, instance.AskEvent, location("answers"))
+	if len(pressed) != 1 || pressed[0].Key != w.key(asked[0].Run) {
+		t.Fatalf("the router sent the press %+v", pressed)
 	}
-	if !pressed {
-		t.Errorf("the router's record does not name the question its press went to")
+	passed := false
+	for _, ask := range w.asked(keyed(w, "answers.yaml")[pressed[0].Key][0].ID, instance.AskEvent) {
+		passed = passed || ask.To == asked[0].Run
+	}
+	if !passed {
+		t.Errorf("the record of answers does not name the question it sent the press on to")
 	}
 }
 

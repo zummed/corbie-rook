@@ -42,9 +42,9 @@ function attachments(text, project) {
 }
 
 // A question is a comment of the bot's that ends with a line GitLab does not
-// show: <!-- rook question <run> <choice> ... --> while it waits, each choice
+// show: <!-- rook question <key> <choice> ... --> while it waits, each choice
 // URL-encoded, and a later comment of the bot's that holds <!-- rook answered
-// <run> --> closes it. The listener reads these lines only in the bot's own
+// <key> --> closes it. The listener reads these lines only in the bot's own
 // comments, and the bot writes them only at the end of a question and of the
 // comment that closes it: every text it is given to write has them taken out.
 const askedLine = /<!-- rook question (\S+)((?: \S+)+) -->/
@@ -385,9 +385,9 @@ function poll(before, bot, now, quiet) {
       if (!isPublic(n)) continue
       if (n.author.id === bot.id) {
         const q = askedLine.exec(n.body)
-        if (q) questions[chat] = { run: q[1], choices: q[2].trim().split(" ").map(decodeURIComponent), at: now }
+        if (q) questions[chat] = { key: q[1], choices: q[2].trim().split(" ").map(decodeURIComponent), at: now }
         const c = closedLine.exec(n.body)
-        if (c && questions[chat] && questions[chat].run === c[1]) delete questions[chat]
+        if (c && questions[chat] && questions[chat].key === c[1]) delete questions[chat]
       }
       // A comment that is only a choice, in any case, while a question waits
       // on the issue, is an answer to it.
@@ -396,7 +396,7 @@ function poll(before, bot, now, quiet) {
       const choice = q && q.choices.find((c) => c.toLowerCase() === said)
       if (choice !== undefined && n.author.id !== bot.id) {
         if (quiet) continue
-        say(Date.parse(n.created_at), "answer", Object.assign({ run: q.run }, person(n.author), { choice: choice }))
+        say(Date.parse(n.created_at), "answer", Object.assign({ question: q.key }, person(n.author), { choice: choice }))
         continue
       }
       // A comment on an issue still waiting is read with it, as its history,

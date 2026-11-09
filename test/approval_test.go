@@ -293,10 +293,10 @@ func asker(service, input string) string {
 }
 
 // receiveFrom lets the placed question of a service take a call from a
-// location, beside the router and the agents.
+// location, beside answers, the agents and the ballot.
 func receiveFrom(t *testing.T, dir, service, from string) {
 	t.Helper()
-	setSite(t, dir, "gromit/"+service+"/chat/ask.yaml", "receive: [gromit/"+service+"/gromit, agents/*, ballot]", "receive: [gromit/"+service+"/gromit, agents/*, ballot, "+from+"]")
+	setSite(t, dir, "gromit/"+service+"/chat/ask.yaml", "receive: [answers, agents/*, ballot]", "receive: [answers, agents/*, ballot, "+from+"]")
 }
 
 // With no press that counts within `within`, the question closes saying no one

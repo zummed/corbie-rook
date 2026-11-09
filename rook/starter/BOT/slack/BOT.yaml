@@ -1,16 +1,17 @@
 # The router of BOT on Slack. It runs Rook's Slack listener as a child, and
 # sends each direct message and each message that names the bot to the
 # conversation, keyed by the thread, the person and the agent. It sends a press
-# of a question's button to that question, and a stop to the conversation. The
-# tokens are set at /<project>/BOT/slack. Add `input: { overhear: true }`
-# beside `machine:` to hear every message in a channel outside a thread, marked
-# unaddressed, which this router drops. It takes events only from its listener:
-# `receive: []`, here and in the listener, refuses a send from any location.
+# of a question's button to `answers`, which sends it on to that question, and
+# a stop to the conversation. The tokens are set at /<project>/BOT/slack. Add
+# `input: { overhear: true }` beside `machine:` to hear every message in a
+# channel outside a thread, marked unaddressed, which this router drops. It
+# takes events only from its listener: `receive: []`, here and in the listener,
+# refuses a send from any location.
 statechart: BOT
 description: The router of BOT on Slack.
 lifetime: singleton
 receive: []
-allow: [send:conversation, send:BOT/slack/chat/ask]
+allow: [send:conversation, send:answers]
 initial: listening
 states:
   listening:
@@ -22,4 +23,4 @@ states:
       stop:
         send: { to: { at: conversation, key: "${'slack:' + event.data.chat + ':' + event.data.user + ':assistant'}" }, event: stop, data: "${event.data}" }
       answer:
-        send: { to: { at: BOT/slack/chat/ask, run: "${event.data.run}" }, event: answer, data: "${event.data}" }
+        send: { to: { at: answers, key: "${event.data.question}" }, event: answer, data: "${event.data}" }

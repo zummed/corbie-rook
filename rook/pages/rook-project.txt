@@ -49,6 +49,7 @@ and still exits 0. In a new project these are the agent, and the calls the
 conversation makes only for a message from a service the project is not on.
 
     corbie test .
+      answers.yaml                        ok
       ballot.yaml                         ok
       conversation.yaml                   ok
       gromit/slack/assistant/status.yaml  ok
@@ -77,8 +78,8 @@ takes the first one's messages.
   a value                                   a listener reads it when it starts: corbie run cancel /my-bot/gromit/<service>/gromit, then submit
 
 After updating Rook, run `corbie rook init .` in the project. It rewrites
-`.rook/`, writes `AGENTS.md`, `.corbieignore`, `ballot.yaml` or `later.yaml`
-when the project lacks one, adds `.rook/` and `people/scopes.yaml` to
+`.rook/`, writes `AGENTS.md`, `.corbieignore`, `answers.yaml`, `ballot.yaml`
+or `later.yaml` when the project lacks one, adds `.rook/` and `people/scopes.yaml` to
 `.corbieignore` when it lacks them, and names the project's files that are not as this version starts a project.
 `corbie rook manual rook-starter` shows those files as this version writes
 them. Copy what you want, then run the two commands above.

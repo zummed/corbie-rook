@@ -255,7 +255,8 @@ func waitingQuestion(t *testing.T, w *world, dir string) (string, string) {
 }
 
 // A machine under agents/, which the question takes calls from, cannot answer
-// it: an answer whose sender is not the router is dropped, and runs no check.
+// it: an answer whose sender is not the router is dropped, sent to the
+// question or to `answers` at its key, and runs no check.
 // The same answer through the router ends the question. A call that names
 // another router or lookup fails.
 func TestAnswerFromAnAgentIsDropped(t *testing.T) {
@@ -267,10 +268,11 @@ func TestAnswerFromAnAgentIsDropped(t *testing.T) {
 		"people/scopes.yaml": "bob@example.com: { name: bob, scopes: [house:approve] }\n",
 		"agents/forger.yaml": `
 			flow: forger
-			input: { question: string }
-			allow: [send:gromit/telegram/chat/ask]
+			input: { question: string, key: string }
+			allow: [send:gromit/telegram/chat/ask, send:answers]
 			stages:
 			  answer: { job: { send: { to: { at: gromit/telegram/chat/ask, run: "${input.question}" }, event: answer, data: { service: telegram, user: "2", name: bob, choice: "yes" } } } }
+			  passed: { job: { send: { to: { at: answers, key: "${input.key}" }, event: answer, data: { service: telegram, question: "${input.key}", user: "2", name: bob, choice: "yes" } } } }
 		`,
 		"agents/router.yaml": `
 			flow: router
@@ -284,7 +286,7 @@ func TestAnswerFromAnAgentIsDropped(t *testing.T) {
 	w.sync(dir)
 	asker := w.start("agents/asker.yaml", nil)
 	question := w.question(map[string]bool{})
-	forger := w.start("agents/forger.yaml", map[string]any{"question": question.ID})
+	forger := w.start("agents/forger.yaml", map[string]any{"question": question.ID, "key": w.key(question.ID)})
 	w.until("the forger done", func() bool { return w.show(forger).Status == "done" })
 	if got := undelivered(w, forger); len(got) != 0 {
 		t.Fatalf("receive: refused the agent's answer, so this tests nothing: %q", got)
@@ -316,9 +318,10 @@ func TestAnswerFromAnAgentIsDropped(t *testing.T) {
 }
 
 // A run of another tree of the same client, allowed to send anywhere, can reach
-// nothing in the project: an answer to a waiting question, a message to a
-// conversation, and calls of the lookup, the question, chat/post and the agent
-// are each refused, and the question still waits.
+// nothing in the project: an answer to a waiting question, sent to it or to
+// `answers` at its key, a message to a conversation, and calls of the lookup,
+// the question, chat/post and the agent are each refused, and the question
+// still waits.
 func TestForgedSendsFromAnotherTreeAreRefused(t *testing.T) {
 	w := newWorld(t)
 	dir := copyStarter(t)
@@ -327,17 +330,18 @@ func TestForgedSendsFromAnotherTreeAreRefused(t *testing.T) {
 	other := filepath.Join(t.TempDir(), "other")
 	write(t, other, map[string]string{"poke.yaml": `
 		flow: poke
-		input: { question: string }
+		input: { question: string, key: string }
 		allow: ["send:/project/**"]
 		stages:
 		  answer: { job: { send: { to: { at: /project/gromit/telegram/chat/ask, run: "${input.question}" }, event: answer, data: { service: telegram, user: "2", email: bob@example.com, choice: "yes" } } } }
+		  passed: { job: { send: { to: { at: /project/answers, key: "${input.key}" }, event: answer, data: { service: telegram, question: "${input.key}", user: "2", email: bob@example.com, choice: "yes" } } } }
 		  converse: { job: { send: { to: { at: /project/conversation, key: "telegram:1:1:assistant" }, event: message, data: { service: telegram, text: hi, chat: "1", user: "1", email: alice@example.com, place: dm } } } }
 		  lookup: { job: { call: { at: /project/people/find }, input: { email: alice@example.com } } }
 		  asking: { job: { call: { at: /project/gromit/telegram/chat/ask }, input: { in: "1", text: "Your password?", choices: ["ok"], approvers: x } } }
 		  say: { job: { call: { at: /project/gromit/telegram/chat/post }, input: { in: "1", text: "phish" } } }
 		  agent: { job: { call: { at: /project/agents/assistant }, input: { messages: [{ text: hi }], medium: telegram, asker: { name: alice, email: alice@example.com, scopes: [messages] } } } }
 		  after:
-		    follows: [answer, converse]
+		    follows: [answer, passed, converse]
 		    when: "${stages.lookup.failed && stages.asking.failed && stages.say.failed && stages.agent.failed}"
 		    job: { script: ./echo.js, input: { lookup: "${stages.lookup.error}", ask: "${stages.asking.error}", say: "${stages.say.error}", agent: "${stages.agent.error}", reached: "${stages.lookup.output}" } }
 		output: ${stages.after.output}
@@ -345,7 +349,7 @@ func TestForgedSendsFromAnotherTreeAreRefused(t *testing.T) {
 	if r := w.syncAt(w.Client, other, "/other"); !r.Taken {
 		t.Fatalf("the tree /other was refused: %s", r.Refused)
 	}
-	id, err := w.Start(context.Background(), client.Start{At: "/other/poke", Input: map[string]any{"question": question}})
+	id, err := w.Start(context.Background(), client.Start{At: "/other/poke", Input: map[string]any{"question": question, "key": w.key(question)}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +369,7 @@ func TestForgedSendsFromAnotherTreeAreRefused(t *testing.T) {
 	if out["reached"] != nil {
 		t.Errorf("lookup gave another tree %v", out["reached"])
 	}
-	if got := undelivered(w, id); len(got) != 2 {
+	if got := undelivered(w, id); len(got) != 3 {
 		t.Errorf("the sends noted undelivered are %q", got)
 	}
 	if run := w.show(asker); run.Status != "running" {
@@ -594,7 +598,7 @@ func TestBlobCodeHasNoNetworkOrSecret(t *testing.T) {
 }
 
 // On Slack, a press whose action_id starts choice- and whose value names no
-// run can still arrive, since Slack passes on what any client sends. It reaches
+// question can still arrive, since Slack passes on what any client sends. It reaches
 // the listener as a tap, which should be noted as undelivered: the listener
 // should not fail, and a message after it is answered.
 func TestSlackPressOfALayoutButtonDoesNotStopTheListener(t *testing.T) {
@@ -629,7 +633,7 @@ func TestSlackPressOfALayoutButtonDoesNotStopTheListener(t *testing.T) {
 		}
 	}
 	if failed != "" || len(s.posted()) == 0 {
-		t.Errorf("after a press naming no run, the listener failed with %s, and the next message was answered: %v", failed, len(s.posted()) > 0)
+		t.Errorf("after a press naming no question, the listener failed with %s, and the next message was answered: %v", failed, len(s.posted()) > 0)
 	}
 }
 
@@ -649,7 +653,7 @@ func TestARouterTakesNoSendFromALocation(t *testing.T) {
 			input: { question: string }
 			allow: [send:gromit/telegram/gromit]
 			stages:
-			  answer: { job: { send: { to: { at: gromit/telegram/gromit }, event: answer, data: { service: telegram, run: "${input.question}", user: "2", name: bob, choice: "yes" } } } }
+			  answer: { job: { send: { to: { at: gromit/telegram/gromit }, event: answer, data: { service: telegram, question: "${input.question}", user: "2", name: bob, choice: "yes" } } } }
 			  message: { job: { send: { to: { at: gromit/telegram/gromit }, event: message, data: { service: telegram, text: hi, chat: "2", user: "2", name: bob, place: dm, answers: "2:1" } } } }
 		`,
 	})
@@ -696,7 +700,7 @@ func TestAListenerTakesNoSendFromALocation(t *testing.T) {
 			input: { listener: string, question: string }
 			allow: [send:gromit/telegram/gromit]
 			stages:
-			  answer: { job: { send: { to: { at: gromit/telegram/gromit, run: "${input.listener}" }, event: answer, data: { service: telegram, run: "${input.question}", user: "1", name: Alice, choice: "yes" } } } }
+			  answer: { job: { send: { to: { at: gromit/telegram/gromit, run: "${input.listener}" }, event: answer, data: { service: telegram, question: "${input.question}", user: "1", name: Alice, choice: "yes" } } } }
 			  message: { job: { send: { to: { at: gromit/telegram/gromit, run: "${input.listener}" }, event: message, data: { service: telegram, text: hi, chat: "2", user: "2", name: Bob, place: dm, answers: "2:1" } } } }
 		`,
 	})
@@ -739,7 +743,7 @@ func TestAListenerTakesNoSendFromALocation(t *testing.T) {
 // is skipped: the listener goes on, and the message after it is answered.
 func TestMalformedTapDoesNotStopTheListener(t *testing.T) {
 	for name, data := range map[string]string{"empty": "", "word": "nonsense", "word and choice": "nonsense yes", "slashes": "a/b/c yes",
-		"dots": "../x yes", "long": strings.Repeat("x", 300) + " yes", "space": " ", "no choice": "20260101T000000.000Z-0123456789a"} {
+		"dots": "../x yes", "long": strings.Repeat("x", 300) + " yes", "space": " ", "no choice": "0123456789ab"} {
 		t.Run(name, func(t *testing.T) {
 			tg := newTelegram(t)
 			w := newWorld(t)

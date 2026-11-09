@@ -6,7 +6,12 @@
 # and the question stays. The first press that counts closes the question and
 # ends it with { choice, by }, `by` being the presser's name. With no press
 # that counts within `within`, by default a week, it ends with { choice: no }.
-# The question holds this run's ID, and the router sends a press to it.
+#
+# Its buttons and lines hold its key, 12 random letters and digits, which
+# stays short whatever its run ID. Before it posts, it sends open to the run
+# of `answers` at that key. A router sends a press there, and that run sends
+# the question each press from the question's router. Once the question takes
+# no more answers, it sends that run shut.
 #
 # With `ballot`, the address { at, key } of the ballot of an approval asked in
 # several places, it sends the ballot opened once it has posted, and settled,
@@ -14,10 +19,11 @@
 # the same data, it shows "<by> said <choice> on <where>." and ends with
 # { choice, by, elsewhere: true }.
 #
-# chat/show does three things: ask posts the question and gives `sent` and
-# `where`, the service's name; tell tells a presser `text`, given the press
-# and `sent`; and close shows `said`, given `sent`, the question's `text` and,
-# after a press that counts, that press.
+# chat/show does three things: ask posts the question, holding the key it is
+# given as `question`, and gives `sent` and `where`, the service's name; tell
+# tells a presser `text`, given the press and `sent`; and close shows `said`,
+# given `sent`, the question's `text` and, after a press that counts, that
+# press.
 statechart: chat-ask
 description: Asks a question with a choice for each answer, and gives the first choice of someone whose scopes hold the approvers.
 title: "${input.text.split('\\n')[0]}"
@@ -39,12 +45,18 @@ input:
     lookup: { type: string }
     show: { type: string }
     ballot: { type: object }
-allow: ["send:${input.show}"]
-initial: asking
+allow: ["send:${input.show}", send:answers]
+initial: keying
 states:
+  # Makes the key, as this state's output.
+  keying:
+    initial: made
+    states:
+      made: { end: done, output: "${Array.from({ length: 12 }, () => '0123456789abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 36)]).join('')}" }
+    on: { done: { go: asking, send: { to: { at: answers, key: "${states.keying.output}" }, event: open, data: { router: "${run.tree + '/' + input.router}", within: "${input.within || '7d'}" } } } }
   asking:
     defer: [answer]
-    job: { call: { at: "${input.show}" }, input: { do: ask, in: "${input.in}", text: "${input.text}", choices: "${input.choices}", question: "${run.id}" } }
+    job: { call: { at: "${input.show}" }, input: { do: ask, in: "${input.in}", text: "${input.text}", choices: "${input.choices}", question: "${states.keying.output}" } }
     on: { done: [{ go: opening, when: "${input.ballot != null}" }, open] }
   opening:
     defer: [answer]
@@ -55,7 +67,7 @@ states:
     initial: waiting
     states:
       waiting:
-        on: { answer: { go: checking, when: "${event.from.at === run.tree + '/' + input.router && (event.data.chat === undefined || event.data.chat === states.asking.output.sent.in)}" } }
+        on: { answer: { go: checking, when: "${event.from.at === run.tree + '/answers' && event.from.key === states.keying.output && (event.data.chat === undefined || event.data.chat === states.asking.output.sent.in)}" } }
       checking:
         defer: [answer]
         job:
@@ -63,8 +75,8 @@ states:
           input: { answer: "${event.data}", lookup: "${input.lookup}", approvers: "${input.approvers}", asker: "${input.asker || ''}", choices: "${input.choices}" }
         on:
           done:
-            - { go: settling, when: "${event.data.counts && input.ballot != null}" }
-            - { go: answered, when: "${event.data.counts}" }
+            - { go: settling, when: "${event.data.counts && input.ballot != null}", send: { to: { at: answers, key: "${states.keying.output}" }, event: shut } }
+            - { go: answered, when: "${event.data.counts}", send: { to: { at: answers, key: "${states.keying.output}" }, event: shut } }
             - { go: telling, when: "${event.data.tell !== ''}" }
             - waiting
           failed: waiting
@@ -73,8 +85,8 @@ states:
         job: { call: { at: "${input.show}" }, input: { do: tell, sent: "${states.asking.output.sent}", answer: "${states.checking.output.answer}", by: "${states.checking.output.by}", text: "${states.checking.output.tell}" } }
         on: { done: waiting, failed: waiting }
     on:
-      unanswered: unanswered
-      close: { go: closed, when: "${input.ballot != null && event.from.at === run.tree + '/' + input.ballot.at && event.from.key === input.ballot.key}" }
+      unanswered: { go: unanswered, send: { to: { at: answers, key: "${states.keying.output}" }, event: shut } }
+      close: { go: closed, when: "${input.ballot != null && event.from.at === run.tree + '/' + input.ballot.at && event.from.key === input.ballot.key}", send: { to: { at: answers, key: "${states.keying.output}" }, event: shut } }
   settling:
     job: { send: { to: "${input.ballot}", event: settled, data: { choice: "${states.checking.output.choice}", by: "${states.checking.output.by}", where: "${states.asking.output.where}" } }, allow: ["send:${input.ballot.at}"] }
     on: { done: answered, failed: answered }

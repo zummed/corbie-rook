@@ -1,10 +1,9 @@
 # Telegram's listener, run as a child of a router: it asks for each new update.
 # It sends its parent message for each direct message, stop for /stop, and
-# answer for a tap on a question's button. A button holds the question's run ID
-# without its client's name, since Telegram keeps 64 bytes of it. The Bot API
-# keeps no history a bot can read, so the listener keeps each chat's history in
-# its output, and a new run of it starts with none. getUpdates never gives the
-# bot's own messages, so a history holds the person's messages only.
+# answer for a tap on a question's button, which holds the question's key. The
+# Bot API keeps no history a bot can read, so the listener keeps each chat's
+# history in its output, and a new run of it starts with none. getUpdates never
+# gives the bot's own messages, so a history holds the person's messages only.
 #
 # `receive: []` refuses a send from any location, which could otherwise
 # address this run by its ID, so what it sends its parent came from Telegram.

@@ -1521,10 +1521,12 @@ func TestSlackResentEventIsAnsweredOnce(t *testing.T) {
 // A question goes to a person on Slack with a button for each choice. A press
 // by someone whose scopes lack the approvers' is refused, and they alone are
 // told why, and the buttons stay. A press by someone whose scopes hold it
-// answers the question, which shows the answer in place of its buttons.
+// answers the question, which shows the answer in place of its buttons. A
+// button holds the question's key, here under a client's name of 60
+// characters.
 func TestSlackQuestionIsAnsweredByAPress(t *testing.T) {
 	s := newSlack(t)
-	w := newWorld(t)
+	w := newWorldAs(t, longClient)
 	dir := slackProject(t, w, s)
 	write(t, dir, map[string]string{"agents/asker.yaml": asker("slack", `{ in: U1, text: "Well?", choices: ["yes", "no"], approvers: messages:approve }`)})
 	w.sync(dir)
@@ -1535,9 +1537,12 @@ func TestSlackQuestionIsAnsweredByAPress(t *testing.T) {
 	if post["channel"] != "D9" {
 		t.Fatalf("the question went to %v", post)
 	}
-	// A button names the question's run by its ID.
+	// A button holds the question's key, whatever the client's name.
 	question := w.at(bot + "/slack/chat/ask.yaml")[0].ID
-	value := question + " no"
+	if !strings.HasPrefix(question, longClient+"/") {
+		t.Fatalf("the question's run is %s", question)
+	}
+	value := w.key(question) + " no"
 	blocks, _ := json.Marshal(post["blocks"])
 	if !strings.Contains(string(blocks), `"value":"`+value+`"`) {
 		t.Fatalf("the buttons are %s", blocks)

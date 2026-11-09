@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -423,6 +424,40 @@ func TestApprovalRefusedByATap(t *testing.T) {
 	}
 	if got := tg.edited(); len(got) != 1 || !strings.HasSuffix(got[0], "alice said no.") {
 		t.Errorf("the question shows %q", got)
+	}
+}
+
+// longClient is a client's name of 60 characters, near the most Corbie takes.
+var longClient = strings.Repeat("a-client-with-a-long-name.", 3)[:60]
+
+// A button holds the question's key, 12 letters and digits, so a question
+// whose run ID starts with a client's name of 60 characters still fits
+// Telegram's 64 bytes, and a tap on it answers it.
+func TestTelegramButtonsFitWhateverTheClientsName(t *testing.T) {
+	tg := newTelegram(t)
+	w := newWorldAs(t, longClient)
+	dir, _ := houseProject(t, w, tg, nil)
+	tg.dm(1, "tell bob hello")
+	w.sync(dir)
+	w.until("a question", func() bool { return len(tg.buttons()) == 2 })
+	question := w.at(bot + "/telegram/chat/ask.yaml")[0].ID
+	if !strings.HasPrefix(question, longClient+"/") {
+		t.Fatalf("the question's run is %s", question)
+	}
+	key := w.key(question)
+	if !regexp.MustCompile(`^[0-9a-z]{12}$`).MatchString(key) {
+		t.Errorf("the key is %q", key)
+	}
+	for _, b := range tg.buttons() {
+		if !strings.HasPrefix(b[1], key+" ") || len(b[1]) > 64 {
+			t.Errorf("a button holds %q", b[1])
+		}
+	}
+	tg.tapOn(t, 0, 1, "yes")
+	tg.waitFor(w, "2", "hello from alice")
+	w.until("the question closed", func() bool { return len(tg.edited()) == 1 })
+	if got := tg.edited()[0]; !strings.HasSuffix(got, "alice said yes.") {
+		t.Errorf("the question now shows %q", got)
 	}
 }
 
