@@ -1,0 +1,6 @@
+# The servers. restart waits for the agent's ask, which asks in #infra.
+description: The servers. Their state, and restarting one.
+instructions: { include: ./infra.md }
+tools:
+  vm_status: { call: infra/vms/status }
+  restart: { call: infra/vms/restart, approve: true }

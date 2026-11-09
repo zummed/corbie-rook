@@ -1,0 +1,29 @@
+# The router of BOT on Jira. It runs Rook's Jira listener as a child, and sends
+# each comment that names the bot, and each opened issue that does, to the
+# conversation, keyed by the issue, the person and the agent. It sends an
+# answer to a question to `answers`, which sends it on to that question. The
+# host is the value JIRA_SITE, the account the value JIRA_EMAIL and its API
+# token the secret JIRA_TOKEN, set at /<project>/BOT/jira. Set the projects the
+# listener reads. Add `settle: 2m` to its input to hear an opened issue once
+# nobody has changed it for two minutes, and `overhear: true` to hear every
+# issue and comment, marked unaddressed, which this router drops. It takes
+# events only from its listener: `receive: []`, here and in the listener,
+# refuses a send from any location.
+statechart: BOT
+description: The router of BOT on Jira.
+lifetime: singleton
+receive: []
+allow: [send:conversation, send:answers]
+initial: listening
+states:
+  listening:
+    job:
+      machine: .rook/jira/listen.yaml
+      input: { projects: [OPS] }
+      restart: { after: always }
+    on:
+      message:
+        when: "${!event.data.unaddressed && !event.data.change}"
+        send: { to: { at: conversation, key: "${'jira:' + event.data.chat + ':' + event.data.user + ':assistant'}" }, event: message, data: "${event.data}" }
+      answer:
+        send: { to: { at: answers, key: "${event.data.question}" }, event: answer, data: "${event.data}" }

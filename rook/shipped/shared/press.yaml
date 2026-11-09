@@ -1,0 +1,25 @@
+# Whether a press of a question's button counts, which the question runs as a
+# child for each press. It calls the lookup at `lookup` with who pressed. The
+# press counts when the choice is one of `choices`, in any case, the presser's
+# scopes hold `approvers`, and the presser's email is not `asker`. It gives the
+# press as `answer`, the choice, `by`, the presser's name, `counts`, and `tell`,
+# what the presser is told when the press does not count. A choice that is no
+# button is told nothing, since no button sends it.
+flow: press
+description: Checks whether a press of a question's button counts, by the presser's scopes.
+title: "${input.answer.name || input.answer.user} pressed ${input.answer.choice}"
+input: { answer: map, lookup: string, approvers: string, asker: "string?", choices: list }
+allow: ["send:${input.lookup}"]
+stages:
+  who:
+    job:
+      call: { at: "${input.lookup}" }
+      input: { service: "${input.answer.service || ''}", user: "${input.answer.user || ''}", name: "${input.answer.name || ''}", email: "${input.answer.email || ''}" }
+  judge:
+    job:
+      script: ./press.js
+      input: { answer: "${input.answer}", who: "${stages.who.output}", approvers: "${input.approvers}", asker: "${input.asker || ''}", choices: "${input.choices}" }
+output: >-
+  ${stages.who.failed
+    ? { answer: input.answer, choice: input.answer.choice, by: input.answer.name || input.answer.user, counts: false, tell: 'Your answer could not be checked, so it does not count.' }
+    : stages.judge.output}

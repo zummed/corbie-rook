@@ -1,0 +1,27 @@
+# The router of gromit on Slack. It runs Rook's Slack listener as a child. It
+# sends a message in #deploys that names the bot to deploys, keyed by the
+# thread, and any other direct message or message that names the bot in
+# #support to the conversation, keyed by the thread, the person and the agent
+# support. It drops changes, and messages from any other channel. It sends a
+# press of a question's button to `answers`, which sends it on to that
+# question, and a stop to the conversation. The tokens are set at
+# /<project>/gromit/slack. It takes events only from its listener: `receive: []`, here and in the listener, refuses a send from any location.
+statechart: gromit
+description: The router of gromit on Slack.
+lifetime: singleton
+receive: []
+allow: [send:conversation, send:deploys, send:answers]
+initial: listening
+states:
+  listening:
+    job: { machine: .rook/slack/listen.yaml, restart: { after: always } }
+    on:
+      message:
+        - when: "${event.data.place === '#deploys' && !event.data.unaddressed && !event.data.change}"
+          send: { to: { at: deploys, key: "${event.data.chat}" }, event: message, data: "${event.data}" }
+        - when: "${(event.data.place === '#support' || event.data.place === 'dm') && !event.data.unaddressed && !event.data.change}"
+          send: { to: { at: conversation, key: "${'slack:' + event.data.chat + ':' + event.data.user + ':support'}" }, event: message, data: "${event.data}" }
+      stop:
+        send: { to: { at: conversation, key: "${'slack:' + event.data.chat + ':' + event.data.user + ':support'}" }, event: stop, data: "${event.data}" }
+      answer:
+        send: { to: { at: answers, key: "${event.data.question}" }, event: answer, data: "${event.data}" }

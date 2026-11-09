@@ -1,0 +1,16 @@
+# Slack's part of Rook's question, which only the question calls. ask posts
+# `text` in `in`, a channel's #name, a conversation, or either with /thread,
+# with a button for each of `choices`; tell shows a presser `text` in a
+# message only they see; close shows the question's `text` and `said` in
+# place of the buttons.
+flow: slack-chat-show
+description: Posts a question on Slack with a button for each choice, tells a presser why a press does not count, and closes the question.
+input: { do: string, in: "string?", text: "string?", choices: "list?", question: "string?", sent: "any?", answer: "map?", by: "string?", said: "string?" }
+stages:
+  show:
+    job:
+      script: .rook/slack/slack.js
+      input: ${input}
+      allow: [net:slack.com, "secret:SLACK_TOKEN@net:slack.com"]
+      restart: { limit: 2 }
+output: ${stages.show.output}

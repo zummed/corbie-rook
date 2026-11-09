@@ -1,0 +1,3 @@
+# Rook's ballot, which closes the other questions of an approval asked in
+# several places once one is answered.
+include: .rook/ballot.yaml

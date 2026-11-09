@@ -1,0 +1,38 @@
+# Rook's answers: one run for each question, at the key the question's buttons
+# and lines hold, which sends the question each answer from its router. A
+# button holds this key, and not the question's run ID, which grows with the
+# client's name: Telegram keeps 64 bytes of a button.
+#
+#   open      from the question, before it posts: { router, within }, its
+#             router's full location and how long it waits, by default 7d
+#   answer    from a router: sent on to the question when the router is its own
+#   shut      from the question, once it takes no more answers
+#
+# It ends on shut, or `within` after open, for a question that was cancelled.
+# An answer that comes before open names no question, and ends the run.
+statechart: answers
+description: Sends a question each answer from its router, at the key its buttons hold.
+lifetime: keyed
+allow: ["send:**"]
+title: Answers to a question
+initial: waiting
+states:
+  waiting:
+    on:
+      open: opened
+      answer: over
+  # Keeps open's sender, the question, and data, as this state's output.
+  opened:
+    initial: kept
+    states:
+      kept: { end: done, output: { question: "${event.from}", router: "${event.data.router}", within: "${event.data.within || '7d'}" } }
+    on: { done: open }
+  open:
+    timers: { quiet: "${states.opened.output.within}" }
+    on:
+      answer:
+        when: "${event.from.at === states.opened.output.router}"
+        send: { to: "${states.opened.output.question}", event: answer, data: "${event.data}" }
+      shut: { go: over, when: "${event.from.run === states.opened.output.question.run}" }
+      quiet: over
+  over: { end: done }

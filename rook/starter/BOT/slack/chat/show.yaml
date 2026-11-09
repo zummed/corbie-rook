@@ -1,0 +1,3 @@
+# The Slack part of Rook's question, which only the question calls.
+include: .rook/slack/chat/show.yaml
+receive: [BOT/slack/chat/ask]

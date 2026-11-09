@@ -1,0 +1,346 @@
+Rook project: you make a project directory for a bot that answers people on Telegram, Slack, GitLab and Jira, and change the bot by changing its files.
+
+Rook is ready-made Corbie machines. `corbie rook init` writes them into the
+project's `.rook/`, and places the bot's calls with files of one line. The
+project's own files say where each message goes, who someone is, and what each
+agent can do.
+
+Start a project
+---------------
+
+1. Make the project, naming its bot and the services it is on.
+2. For Slack, make the app first, as The Slack app below says.
+3. Add the agent, as Add an agent below says, and set each secret and value `init` names.
+4. Start Corbie, and submit the project.
+
+    corbie init --ceiling all
+    corbie rook init my-bot --bot gromit --services slack
+      Make the Slack app first, as corbie rook manual rook-project says under The Slack app.
+      my-bot is ready, and answers nobody until agents/assistant.yaml is there. Add it as corbie rook manual rook-project says under Add an agent, or ask a model in my-bot to. Then:
+
+        corbie controller secret set SLACK_TOKEN --at /my-bot/gromit/slack
+        corbie controller secret set SLACK_APP_TOKEN --at /my-bot/gromit/slack
+        cd my-bot && corbie run submit .
+
+    cd my-bot
+    corbie start controller runner ui &
+    corbie run submit .
+
+`corbie run submit .` records the project as the tree `/my-bot`, and starts
+each router, which starts its listener. A secret or a value set at
+`/my-bot/gromit/slack` is used by the Slack router and calls of the bot
+`gromit`, and one set at `/my-bot` by every run of the project.
+
+- Until the project has an agent, the bot answers anyone who names it with `This bot has no agent yet.`
+- Submit the project from a client no gateway uses: a gateway whose client submitted the project can call any of its locations with any input.
+- `corbie ui` shows each run and what waits on a person. Its Toolkits page shows each toolkit, the agents that offer it, and which of its tools have `approve: true`.
+
+After a change
+--------------
+
+Corbie reads the project's files only when they are submitted. After changing
+any file, run in the project:
+
+  corbie test .            reads every machine, and starts nothing
+  corbie run submit .      records the files, and starts again what the change says
+
+`corbie test .` names each location a machine calls that the project lacks,
+and still exits 0. In a new project these are the agent, and the calls the
+conversation makes only for a message from a service the project is not on.
+
+    corbie test .
+      answers.yaml                        ok
+      ballot.yaml                         ok
+      conversation.yaml                   ok
+      gromit/slack/assistant/status.yaml  ok
+      gromit/slack/chat/ask.yaml          ok
+      gromit/slack/chat/post.yaml         ok
+      gromit/slack/chat/show.yaml         ok
+      gromit/slack/files/get.yaml         ok
+      gromit/slack/gromit.yaml            ok
+      later.yaml                          ok
+      people/find.yaml                    ok
+      .rook/                              listed
+      people/scopes.yaml                  listed
+      nothing in the tree is at /my-bot/agents/assistant, named by conversation.yaml states.answering.job.machine.stages.answer.job.call
+      nothing in the tree is at /my-bot/gromit/gitlab/chat/post, named by conversation.yaml states.replying.job.machine.stages.gitlab.job.call
+      nothing in the tree is at /my-bot/gromit/jira/chat/post, named by conversation.yaml states.replying.job.machine.stages.jira.job.call
+      nothing in the tree is at /my-bot/gromit/telegram/chat/post, named by conversation.yaml states.replying.job.machine.stages.telegram.job.call
+      nothing in the tree is at /my-bot/gromit/telegram/chat/status, named by conversation.yaml states.answering.job.machine.stages.telegram_status.job.call
+
+Submit to one Corbie only: a second copy of a router, with the same token,
+takes the first one's messages.
+
+  a router, or a file its listener reads    the router and its listener start again; the conversations go on
+  an agent, or a toolkit it includes        the next turn is answered by the new agent
+  conversation.yaml                         the runs under way finish with the machines they started with
+  a file deleted                            the runs at its location are cancelled
+  a value                                   a listener reads it when it starts: corbie run cancel /my-bot/gromit/<service>/gromit, then submit
+
+After updating Rook, run `corbie rook init .` in the project. It rewrites
+`.rook/`, writes `AGENTS.md`, `.corbieignore`, `answers.yaml`, `ballot.yaml`
+or `later.yaml` when the project lacks one, adds `.rook/` and `people/scopes.yaml` to
+`.corbieignore` when it lacks them, and names the project's files that are not as this version starts a project.
+`corbie rook manual rook-starter` shows those files as this version writes
+them. Copy what you want, then run the two commands above.
+
+What a project holds
+--------------------
+
+  .corbieignore       what is no machine: .rook/, people/scopes.yaml, and toolkits/ once you add one
+  conversation.yaml   one run for each person in each thread, and the stages of a turn
+  gromit/<service>/   the router of the bot gromit on a service, and the calls it places, each a file of one line
+  people/find.yaml    the lookup: who someone is, and their scopes
+  people/scopes.yaml  each person's email, name and scopes, which Rook's lookup reads
+  agents/             the agent at agents/assistant, once you add it
+  toolkits/           the toolkits an agent includes, once you add one
+  schedules/          machines that run at a time, once you add one
+  AGENTS.md           notes for a model or a person changing the project; it points at .rook/AGENTS.md
+  CLAUDE.md           makes Claude Code read AGENTS.md; init writes it only to a new project
+  .mcp.json           starts corbie mcp for a model; init writes it only to a new project
+  .rook/              Rook's machines; corbie rook init rewrites it, so change nothing there
+
+A `*.yaml` that `.corbieignore` does not list has a location, `/my-bot/` and
+its path without `.yaml`, as `/my-bot/agents/assistant`. `.rook/AGENTS.md` is
+the page `corbie rook manual rook`, which a model reads before it changes the
+project. Keep `.rook/` in git, or run `corbie rook init .` after cloning the
+project.
+
+Add an agent
+------------
+
+The conversation calls the agent at `agents/assistant` for each turn, with
+the asker's scopes, which the lookup reads from `people/scopes.yaml`. A
+toolkit the agent includes is offered only to a person whose scopes its
+`when:` names. The example's tools call GitLab, so add it first in the
+project, and do what `init` prints. The router it writes reads the project
+`group/project` until you set the listener's `projects:` or `group:`.
+
+    corbie rook init . --bot gromit --services gitlab
+      my-bot has this version's .rook.
+
+      Then:
+
+        corbie controller secret set GITLAB_TOKEN --at /my-bot/gromit/gitlab
+        corbie controller value set GITLAB_SITE <host> --at /my-bot/gromit/gitlab
+        set the listener's projects: or group: in gromit/gitlab/gromit.yaml
+        corbie test .
+        corbie run submit .
+
+To add the agent:
+
+1. Give each person their email, as the service shows it, with their name and scopes, in `people/scopes.yaml`.
+2. Write `agents/assistant.yaml`, which includes `.rook/agent.yaml` and names its model.
+3. Write each toolkit under `toolkits/`, list `toolkits/` in `.corbieignore`, and place each machine its tools call.
+4. Set the model's secret: `corbie controller secret set ANTHROPIC_KEY --at /my-bot/agents`.
+
+    # people/scopes.yaml, with two people
+    ana@example.com: { name: Ana, scopes: [orders:read, orders:write] }
+    di@example.com: { name: Di, scopes: [orders:read, orders:approve] }
+
+    # agents/assistant.yaml
+    agent: assistant
+    description: Answers questions about the orders app.
+    include: .rook/agent.yaml
+    model: { name: claude-sonnet-5-5, secret: ANTHROPIC_KEY }
+    system: |
+      You answer questions about the orders app. What you write is read in a
+      chat: answer in a few short sentences, in everyday words.
+
+      ${input.format}
+    ask:
+      machine: .rook/approval.yaml
+      input: { ask: [{ at: gromit/slack/chat/ask, in: "#orders-team" }], approvers: "orders:approve", within: 1d, asker: "${input.asker.email}", request: "${input.messages.map((m) => (m.later != null ? '(a reminder the bot set) ' : '') + m.text).join('\\n')}" }
+    toolkits:
+      orders: { include: toolkits/orders.yaml, when: "${input.asker.scopes.includes('orders:read')}" }
+
+    # toolkits/orders.yaml
+    description: The orders app, its settings, and changing them.
+    instructions: { include: ./orders.md }
+    tools:
+      read_file: { call: gromit/gitlab/repository/files/read, input: { project: group/orders } }
+      change_file:
+        call: gromit/gitlab/repository/commits/create
+        input: { project: group/orders }
+        approve: true
+        when: "${input.asker.scopes.includes('orders:write')}"
+
+    # toolkits/orders.md
+    The orders app is built from the repository group/orders. Its settings are
+    in config/app.yaml. Read a file before you change it, and change only what
+    the person asked for.
+
+    # gromit/gitlab/repository/files/read.yaml
+    include: .rook/gitlab/repository/files/read.yaml
+
+    # gromit/gitlab/repository/commits/create.yaml
+    include: .rook/gitlab/repository/commits/create.yaml
+
+    # .corbieignore, with toolkits/ added
+    .rook/
+    people/scopes.yaml
+    toolkits/
+
+- Ana is offered `orders` with both tools. Di is offered `orders` with `read_file` only, since she lacks `orders:write`, and her press on a question counts, since she holds `orders:approve`.
+- A person `people/scopes.yaml` does not hold is answered by the agent with no toolkit.
+- The model is given `instructions:` when it opens the toolkit.
+- A tool written `call:` takes its description and arguments from the machine at its location, without the names its `input:` fixes, so the model never names the project. A schedule, another machine or a client can run that machine without the agent.
+- `change_file` waits for the agent's `ask:`, until someone with `orders:approve`, who did not ask, presses yes in `#orders-team`. A no, or no press within a day, goes back to the model as `denied`.
+- Any machine at `agents/assistant` with the same input and output answers in its place, a flow with no model included, as `corbie rook manual rook-design` says under The agent.
+
+Common changes
+--------------
+
+  The bot should                                    Change
+  look something up, or do something, when asked    a tool in a toolkit, calling a machine you place or write
+  let some people do more                           a toolkit's or a tool's when:, and their scopes
+  ask other people about one toolkit or tool        an entry of by: in the agent's ask
+  answer in one channel with other toolkits         a second agent and conversation, and a rule in the router
+  answer some messages with steps of its own        a keyed statechart, and a rule in the router
+  answer some messages that do not name it          overhear: true, a rule in the router, and a filter stage
+  clean a reply before it is posted outside a DM    a redact stage in conversation.yaml
+  do something at a time                            a schedule under schedules/
+  say what it is doing while it works               the agent's system text: when to use its tool progress
+  come back later to check on something             the agent's system text: when to use its tool later
+  be on another service                             corbie rook init . --bot gromit --services <name>
+  be a second bot                                   corbie rook init . --bot <name> --services <names>, and a second conversation
+
+- To send a channel's messages to a machine of your own, such as `deploys.yaml` in `corbie rook manual rook-design` under Asking a person, add a rule before the conversation's in the router, and `send:deploys` to its `allow:`. Write `receive: [gromit/slack/gromit]` in your machine, so no other location starts it:
+
+      message:
+        - when: "${event.data.place === '#deploys' && !event.data.change && !event.data.unaddressed}"
+          send: { to: { at: deploys, key: "${event.data.chat}" }, event: message, data: "${event.data}" }
+        - when: "${!event.data.unaddressed && !event.data.change}"
+          send: { to: { at: conversation, key: "${'slack:' + event.data.chat + ':' + event.data.user + ':assistant'}" }, event: message, data: "${event.data}" }
+
+- To answer in one channel with a second agent, copy `conversation.yaml` to a file such as `team/conversation.yaml`, and change `agents/assistant` in it to `agents/team`. Write `receive: [team/conversation]` in `agents/team.yaml`, and send that channel's messages to `team/conversation` from the router, with a key that ends `:team`, and `send:team/conversation` to the router's `allow:`.
+- An agent that includes `.rook/agent.yaml` takes calls only from `conversation`. When a second conversation, such as a copy at `deploys.yaml`, calls the same agent, the agent writes its own `receive:` naming both, as `receive: [conversation, deploys]`, or the call is refused.
+- To answer Slack messages that do not name the bot, add `input: { overhear: true }` to the router's job. A channel's message outside a thread, or a reply in a thread the bot has said something in, then comes with `unaddressed: true`, which the router's `when:` drops until you change it.
+- To answer some of those, add a stage that calls a filter to the turn in `conversation.yaml`, as its comment shows, and place `.rook/filters/words.yaml`, or write an agent that includes `.rook/filters/model.yaml`.
+- To clean a reply posted outside a direct message, add a stage that calls a redactor of your own, as the comment in `conversation.yaml` shows, and `send:redact` to the turn's `allow:`. The model still sees every tool's whole result.
+- To hear every public issue and comment on GitLab or Jira, add `overhear: true` to the listener's input, and to wait until an opened issue is finished, `settle: 2m`. On GitLab, `group: <path>` reads every project of a group with one ask.
+- To ask other people about one toolkit or tool, give the approval an entry of `by:` under its name. A held call of that toolkit or tool goes to the entry's `ask`, `approvers` and `within`, and every other to the approval's own:
+
+      ask:
+        machine: .rook/approval.yaml
+        input:
+          ask: [{ at: gromit/slack/chat/ask, in: "#orders-team" }]
+          approvers: "orders:approve"
+          asker: "${input.asker.email}"
+          by:
+            infra: { ask: [{ at: gromit/slack/chat/ask, in: "#infra" }], approvers: "infra:approve", within: 1h }
+
+- To post from a machine, call the bot's `chat/post` with `{ in, text }`, as `corbie rook manual rook-design` shows under Rook's calls.
+- To find people somewhere else, write `people/find.yaml` as a machine of your own that takes `{ service, user, name, email }` and gives `{ name, email, scopes }`.
+- To add a service, run `corbie rook init . --bot gromit --services <name>`, set the secrets and values it names, and submit. The conversation answers every service already.
+- `init` writes no second `conversation.yaml`, and prints these steps when it adds a second bot. Copy `conversation.yaml` to `<bot>/conversation.yaml` and change `gromit` in it to the new bot's name, so its `receive:` names the new bot's routers. In those routers, change the `send:` target and the `allow:` entry from `conversation` to `<bot>/conversation`. Add `<bot>/conversation` to the `receive:` of each agent it calls, as `receive: [conversation, <bot>/conversation]`.
+
+With a model
+------------
+
+Rook needs no model to run, and a model can change the project for you. A
+project's `.mcp.json` starts `corbie mcp --allow test --allow "rook init"` for
+a model that reads it, such as Claude Code, which asks once before it starts
+it. Start it in the project, and ask for what the bot should do.
+
+The model is told the page `rook`, and reads the rest of the manual from
+there. It checks what it writes with `corbie test`, and gives you the commands
+that start the bot. Another tool reads `AGENTS.md`, and runs the same commands
+in a shell.
+
+The Slack app
+-------------
+
+The Slack listener needs a Slack app that is an agent and uses Socket Mode,
+so nothing on the internet connects to this computer.
+
+1. At api.slack.com/apps, choose Create New App, then From a manifest, and
+   pick the workspace.
+2. Choose JSON, and paste the manifest below, with your name and
+   description. Slack cannot turn an agent back into a plain app.
+3. Under Basic Information, App-Level Tokens, make a token with the scope
+   `connections:write`, and run `corbie controller secret set
+   SLACK_APP_TOKEN --at /my-bot/gromit/slack`.
+4. Under Install App, install the app, and set its Bot User OAuth Token with
+   `corbie controller secret set SLACK_TOKEN --at /my-bot/gromit/slack`.
+5. In `people/scopes.yaml`, give each person's email as Slack shows it in
+   their profile, with their name and scopes.
+6. In each channel the bot should hear, run `/invite @Rook`.
+
+    {
+      "display_information": {
+        "name": "Rook"
+      },
+      "features": {
+        "bot_user": {
+          "display_name": "Rook",
+          "always_online": true
+        },
+        "app_home": {
+          "messages_tab_enabled": true,
+          "messages_tab_read_only_enabled": false
+        },
+        "agent_view": {
+          "agent_description": "Answers questions and does tasks for the people it belongs to."
+        }
+      },
+      "oauth_config": {
+        "scopes": {
+          "bot": [
+            "assistant:write",
+            "chat:write",
+            "im:write",
+            "channels:read",
+            "groups:read",
+            "im:read",
+            "channels:history",
+            "groups:history",
+            "im:history",
+            "users:read",
+            "users:read.email",
+            "reactions:read",
+            "files:read",
+            "files:write"
+          ]
+        }
+      },
+      "settings": {
+        "event_subscriptions": {
+          "bot_events": [
+            "message.channels",
+            "message.groups",
+            "message.im",
+            "reaction_added",
+            "agent_session_stopped"
+          ]
+        },
+        "interactivity": {
+          "is_enabled": true
+        },
+        "socket_mode_enabled": true
+      }
+    }
+
+  assistant:write                                   makes the bot an agent, which Slack gives a status and a stop button in a thread
+  chat:write                                        posts, tells a person why their press does not count, and changes a question once it is answered
+  im:write                                          opens a direct message to post to a person by their member ID
+  channels:read, groups:read                        reads a channel's name, which a message gives as its place
+  im:read                                           reads whether a conversation is a direct message, for a stop or a reaction there
+  channels:history, groups:history, im:history      hears messages, and reads a thread's history
+  users:read, users:read.email                      reads a sender's name and email, which the lookup finds them by
+  reactions:read                                    hears an emoji added to a message, with the event reaction_added
+  files:read                                        downloads the files sent with a message
+  files:write                                       uploads a file with files/upload
+
+The bot hears a direct message, and a message that names it in a channel it
+was invited to. With the event `agent_session_stopped`, Slack shows a stop
+button under a thread while the bot works there.
+
+Reference
+---------
+
+  corbie rook manual rook-design     the runs that answer a message, what each machine takes and gives, and who may do what
+  corbie rook manual rook-starter    the files this version starts a project with
+  corbie manual a-directory          how corbie run submit brings runs into line with files, and .corbieignore
+  corbie manual agent                an agent's tools, toolkits and when:
+  corbie manual schedules            a machine that runs at a time

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	rook "github.com/zummed/corbie-rook"
+	rook "github.com/zummed/corbie-rook/rook"
 	"github.com/zummed/corbie/client/cli"
 )
 

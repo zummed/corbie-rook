@@ -1,0 +1,23 @@
+# The router of BOT on Telegram. It runs Rook's Telegram listener as a child,
+# and sends each direct message to the conversation, keyed by the chat, the
+# person and the agent. It sends a tap on a question's button to `answers`,
+# which sends it on to that question, and /stop to the conversation. The token
+# is set at /<project>/BOT/telegram. It takes events only from its listener:
+# `receive: []`, here and in the listener, refuses a send from any location.
+statechart: BOT
+description: The router of BOT on Telegram.
+lifetime: singleton
+receive: []
+allow: [send:conversation, send:answers]
+initial: listening
+states:
+  listening:
+    job: { machine: .rook/telegram/listen.yaml, restart: { after: always } }
+    on:
+      message:
+        when: "${!event.data.change}"
+        send: { to: { at: conversation, key: "${'telegram:' + event.data.chat + ':' + event.data.user + ':assistant'}" }, event: message, data: "${event.data}" }
+      stop:
+        send: { to: { at: conversation, key: "${'telegram:' + event.data.chat + ':' + event.data.user + ':assistant'}" }, event: stop, data: "${event.data}" }
+      answer:
+        send: { to: { at: answers, key: "${event.data.question}" }, event: answer, data: "${event.data}" }
