@@ -11,6 +11,5 @@ stages:
     job:
       script: .rook/slack/slack.js
       input: ${input}
-      allow: [net:slack.com, "secret:SLACK_TOKEN@net:slack.com"]
+      allow: ["secret:SLACK_TOKEN@net:slack.com"]
       restart: { limit: 2 }
-output: ${stages.show.output}

@@ -11,6 +11,5 @@ stages:
       script: .rook/jira/jira.js
       files: [.rook/jira/api.js, .rook/shared/thread.js]
       input: { do: history, issue: "${input.issue}", site: "${values.JIRA_SITE}", email: "${values.JIRA_EMAIL}" }
-      allow: ["net:${values.JIRA_SITE}", "secret:JIRA_TOKEN@net:${values.JIRA_SITE}"]
+      allow: ["secret:JIRA_TOKEN@net:${values.JIRA_SITE}"]
       timeout: 20s
-output: ${stages.read.output}

@@ -11,4 +11,3 @@ stages:
       script: ./file.js
       files: [people/scopes.yaml]
       input: { name: "${input.name || input.user || ''}", email: "${input.email || ''}" }
-output: ${stages.find.output}

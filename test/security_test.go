@@ -530,7 +530,7 @@ func TestSecretValueNeverReachesTheModelOrTheChat(t *testing.T) {
   reveal:
     description: Show the token.
     args: {}
-    job: { script: ./reveal.js, allow: [net:example.com, "secret:API_TOKEN@net:example.com"] }
+    job: { script: ./reveal.js, allow: ["secret:API_TOKEN@net:example.com"] }
 `,
 		"agents/reveal.js":           `const s = secrets.get("API_TOKEN"); return { plain: String(s), text: secrets.text` + "`${s}`" + `, json: JSON.stringify(s) }`,
 		".rook/telegram/telegram.js": heard(heardIn("1", "1", "dm", "show me the token")),

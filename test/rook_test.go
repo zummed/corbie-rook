@@ -126,12 +126,13 @@ func copyStarter(t *testing.T) string {
 		"agents/assistant.yaml":      helperStub,
 	})
 	// The stand-in script uses no secret, and the test's controller holds none.
-	cut(t, filepath.Join(dir, ".rook/telegram"), `, "secret:TELEGRAM_TOKEN@net:api.telegram.org"`)
+	cut(t, filepath.Join(dir, ".rook/telegram"), `"secret:TELEGRAM_TOKEN@net:api.telegram.org"`, `net:api.telegram.org`)
 	return dir
 }
 
-// cut removes a text from every machine in a directory and below it.
-func cut(t *testing.T, dir, text string) {
+// cut puts one text in place of another in every machine in a directory
+// and below it.
+func cut(t *testing.T, dir, text, with string) {
 	t.Helper()
 	err := filepath.WalkDir(dir, func(name string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(name, ".yaml") {
@@ -141,7 +142,7 @@ func cut(t *testing.T, dir, text string) {
 		if err != nil {
 			return err
 		}
-		return os.WriteFile(name, []byte(strings.ReplaceAll(string(src), text, "")), 0o644)
+		return os.WriteFile(name, []byte(strings.ReplaceAll(string(src), text, with)), 0o644)
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -15,6 +15,5 @@ stages:
       script: .rook/gitlab/gitlab.js
       files: [.rook/gitlab/api.js]
       input: { do: upload, project: "${input.project}", name: "${input.name}", file: "${input.file}", iid: "${input.iid || 0}", site: "${values.GITLAB_SITE}" }
-      allow: ["net:${values.GITLAB_SITE}", "secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
+      allow: ["secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
       timeout: 5m
-output: ${stages.upload.output}

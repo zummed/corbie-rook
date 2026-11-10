@@ -8,5 +8,5 @@ stages:
     job:
       script: .rook/telegram/telegram.js
       input: { do: status, token: TELEGRAM_TOKEN, in: "${input.in}", text: "${input.text}" }
-      allow: [net:api.telegram.org, "secret:TELEGRAM_TOKEN@net:api.telegram.org"]
+      allow: ["secret:TELEGRAM_TOKEN@net:api.telegram.org"]
       timeout: 20s

@@ -11,6 +11,5 @@ stages:
       script: .rook/gitlab/gitlab.js
       files: [.rook/gitlab/api.js]
       input: "${Object.assign({ site: values.GITLAB_SITE }, input)}"
-      allow: ["net:${values.GITLAB_SITE}", "secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
+      allow: ["secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
       restart: { limit: 2 }
-output: ${stages.show.output}

@@ -8,6 +8,5 @@ stages:
     job:
       script: .rook/slack/slack.js
       input: { do: download, attachments: "${input.attachments}", most: 33554432 }
-      allow: [net:files.slack.com, "secret:SLACK_TOKEN@net:files.slack.com"]
+      allow: ["secret:SLACK_TOKEN@net:files.slack.com"]
       timeout: 5m
-output: ${stages.download.output}

@@ -1,6 +1,5 @@
 flow: status
 description: The state of every virtual machine.
-allow: ["net:${values.HYPERVISOR}", "secret:HYPERVISOR_KEY@net:${values.HYPERVISOR}"]
+allow: ["secret:HYPERVISOR_KEY@net:${values.HYPERVISOR}"]
 stages:
   status: { job: { script: ./status.js, input: { host: "${values.HYPERVISOR}" } } }
-output: ${stages.status.output}

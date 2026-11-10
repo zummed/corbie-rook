@@ -5,4 +5,3 @@ description: Posts a text in Markdown as a comment on a Jira issue.
 input: { in: string, text: string }
 stages:
   post: { job: { machine: .rook/jira/issue/comment/create.yaml, input: { issue: "${input.in}", text: "${input.text}" } } }
-output: ${stages.post.output}

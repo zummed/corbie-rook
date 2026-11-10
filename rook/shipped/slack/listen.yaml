@@ -23,7 +23,7 @@ states:
     job:
       script: ./slack.js
       input: { do: hear, overhear: "${input.overhear || false}", cursor: "${states.hearing.output ? states.hearing.output.cursor : null}" }
-      allow: [net:slack.com, net:wss-primary.slack.com, net:wss-backup.slack.com, "secret:SLACK_TOKEN@net:slack.com", "secret:SLACK_APP_TOKEN@net:slack.com"]
+      allow: [net:wss-primary.slack.com, net:wss-backup.slack.com, "secret:SLACK_TOKEN@net:slack.com", "secret:SLACK_APP_TOKEN@net:slack.com"]
       timeout: 5m
     on:
       message: { send: { to: parent, event: message, data: "${event.data}" } }

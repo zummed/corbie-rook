@@ -12,6 +12,5 @@ stages:
       script: .rook/jira/jira.js
       files: [.rook/jira/api.js, .rook/shared/rich.js]
       input: "${Object.assign({ site: values.JIRA_SITE, email: values.JIRA_EMAIL }, input)}"
-      allow: ["net:${values.JIRA_SITE}", "secret:JIRA_TOKEN@net:${values.JIRA_SITE}"]
+      allow: ["secret:JIRA_TOKEN@net:${values.JIRA_SITE}"]
       restart: { limit: 2 }
-output: ${stages.show.output}

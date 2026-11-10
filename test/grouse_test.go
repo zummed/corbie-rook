@@ -787,10 +787,10 @@ func TestGrouseSecurity(t *testing.T) {
 		setSite(t, dir, "agents/support.yaml", "toolkits:\n", `tools:
   peek_slack:
     description: Reads the Slack token.
-    job: { script: ./peek.js, input: { name: SLACK_TOKEN }, allow: [net:example.com, "secret:SLACK_TOKEN@net:example.com"] }
+    job: { script: ./peek.js, input: { name: SLACK_TOKEN }, allow: ["secret:SLACK_TOKEN@net:example.com"] }
   peek_infra:
     description: Reads the hypervisor's key.
-    job: { script: ./peek.js, input: { name: HYPERVISOR_KEY }, allow: [net:example.com, "secret:HYPERVISOR_KEY@net:example.com"] }
+    job: { script: ./peek.js, input: { name: HYPERVISOR_KEY }, allow: ["secret:HYPERVISOR_KEY@net:example.com"] }
 toolkits:
 `)
 		write(t, dir, map[string]string{

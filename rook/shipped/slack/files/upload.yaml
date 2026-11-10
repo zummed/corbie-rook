@@ -8,6 +8,5 @@ stages:
     job:
       script: .rook/slack/slack.js
       input: { do: upload, in: "${input.in}", name: "${input.name}", file: "${input.file}" }
-      allow: [net:slack.com, net:files.slack.com, "secret:SLACK_TOKEN@net:slack.com"]
+      allow: [net:files.slack.com, "secret:SLACK_TOKEN@net:slack.com"]
       timeout: 5m
-output: ${stages.upload.output}

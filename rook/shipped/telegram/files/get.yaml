@@ -9,6 +9,5 @@ stages:
     job:
       script: .rook/telegram/telegram.js
       input: { do: get, token: TELEGRAM_TOKEN, attachments: "${input.attachments}", most: 20000000 }
-      allow: [net:api.telegram.org, "secret:TELEGRAM_TOKEN@net:api.telegram.org"]
+      allow: ["secret:TELEGRAM_TOKEN@net:api.telegram.org"]
       timeout: 5m
-output: ${stages.download.output}

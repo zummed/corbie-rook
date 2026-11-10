@@ -11,6 +11,5 @@ stages:
     job:
       script: .rook/telegram/telegram.js
       input: "${Object.assign({ token: 'TELEGRAM_TOKEN' }, input)}"
-      allow: [net:api.telegram.org, "secret:TELEGRAM_TOKEN@net:api.telegram.org"]
+      allow: ["secret:TELEGRAM_TOKEN@net:api.telegram.org"]
       restart: { limit: 2 }
-output: ${stages.show.output}
