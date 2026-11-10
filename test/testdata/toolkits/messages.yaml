@@ -7,7 +7,7 @@ tools:
     description: Write a text in a person's Telegram chat, by the chat's ID.
     args: { chat: string, text: string }
     job:
-      call: { at: gromit/telegram/chat/post }
+      call: { at: grouse/telegram/chat/post }
       input: { in: "${args.chat}", text: "${args.text}" }
-      allow: [send:gromit/telegram/chat/post]
+      allow: [send:grouse/telegram/chat/post]
       approve: true

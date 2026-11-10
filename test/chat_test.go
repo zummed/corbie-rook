@@ -246,9 +246,9 @@ const houseToolkit = `
 	    description: Write a text in a person's Telegram chat, by the chat's ID.
 	    args: { chat: string, text: string }
 	    job:
-	      call: { at: gromit/telegram/chat/post }
+	      call: { at: grouse/telegram/chat/post }
 	      input: { in: "${args.chat}", text: "${args.text}" }
-	      allow: [send:gromit/telegram/chat/post]
+	      allow: [send:grouse/telegram/chat/post]
 	      approve: true
 `
 
@@ -327,7 +327,7 @@ func houseModel(c llmstandin.Call) llmstandin.Reply {
 // houseAsk is the ask of an agent with the toolkit house: a yes from someone
 // with house:approve in alice's chat. It names no asker, so alice may approve
 // what she asked for.
-const houseAsk = "ask:\n  machine: .rook/approval.yaml\n  input: { ask: [{ at: gromit/telegram/chat/ask, in: \"1\" }], approvers: \"house:approve\", request: \"${input.messages.map((m) => m.text).join('\\\\n')}\" }\n"
+const houseAsk = "ask:\n  machine: .rook/approval.yaml\n  input: { ask: [{ at: grouse/telegram/chat/ask, in: \"1\" }], approvers: \"house:approve\", request: \"${input.messages.map((m) => m.text).join('\\\\n')}\" }\n"
 
 // houseProject makes a project whose agent at agents/assistant may open the
 // toolkit house, for a person with the scope house, and asks the stand-in
@@ -856,7 +856,7 @@ func TestPageDeploys(t *testing.T) {
 	point(t, dir, "gitlab", gl.Server)
 	w.secret("GITLAB_TOKEN", "gl-token")
 	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
-	for _, path := range []string{"deploys.yaml", "gromit/gitlab/pipeline/create.yaml", "gromit/slack/chat/ask.yaml"} {
+	for _, path := range []string{"deploys.yaml", "grouse/gitlab/pipeline/create.yaml", "grouse/slack/chat/ask.yaml"} {
 		writeRaw(t, dir, path, pageExample(t, "rook-design", path))
 	}
 	write(t, dir, map[string]string{"people/scopes.yaml": `
@@ -934,7 +934,7 @@ func TestPageToolkitAndAgent(t *testing.T) {
 	w.secret("GITLAB_TOKEN", "gl-token")
 	w.value("GITLAB_SITE", strings.TrimPrefix(gl.URL, "http://"))
 	w.secret("ANTHROPIC_KEY", "sk-test")
-	for _, path := range []string{"agents/assistant.yaml", "toolkits/orders.yaml", "toolkits/orders.md", "gromit/gitlab/repository/files/read.yaml", "gromit/gitlab/repository/commits/create.yaml", ".corbieignore"} {
+	for _, path := range []string{"agents/assistant.yaml", "toolkits/orders.yaml", "toolkits/orders.md", "grouse/gitlab/repository/files/read.yaml", "grouse/gitlab/repository/commits/create.yaml", ".corbieignore"} {
 		writeRaw(t, dir, path, pageExample(t, "rook-project", path))
 	}
 	agent := pageExample(t, "rook-project", "agents/assistant.yaml")

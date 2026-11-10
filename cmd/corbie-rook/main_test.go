@@ -77,9 +77,9 @@ func TestThePageShowsWhatInitPrints(t *testing.T) {
 	}
 	t.Chdir(t.TempDir())
 	for _, c := range []struct{ in, command string }{
-		{".", "corbie rook init my-bot --bot gromit --services slack"},
+		{".", "corbie rook init my-bot --bot grouse --services slack"},
 		{"my-bot", "corbie test ."},
-		{".", "corbie rook init . --bot gromit --services gitlab"},
+		{".", "corbie rook init . --bot grouse --services gitlab"},
 	} {
 		t.Chdir(c.in)
 		var out string
@@ -95,7 +95,7 @@ func TestThePageShowsWhatInitPrints(t *testing.T) {
 			t.Errorf("%s ended %d and printed\n%s\nand the page shows\n%s", c.command, status, out, want)
 		}
 	}
-	if !strings.Contains(shown("corbie rook init . --bot gromit --services gitlab"), "  set the listener's projects: or group: in gromit/gitlab/gromit.yaml\n") {
+	if !strings.Contains(shown("corbie rook init . --bot grouse --services gitlab"), "  set the listener's projects: or group: in grouse/gitlab/grouse.yaml\n") {
 		t.Error("the page shows no line for the GitLab router's placeholder")
 	}
 }
@@ -104,18 +104,18 @@ func TestThePageShowsWhatInitPrints(t *testing.T) {
 // the service's directory under the bot's.
 func TestInitPrintsTheSecretsAndValuesOfItsServices(t *testing.T) {
 	t.Chdir(t.TempDir())
-	out, status := run(t, "", "init", "my-bot", "--bot", "gromit", "--services", "gitlab,jira")
+	out, status := run(t, "", "init", "my-bot", "--bot", "grouse", "--services", "gitlab,jira")
 	if status != 0 {
 		t.Fatalf("init ended %d:\n%s", status, out)
 	}
 	for _, want := range []string{
-		"  corbie controller secret set GITLAB_TOKEN --at /my-bot/gromit/gitlab\n",
-		"  corbie controller value set GITLAB_SITE <host> --at /my-bot/gromit/gitlab\n",
-		"  corbie controller secret set JIRA_TOKEN --at /my-bot/gromit/jira\n",
-		"  corbie controller value set JIRA_SITE <host> --at /my-bot/gromit/jira\n",
-		"  corbie controller value set JIRA_EMAIL <email> --at /my-bot/gromit/jira\n",
-		"  set the listener's projects: or group: in gromit/gitlab/gromit.yaml\n",
-		"  set the listener's projects: in gromit/jira/gromit.yaml\n",
+		"  corbie controller secret set GITLAB_TOKEN --at /my-bot/grouse/gitlab\n",
+		"  corbie controller value set GITLAB_SITE <host> --at /my-bot/grouse/gitlab\n",
+		"  corbie controller secret set JIRA_TOKEN --at /my-bot/grouse/jira\n",
+		"  corbie controller value set JIRA_SITE <host> --at /my-bot/grouse/jira\n",
+		"  corbie controller value set JIRA_EMAIL <email> --at /my-bot/grouse/jira\n",
+		"  set the listener's projects: or group: in grouse/gitlab/grouse.yaml\n",
+		"  set the listener's projects: in grouse/jira/grouse.yaml\n",
 		"  cd my-bot && corbie run submit .\n",
 	} {
 		if !strings.Contains(out, want) {
@@ -151,7 +151,7 @@ func TestInitWithNoServicesSaysHowToChooseThem(t *testing.T) {
 func TestInitTakesAListAsPeopleWriteIt(t *testing.T) {
 	for _, list := range []string{"slack, gitlab", "slack,gitlab,", "slack,gitlab,slack"} {
 		t.Chdir(t.TempDir())
-		out, status := run(t, "", "init", "my-bot", "--bot", "gromit", "--services", list)
+		out, status := run(t, "", "init", "my-bot", "--bot", "grouse", "--services", list)
 		if status != 0 {
 			t.Errorf("--services %q ended %d:\n%s", list, status, out)
 			continue
@@ -169,7 +169,7 @@ func TestInitTakesAListAsPeopleWriteIt(t *testing.T) {
 // to the same bot does not.
 func TestInitOfASecondBotSaysItNeedsItsOwnConversation(t *testing.T) {
 	t.Chdir(t.TempDir())
-	if out, status := run(t, "", "init", "my-bot", "--bot", "gromit", "--services", "slack"); status != 0 {
+	if out, status := run(t, "", "init", "my-bot", "--bot", "grouse", "--services", "slack"); status != 0 {
 		t.Fatalf("init ended %d:\n%s", status, out)
 	}
 	out, status := run(t, "", "init", "my-bot", "--bot", "hal", "--services", "telegram")
@@ -183,7 +183,7 @@ func TestInitOfASecondBotSaysItNeedsItsOwnConversation(t *testing.T) {
 	if !strings.Contains(out, secret+"\n"+step+"  cd my-bot && corbie test .\n") {
 		t.Errorf("init does not print the step after the secrets:\n%s", out)
 	}
-	if out, _ := run(t, "", "init", "my-bot", "--bot", "gromit", "--services", "jira"); strings.Contains(out, "another bot") {
+	if out, _ := run(t, "", "init", "my-bot", "--bot", "grouse", "--services", "jira"); strings.Contains(out, "another bot") {
 		t.Errorf("init of a service of the same bot prints the step:\n%s", out)
 	}
 }

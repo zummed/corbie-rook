@@ -9,6 +9,5 @@ stages:
       script: .rook/jira/jira.js
       files: [.rook/jira/api.js]
       input: { do: attachments, attachments: "${input.attachments}", most: 33554432, site: "${values.JIRA_SITE}", email: "${values.JIRA_EMAIL}" }
-      allow: ["net:${values.JIRA_SITE}", "secret:JIRA_TOKEN@net:${values.JIRA_SITE}"]
+      allow: ["secret:JIRA_TOKEN@net:${values.JIRA_SITE}"]
       timeout: 5m
-output: ${stages.download.output}

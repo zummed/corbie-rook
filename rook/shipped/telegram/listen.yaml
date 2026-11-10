@@ -23,7 +23,7 @@ states:
         cursor: "${states.hearing.output ? states.hearing.output.cursor : null}"
         failing: "${states.hearing.output ? states.hearing.output.failing : null}"
         chats: "${states.hearing.output ? states.hearing.output.chats : null}"
-      allow: [net:api.telegram.org, "secret:TELEGRAM_TOKEN@net:api.telegram.org"]
+      allow: ["secret:TELEGRAM_TOKEN@net:api.telegram.org"]
       timeout: 2m
     on:
       message: { send: { to: parent, event: message, data: "${event.data}" } }

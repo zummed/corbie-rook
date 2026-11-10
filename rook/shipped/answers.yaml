@@ -23,9 +23,7 @@ states:
       answer: over
   # Keeps open's sender, the question, and data, as this state's output.
   opened:
-    initial: kept
-    states:
-      kept: { end: done, output: { question: "${event.from}", router: "${event.data.router}", within: "${event.data.within || '7d'}" } }
+    output: { question: "${event.from}", router: "${event.data.router}", within: "${event.data.within || '7d'}" }
     on: { done: open }
   open:
     timers: { quiet: "${states.opened.output.within}" }

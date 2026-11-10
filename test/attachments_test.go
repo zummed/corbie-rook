@@ -254,12 +254,12 @@ func TestTelegramFilesSendSendsADocument(t *testing.T) {
 		bot + "/telegram/files/send.yaml": "include: .rook/telegram/files/send.yaml\n",
 		"agents/sender.yaml": `
 			flow: sender
-			allow: [send:gromit/telegram/files/get, send:gromit/telegram/files/send]
+			allow: [send:grouse/telegram/files/get, send:grouse/telegram/files/send]
 			stages:
 			  made: { job: { script: ./made.js } }
-			  report: { job: { call: { at: gromit/telegram/files/send }, input: { in: "1", name: report.csv, file: "${stages.made.output}" } } }
-			  got: { job: { call: { at: gromit/telegram/files/get }, input: { attachments: [{ name: photo.jpg, type: image/jpeg, size: 8, id: P1 }] } } }
-			  photo: { job: { call: { at: gromit/telegram/files/send }, input: { in: "1", name: cat.jpg, file: "${stages.got.output[0].file}" } }, follows: [report] }
+			  report: { job: { call: { at: grouse/telegram/files/send }, input: { in: "1", name: report.csv, file: "${stages.made.output}" } } }
+			  got: { job: { call: { at: grouse/telegram/files/get }, input: { attachments: [{ name: photo.jpg, type: image/jpeg, size: 8, id: P1 }] } } }
+			  photo: { job: { call: { at: grouse/telegram/files/send }, input: { in: "1", name: cat.jpg, file: "${stages.got.output[0].file}" } }, follows: [report] }
 		`,
 		"agents/made.js": `return blobs.make("a,b\n1,2\n", { type: "text/csv" })`,
 	})
@@ -302,10 +302,10 @@ func uploading(t *testing.T, dir string) {
 		"on/report.yaml": `
 			flow: report
 			input: { in: string }
-			allow: [send:gromit/slack/files/upload]
+			allow: [send:grouse/slack/files/upload]
 			stages:
 			  file: { job: { script: ./file.js } }
-			  upload: { job: { call: { at: gromit/slack/files/upload }, input: { in: "${input.in}", name: report.csv, file: "${stages.file.output}" } } }
+			  upload: { job: { call: { at: grouse/slack/files/upload }, input: { in: "${input.in}", name: report.csv, file: "${stages.file.output}" } } }
 			output: ${stages.upload.output}
 		`,
 		"on/file.js": `return blobs.make("a,b\n", { type: "text/csv" })`,
@@ -363,9 +363,9 @@ func TestSlackFilesGetDownloadsAFile(t *testing.T) {
 		"on/get.yaml": `
 			flow: get
 			input: { attachments: list }
-			allow: [send:gromit/slack/files/get]
+			allow: [send:grouse/slack/files/get]
 			stages:
-			  get: { job: { call: { at: gromit/slack/files/get }, input: { attachments: "${input.attachments}" } } }
+			  get: { job: { call: { at: grouse/slack/files/get }, input: { attachments: "${input.attachments}" } } }
 			  read: { job: { script: ./read.js, input: { files: "${stages.get.output}" } } }
 			output: ${stages.read.output}
 		`,

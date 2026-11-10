@@ -4,8 +4,8 @@
 statechart: issue-log
 description: Writes each change to an orders issue in #orders-log.
 lifetime: keyed
-receive: [gromit/gitlab/gromit]
-allow: [send:gromit/slack/chat/post]
+receive: [grouse/gitlab/grouse]
+allow: [send:grouse/slack/chat/post]
 initial: waiting
 states:
   waiting:
@@ -13,6 +13,6 @@ states:
     on: { change: posting, quiet: over }
   posting:
     defer: [change]
-    job: { call: { at: gromit/slack/chat/post }, input: { in: "#orders-log", text: "${event.data.chat + ': ' + event.data.text}" } }
+    job: { call: { at: grouse/slack/chat/post }, input: { in: "#orders-log", text: "${event.data.chat + ': ' + event.data.text}" } }
     on: { done: waiting, failed: waiting }
   over: { end: done }

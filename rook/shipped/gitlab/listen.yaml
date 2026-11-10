@@ -37,7 +37,7 @@ states:
         overhear: "${input.overhear || false}"
         settle: "${input.settle || '0s'}"
         cursor: "${states.hearing.output ? states.hearing.output.cursor : null}"
-      allow: ["net:${values.GITLAB_SITE}", "secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
+      allow: ["secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
       timeout: 2m
     on:
       message: { send: { to: parent, event: message, data: "${event.data}" } }

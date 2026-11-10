@@ -31,7 +31,7 @@ states:
       script: ./jira.js
       files: [./api.js]
       input: { do: hear, site: "${values.JIRA_SITE}", email: "${values.JIRA_EMAIL}", projects: "${input.projects}", overhear: "${input.overhear || false}", settle: "${input.settle || '0s'}", cursor: "${states.hearing.output ? states.hearing.output.cursor : null}" }
-      allow: ["net:${values.JIRA_SITE}", "secret:JIRA_TOKEN@net:${values.JIRA_SITE}"]
+      allow: ["secret:JIRA_TOKEN@net:${values.JIRA_SITE}"]
       timeout: 2m
     on:
       message: { send: { to: parent, event: message, data: "${event.data}" } }

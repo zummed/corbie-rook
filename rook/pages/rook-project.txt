@@ -14,12 +14,12 @@ Start a project
 4. Start Corbie, and submit the project.
 
     corbie init --ceiling all
-    corbie rook init my-bot --bot gromit --services slack
+    corbie rook init my-bot --bot grouse --services slack
       Make the Slack app first, as corbie rook manual rook-project says under The Slack app.
       my-bot is ready, and answers nobody until agents/assistant.yaml is there. Add it as corbie rook manual rook-project says under Add an agent, or ask a model in my-bot to. Then:
 
-        corbie controller secret set SLACK_TOKEN --at /my-bot/gromit/slack
-        corbie controller secret set SLACK_APP_TOKEN --at /my-bot/gromit/slack
+        corbie controller secret set SLACK_TOKEN --at /my-bot/grouse/slack
+        corbie controller secret set SLACK_APP_TOKEN --at /my-bot/grouse/slack
         cd my-bot && corbie run submit .
 
     cd my-bot
@@ -28,8 +28,8 @@ Start a project
 
 `corbie run submit .` records the project as the tree `/my-bot`, and starts
 each router, which starts its listener. A secret or a value set at
-`/my-bot/gromit/slack` is used by the Slack router and calls of the bot
-`gromit`, and one set at `/my-bot` by every run of the project.
+`/my-bot/grouse/slack` is used by the Slack router and calls of the bot
+`grouse`, and one set at `/my-bot` by every run of the project.
 
 - Until the project has an agent, the bot answers anyone who names it with `This bot has no agent yet.`
 - Submit the project from a client no gateway uses: a gateway whose client submitted the project can call any of its locations with any input.
@@ -52,21 +52,21 @@ conversation makes only for a message from a service the project is not on.
       answers.yaml                        ok
       ballot.yaml                         ok
       conversation.yaml                   ok
-      gromit/slack/assistant/status.yaml  ok
-      gromit/slack/chat/ask.yaml          ok
-      gromit/slack/chat/post.yaml         ok
-      gromit/slack/chat/show.yaml         ok
-      gromit/slack/files/get.yaml         ok
-      gromit/slack/gromit.yaml            ok
+      grouse/slack/assistant/status.yaml  ok
+      grouse/slack/chat/ask.yaml          ok
+      grouse/slack/chat/post.yaml         ok
+      grouse/slack/chat/show.yaml         ok
+      grouse/slack/files/get.yaml         ok
+      grouse/slack/grouse.yaml            ok
       later.yaml                          ok
       people/find.yaml                    ok
       .rook/                              listed
       people/scopes.yaml                  listed
       nothing in the tree is at /my-bot/agents/assistant, named by conversation.yaml states.answering.job.machine.stages.answer.job.call
-      nothing in the tree is at /my-bot/gromit/gitlab/chat/post, named by conversation.yaml states.replying.job.machine.stages.gitlab.job.call
-      nothing in the tree is at /my-bot/gromit/jira/chat/post, named by conversation.yaml states.replying.job.machine.stages.jira.job.call
-      nothing in the tree is at /my-bot/gromit/telegram/chat/post, named by conversation.yaml states.replying.job.machine.stages.telegram.job.call
-      nothing in the tree is at /my-bot/gromit/telegram/chat/status, named by conversation.yaml states.answering.job.machine.stages.telegram_status.job.call
+      nothing in the tree is at /my-bot/grouse/gitlab/chat/post, named by conversation.yaml states.replying.job.machine.stages.gitlab.job.call
+      nothing in the tree is at /my-bot/grouse/jira/chat/post, named by conversation.yaml states.replying.job.machine.stages.jira.job.call
+      nothing in the tree is at /my-bot/grouse/telegram/chat/post, named by conversation.yaml states.replying.job.machine.stages.telegram.job.call
+      nothing in the tree is at /my-bot/grouse/telegram/chat/status, named by conversation.yaml states.answering.job.machine.stages.telegram_status.job.call
 
 Submit to one Corbie only: a second copy of a router, with the same token,
 takes the first one's messages.
@@ -75,7 +75,7 @@ takes the first one's messages.
   an agent, or a toolkit it includes        the next turn is answered by the new agent
   conversation.yaml                         the runs under way finish with the machines they started with
   a file deleted                            the runs at its location are cancelled
-  a value                                   a listener reads it when it starts: corbie run cancel /my-bot/gromit/<service>/gromit, then submit
+  a value                                   a listener reads it when it starts: corbie run cancel /my-bot/grouse/<service>/grouse, then submit
 
 After updating Rook, run `corbie rook init .` in the project. It rewrites
 `.rook/`, writes `AGENTS.md`, `.corbieignore`, `answers.yaml`, `ballot.yaml`
@@ -89,7 +89,7 @@ What a project holds
 
   .corbieignore       what is no machine: .rook/, people/scopes.yaml, and toolkits/ once you add one
   conversation.yaml   one run for each person in each thread, and the stages of a turn
-  gromit/<service>/   the router of the bot gromit on a service, and the calls it places, each a file of one line
+  grouse/<service>/   the router of the bot grouse on a service, and the calls it places, each a file of one line
   people/find.yaml    the lookup: who someone is, and their scopes
   people/scopes.yaml  each person's email, name and scopes, which Rook's lookup reads
   agents/             the agent at agents/assistant, once you add it
@@ -116,14 +116,14 @@ toolkit the agent includes is offered only to a person whose scopes its
 project, and do what `init` prints. The router it writes reads the project
 `group/project` until you set the listener's `projects:` or `group:`.
 
-    corbie rook init . --bot gromit --services gitlab
+    corbie rook init . --bot grouse --services gitlab
       my-bot has this version's .rook.
 
       Then:
 
-        corbie controller secret set GITLAB_TOKEN --at /my-bot/gromit/gitlab
-        corbie controller value set GITLAB_SITE <host> --at /my-bot/gromit/gitlab
-        set the listener's projects: or group: in gromit/gitlab/gromit.yaml
+        corbie controller secret set GITLAB_TOKEN --at /my-bot/grouse/gitlab
+        corbie controller value set GITLAB_SITE <host> --at /my-bot/grouse/gitlab
+        set the listener's projects: or group: in grouse/gitlab/grouse.yaml
         corbie test .
         corbie run submit .
 
@@ -150,7 +150,7 @@ To add the agent:
       ${input.format}
     ask:
       machine: .rook/approval.yaml
-      input: { ask: [{ at: gromit/slack/chat/ask, in: "#orders-team" }], approvers: "orders:approve", within: 1d, asker: "${input.asker.email}", request: "${input.messages.map((m) => (m.later != null ? '(a reminder the bot set) ' : '') + m.text).join('\\n')}" }
+      input: { ask: [{ at: grouse/slack/chat/ask, in: "#orders-team" }], approvers: "orders:approve", within: 1d, asker: "${input.asker.email}", request: "${input.messages.map((m) => (m.later != null ? '(a reminder the bot set) ' : '') + m.text).join('\\n')}" }
     toolkits:
       orders: { include: toolkits/orders.yaml, when: "${input.asker.scopes.includes('orders:read')}" }
 
@@ -158,9 +158,9 @@ To add the agent:
     description: The orders app, its settings, and changing them.
     instructions: { include: ./orders.md }
     tools:
-      read_file: { call: gromit/gitlab/repository/files/read, input: { project: group/orders } }
+      read_file: { call: grouse/gitlab/repository/files/read, input: { project: group/orders } }
       change_file:
-        call: gromit/gitlab/repository/commits/create
+        call: grouse/gitlab/repository/commits/create
         input: { project: group/orders }
         approve: true
         when: "${input.asker.scopes.includes('orders:write')}"
@@ -170,10 +170,10 @@ To add the agent:
     in config/app.yaml. Read a file before you change it, and change only what
     the person asked for.
 
-    # gromit/gitlab/repository/files/read.yaml
+    # grouse/gitlab/repository/files/read.yaml
     include: .rook/gitlab/repository/files/read.yaml
 
-    # gromit/gitlab/repository/commits/create.yaml
+    # grouse/gitlab/repository/commits/create.yaml
     include: .rook/gitlab/repository/commits/create.yaml
 
     # .corbieignore, with toolkits/ added
@@ -202,10 +202,10 @@ Common changes
   do something at a time                            a schedule under schedules/
   say what it is doing while it works               the agent's system text: when to use its tool progress
   come back later to check on something             the agent's system text: when to use its tool later
-  be on another service                             corbie rook init . --bot gromit --services <name>
+  be on another service                             corbie rook init . --bot grouse --services <name>
   be a second bot                                   corbie rook init . --bot <name> --services <names>, and a second conversation
 
-- To send a channel's messages to a machine of your own, such as `deploys.yaml` in `corbie rook manual rook-design` under Asking a person, add a rule before the conversation's in the router, and `send:deploys` to its `allow:`. Write `receive: [gromit/slack/gromit]` in your machine, so no other location starts it:
+- To send a channel's messages to a machine of your own, such as `deploys.yaml` in `corbie rook manual rook-design` under Asking a person, add a rule before the conversation's in the router, and `send:deploys` to its `allow:`. Write `receive: [grouse/slack/grouse]` in your machine, so no other location starts it:
 
       message:
         - when: "${event.data.place === '#deploys' && !event.data.change && !event.data.unaddressed}"
@@ -224,16 +224,16 @@ Common changes
       ask:
         machine: .rook/approval.yaml
         input:
-          ask: [{ at: gromit/slack/chat/ask, in: "#orders-team" }]
+          ask: [{ at: grouse/slack/chat/ask, in: "#orders-team" }]
           approvers: "orders:approve"
           asker: "${input.asker.email}"
           by:
-            infra: { ask: [{ at: gromit/slack/chat/ask, in: "#infra" }], approvers: "infra:approve", within: 1h }
+            infra: { ask: [{ at: grouse/slack/chat/ask, in: "#infra" }], approvers: "infra:approve", within: 1h }
 
 - To post from a machine, call the bot's `chat/post` with `{ in, text }`, as `corbie rook manual rook-design` shows under Rook's calls.
 - To find people somewhere else, write `people/find.yaml` as a machine of your own that takes `{ service, user, name, email }` and gives `{ name, email, scopes }`.
-- To add a service, run `corbie rook init . --bot gromit --services <name>`, set the secrets and values it names, and submit. The conversation answers every service already.
-- `init` writes no second `conversation.yaml`, and prints these steps when it adds a second bot. Copy `conversation.yaml` to `<bot>/conversation.yaml` and change `gromit` in it to the new bot's name, so its `receive:` names the new bot's routers. In those routers, change the `send:` target and the `allow:` entry from `conversation` to `<bot>/conversation`. Add `<bot>/conversation` to the `receive:` of each agent it calls, as `receive: [conversation, <bot>/conversation]`.
+- To add a service, run `corbie rook init . --bot grouse --services <name>`, set the secrets and values it names, and submit. The conversation answers every service already.
+- `init` writes no second `conversation.yaml`, and prints these steps when it adds a second bot. Copy `conversation.yaml` to `<bot>/conversation.yaml` and change `grouse` in it to the new bot's name, so its `receive:` names the new bot's routers. In those routers, change the `send:` target and the `allow:` entry from `conversation` to `<bot>/conversation`. Add `<bot>/conversation` to the `receive:` of each agent it calls, as `receive: [conversation, <bot>/conversation]`.
 
 With a model
 ------------
@@ -260,9 +260,9 @@ so nothing on the internet connects to this computer.
    description. Slack cannot turn an agent back into a plain app.
 3. Under Basic Information, App-Level Tokens, make a token with the scope
    `connections:write`, and run `corbie controller secret set
-   SLACK_APP_TOKEN --at /my-bot/gromit/slack`.
+   SLACK_APP_TOKEN --at /my-bot/grouse/slack`.
 4. Under Install App, install the app, and set its Bot User OAuth Token with
-   `corbie controller secret set SLACK_TOKEN --at /my-bot/gromit/slack`.
+   `corbie controller secret set SLACK_TOKEN --at /my-bot/grouse/slack`.
 5. In `people/scopes.yaml`, give each person's email as Slack shows it in
    their profile, with their name and scopes.
 6. In each channel the bot should hear, run `/invite @Rook`.

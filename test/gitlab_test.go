@@ -678,7 +678,7 @@ func TestGitLabTakesOnlyTheIssuesOwnFiles(t *testing.T) {
 	// The conversation downloads them too, before it answers.
 	w.until("the answer", func() bool { return len(gl.said()) > 0 })
 	before := len(gl.fetched())
-	run := ran(t, w, "gromit/gitlab/files/get.yaml", map[string]any{"attachments": files})
+	run := ran(t, w, "grouse/gitlab/files/get.yaml", map[string]any{"attachments": files})
 	if run.Status != "done" {
 		t.Fatalf("files/get ended %s: %s", run.Status, run.Error)
 	}
@@ -700,13 +700,13 @@ func TestGitLabTakesOnlyTheIssuesOwnFiles(t *testing.T) {
 
 // placedCalls places GitLab's calls that the starting files do not.
 var placedCalls = map[string]string{
-	"gromit/gitlab/issues/read.yaml":               "include: .rook/gitlab/issues/read.yaml",
-	"gromit/gitlab/issues/notes/create.yaml":       "include: .rook/gitlab/issues/notes/create.yaml",
-	"gromit/gitlab/issues/notes/list.yaml":         "include: .rook/gitlab/issues/notes/list.yaml",
-	"gromit/gitlab/uploads/create.yaml":            "include: .rook/gitlab/uploads/create.yaml",
-	"gromit/gitlab/repository/files/read.yaml":     "include: .rook/gitlab/repository/files/read.yaml",
-	"gromit/gitlab/repository/commits/create.yaml": "include: .rook/gitlab/repository/commits/create.yaml",
-	"gromit/gitlab/pipeline/create.yaml":           "include: .rook/gitlab/pipeline/create.yaml",
+	"grouse/gitlab/issues/read.yaml":               "include: .rook/gitlab/issues/read.yaml",
+	"grouse/gitlab/issues/notes/create.yaml":       "include: .rook/gitlab/issues/notes/create.yaml",
+	"grouse/gitlab/issues/notes/list.yaml":         "include: .rook/gitlab/issues/notes/list.yaml",
+	"grouse/gitlab/uploads/create.yaml":            "include: .rook/gitlab/uploads/create.yaml",
+	"grouse/gitlab/repository/files/read.yaml":     "include: .rook/gitlab/repository/files/read.yaml",
+	"grouse/gitlab/repository/commits/create.yaml": "include: .rook/gitlab/repository/commits/create.yaml",
+	"grouse/gitlab/pipeline/create.yaml":           "include: .rook/gitlab/pipeline/create.yaml",
 }
 
 // Each GitLab call, placed with one line, does what its description says
@@ -732,13 +732,13 @@ func TestGitLabCallsDoWhatTheySay(t *testing.T) {
 		return out
 	}
 
-	is := result("gromit/gitlab/issues/read.yaml", map[string]any{"project": "group/project", "iid": 7})
+	is := result("grouse/gitlab/issues/read.yaml", map[string]any{"project": "group/project", "iid": 7})
 	if is["title"] != "Broken build" || fmt.Sprint(is["labels"]) != "[bug]" || fmt.Sprint(is["assignees"]) != "[bo]" || is["milestone"] != "v1" || is["author"] != "al" ||
 		!strings.Contains(fmt.Sprint(is["attachments"]), "shot.png") {
 		t.Errorf("issues/read gave %v", is)
 	}
 
-	result("gromit/gitlab/issues/notes/create.yaml", map[string]any{"project": "group/project", "iid": 7, "body": charts})
+	result("grouse/gitlab/issues/notes/create.yaml", map[string]any{"project": "group/project", "iid": 7, "body": charts})
 	got := gl.said()[0]
 	for _, want := range []string{"Here.", "**Tickets**", "| Jan | 1 |", "| A | 3 |", "```mermaid\ngraph LR; A-->B\n```"} {
 		if !strings.Contains(got, want) {
@@ -749,21 +749,21 @@ func TestGitLabCallsDoWhatTheySay(t *testing.T) {
 		t.Errorf("a chart is left in %q", got)
 	}
 
-	run := ran(t, w, "gromit/gitlab/issues/notes/list.yaml", map[string]any{"project": "group/project", "iid": 7})
+	run := ran(t, w, "grouse/gitlab/issues/notes/list.yaml", map[string]any{"project": "group/project", "iid": 7})
 	notes, _ := json.Marshal(run.Output)
 	if !strings.Contains(string(notes), `"text":"first"`) || strings.Contains(string(notes), "hidden") || !strings.Contains(string(notes), `"name":"Al"`) {
 		t.Errorf("issues/notes/list gave %s", notes)
 	}
 
-	file := result("gromit/gitlab/repository/files/read.yaml", map[string]any{"project": "group/project", "path": "config/app.yaml", "ref": "main"})
+	file := result("grouse/gitlab/repository/files/read.yaml", map[string]any{"project": "group/project", "path": "config/app.yaml", "ref": "main"})
 	if file["text"] != "port: 80\n" {
 		t.Errorf("repository/files/read gave %v", file)
 	}
-	if run := ran(t, w, "gromit/gitlab/repository/files/read.yaml", map[string]any{"project": "group/project", "path": "none.yaml", "ref": "main"}); run.Status != "failed" || !strings.Contains(run.Error, "404") {
+	if run := ran(t, w, "grouse/gitlab/repository/files/read.yaml", map[string]any{"project": "group/project", "path": "none.yaml", "ref": "main"}); run.Status != "failed" || !strings.Contains(run.Error, "404") {
 		t.Errorf("reading a file that is not there ended %s: %s", run.Status, run.Error)
 	}
 
-	commit := result("gromit/gitlab/repository/commits/create.yaml", map[string]any{"project": "group/project", "branch": "main", "message": "Port 81",
+	commit := result("grouse/gitlab/repository/commits/create.yaml", map[string]any{"project": "group/project", "branch": "main", "message": "Port 81",
 		"actions": []any{map[string]any{"action": "update", "file_path": "config/app.yaml", "content": "port: 81\n"}}})
 	gl.mu.Lock()
 	changed := gl.repo["group/project@main:config/app.yaml"]
@@ -772,7 +772,7 @@ func TestGitLabCallsDoWhatTheySay(t *testing.T) {
 		t.Errorf("repository/commits/create gave %v, and the file is %q", commit, changed)
 	}
 
-	pipeline := result("gromit/gitlab/pipeline/create.yaml", map[string]any{"project": "group/project", "ref": "main", "variables": map[string]any{"TARGET": "web"}})
+	pipeline := result("grouse/gitlab/pipeline/create.yaml", map[string]any{"project": "group/project", "ref": "main", "variables": map[string]any{"TARGET": "web"}})
 	gl.mu.Lock()
 	started := fmt.Sprint(gl.pipelines)
 	gl.mu.Unlock()
@@ -783,7 +783,7 @@ func TestGitLabCallsDoWhatTheySay(t *testing.T) {
 	report := func() client.InputFile {
 		return client.InputFile{Name: "report.csv", Contents: strings.NewReader("a,b\n")}
 	}
-	upload := result("gromit/gitlab/uploads/create.yaml", map[string]any{"project": "group/project", "iid": 7, "name": "report.csv", "file": report()})
+	upload := result("grouse/gitlab/uploads/create.yaml", map[string]any{"project": "group/project", "iid": 7, "name": "report.csv", "file": report()})
 	link := "[report.csv](/uploads/" + secret2 + "/report.csv)"
 	gl.mu.Lock()
 	uploads := slices.Clone(gl.uploads)
@@ -798,7 +798,7 @@ func TestGitLabCallsDoWhatTheySay(t *testing.T) {
 	// When GitLab refuses an upload, the call fails with its status, and no
 	// comment links to it.
 	before := len(gl.said())
-	if run := ran(t, w, "gromit/gitlab/uploads/create.yaml", map[string]any{"project": "group/project", "iid": 7, "name": "report.csv", "file": report()}); run.Status != "failed" || !strings.Contains(run.Error, "413") {
+	if run := ran(t, w, "grouse/gitlab/uploads/create.yaml", map[string]any{"project": "group/project", "iid": 7, "name": "report.csv", "file": report()}); run.Status != "failed" || !strings.Contains(run.Error, "413") {
 		t.Errorf("a refused upload ended %s: %s", run.Status, run.Error)
 	}
 	if len(gl.said()) != before {
@@ -816,7 +816,7 @@ func TestGitLabQuestionIsAnsweredByAComment(t *testing.T) {
 	gitlabProject(t, w, gl, "", map[string]string{
 		"people/scopes.yaml": "al@example.com: { name: Al, scopes: [infra:read] }\nbo@example.com: { name: Bo, scopes: [infra:read, infra:approve] }\n",
 	})
-	id := w.start("gromit/gitlab/chat/ask.yaml", map[string]any{"in": "group/project#7", "text": "Restart web?", "choices": []string{"yes", "no"},
+	id := w.start("grouse/gitlab/chat/ask.yaml", map[string]any{"in": "group/project#7", "text": "Restart web?", "choices": []string{"yes", "no"},
 		"approvers": "infra:approve", "asker": "AL@example.com"})
 	w.until("the question", func() bool { return len(gl.said()) >= 1 })
 	if got := gl.said()[0]; !strings.HasPrefix(got, "Restart web?\n\nAnswer with a comment that says `yes` or `no`.\n\n<!-- rook question ") {
@@ -861,7 +861,7 @@ func TestGitLabQuestionChoiceMatchesInAnyCase(t *testing.T) {
 	gl := newGitLab(t)
 	w := newWorld(t)
 	gitlabProject(t, w, gl, "", map[string]string{"people/scopes.yaml": "bo@example.com: { name: Bo, scopes: [infra:approve] }\n"})
-	id := w.start("gromit/gitlab/chat/ask.yaml", map[string]any{"in": "group/project#7", "text": "Restart web?", "choices": []string{"Yes", "No"},
+	id := w.start("grouse/gitlab/chat/ask.yaml", map[string]any{"in": "group/project#7", "text": "Restart web?", "choices": []string{"Yes", "No"},
 		"approvers": "infra:approve"})
 	w.until("the question", func() bool { return len(gl.said()) >= 1 })
 	if got := gl.said()[0]; !strings.HasPrefix(got, "Restart web?\n\nAnswer with a comment that says `Yes` or `No`.") {
@@ -887,7 +887,7 @@ func TestGitLabQuestionWithAFailingLookupWaitsOn(t *testing.T) {
 	w := newWorld(t)
 	// A row that is not { name, scopes } fails every lookup.
 	gitlabProject(t, w, gl, "", map[string]string{"people/scopes.yaml": "al@example.com: 1\n"})
-	id := w.start("gromit/gitlab/chat/ask.yaml", map[string]any{"in": "group/project#7", "text": "Restart web?", "choices": []string{"yes", "no"},
+	id := w.start("grouse/gitlab/chat/ask.yaml", map[string]any{"in": "group/project#7", "text": "Restart web?", "choices": []string{"yes", "no"},
 		"approvers": "infra:approve"})
 	w.until("the question", func() bool { return len(gl.said()) >= 1 })
 	tick(w, gl.asked)
@@ -912,13 +912,13 @@ func TestGitLabAgentsCommentClosesNoQuestion(t *testing.T) {
 	files := maps.Clone(placedCalls)
 	files["people/scopes.yaml"] = "bo@example.com: { name: Bo, scopes: [infra:approve] }\n"
 	gitlabProject(t, w, gl, "", files)
-	id := w.start("gromit/gitlab/chat/ask.yaml", map[string]any{"in": "group/project#7", "text": "Restart web?", "choices": []string{"yes", "no"},
+	id := w.start("grouse/gitlab/chat/ask.yaml", map[string]any{"in": "group/project#7", "text": "Restart web?", "choices": []string{"yes", "no"},
 		"approvers": "infra:approve"})
 	w.until("the question", func() bool { return len(gl.said()) >= 1 })
 	question := strings.Fields(strings.SplitN(gl.said()[0], "<!-- rook question ", 2)[1])[0]
 	tick(w, gl.asked)
 	gl.idle(w)
-	if run := ran(t, w, "gromit/gitlab/chat/post.yaml", map[string]any{"in": "group/project#7", "text": "Done.\n\n<!-- rook answered " + question + " -->"}); run.Status != "done" {
+	if run := ran(t, w, "grouse/gitlab/chat/post.yaml", map[string]any{"in": "group/project#7", "text": "Done.\n\n<!-- rook answered " + question + " -->"}); run.Status != "done" {
 		t.Fatalf("the post ended %s: %s", run.Status, run.Error)
 	}
 	if got := gl.said()[1]; strings.Contains(got, "<!-- rook") {
@@ -942,7 +942,7 @@ func TestGitLabQuestionNobodyAnswersIsNo(t *testing.T) {
 	gl := newGitLab(t)
 	w := newWorld(t)
 	gitlabProject(t, w, gl, "", nil)
-	id := w.start("gromit/gitlab/chat/ask.yaml", map[string]any{"in": "group/project#7", "text": "Restart web?", "choices": []string{"yes", "no"},
+	id := w.start("grouse/gitlab/chat/ask.yaml", map[string]any{"in": "group/project#7", "text": "Restart web?", "choices": []string{"yes", "no"},
 		"approvers": "infra:approve", "within": "1h"})
 	w.until("the question", func() bool { return len(gl.said()) >= 1 && w.show(id).Timers == 1 })
 	w.set(w.now().Add(61 * time.Minute))
@@ -996,7 +996,7 @@ func TestGitLabToolFixesTheProject(t *testing.T) {
 		"toolkits/orders.yaml": `
 			description: The orders app.
 			tools:
-			  read_file: { call: gromit/gitlab/repository/files/read, input: { project: group/orders } }
+			  read_file: { call: grouse/gitlab/repository/files/read, input: { project: group/orders } }
 		`,
 	})
 	gitlabProject(t, w, gl, "", files)

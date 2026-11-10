@@ -7,7 +7,7 @@ Rook is ready-made Corbie machines: the listeners and calls of Telegram, Slack, 
 - `rook/pages/`: Rook's pages of the manual. `rook-design.txt` is the design, `rook-project.txt` how a person uses it, and `rook.txt` what a model is told when `corbie mcp` allows it `rook init`, which `init` also writes as `.rook/AGENTS.md`. `README.md` is the front page on GitHub.
 - `rook/shipped/`: what is written into a project's `.rook/`. `rook/starter/`: a project's first files, which hold no agent and no toolkit; `BOT` in a path or a text there is the bot's name, and `starter/BOT/<service>/` holds a service's router and placed calls.
 - `rook/rook.go`: what writes them. `cmd/corbie-rook/`: the program.
-- `test/`: the tests. `test/testdata/` holds the agents, toolkit and people the tests add to a project, and `testdata/gromit/`, the worked example as a whole project without `.rook/`, which `gromit_test.go` runs.
+- `test/`: the tests. `test/testdata/` holds the agents, toolkit and people the tests add to a project, and `testdata/grouse/`, the worked example as a whole project without `.rook/`, which `grouse_test.go` runs.
 
 ## What holds
 
@@ -48,7 +48,7 @@ Words:
 - No metaphor and no soft verbs. Not "decides", "reaches", "touches", "meets", "holds on to", "is owed", "stands", "says so". Not "unless it says": write "by default".
 - One word for one thing, the same in the docs, the code and what is printed. A word with two meanings is a fault, and so is a second word for the same thing. A word is changed everywhere or not at all.
 - Corbie's words are Rook's words. These are settled:
-  - **machine**: a YAML definition of type flow, statechart or agent. Never a computer.
+  - **machine**: a YAML definition of type flow, statechart, agent or decision. Never a computer.
   - **job**: the `job:` block of a stage, a state, a tool or an ask. A job is a script, a machine, or a send. A machine is named by its file (`machine:`) or by its location (`call:`), and a send delivers an event and returns nothing. A runner executes a script; a machine named by its file runs as a child run, and one named by its location as a run of its own whose result is the job's output.
   - **run**: one execution of a machine, which a client starts, lists and shows.
   - **directory**, never "folder". **computer**, never "machine".

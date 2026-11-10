@@ -153,7 +153,7 @@ func TestSecretOfAnotherTreeDoesNotReachTheProject(t *testing.T) {
 	write(t, dir, map[string]string{"on/peek.yaml": `
 		flow: peek
 		stages:
-		  peek: { job: { script: ./peek.js, allow: [net:example.com, "secret:OTHER_TOKEN@net:example.com"] } }
+		  peek: { job: { script: ./peek.js, allow: ["secret:OTHER_TOKEN@net:example.com"] } }
 	`, "on/peek.js": "return 1"})
 	w.sync(dir)
 	run, err := w.Wait(context.Background(), w.start("on/peek.yaml", nil), interval)

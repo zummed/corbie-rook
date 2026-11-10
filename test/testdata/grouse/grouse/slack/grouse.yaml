@@ -1,13 +1,13 @@
-# The router of gromit on Slack. It runs Rook's Slack listener as a child. It
+# The router of grouse on Slack. It runs Rook's Slack listener as a child. It
 # sends a message in #deploys that names the bot to deploys, keyed by the
 # thread, and any other direct message or message that names the bot in
 # #support to the conversation, keyed by the thread, the person and the agent
 # support. It drops changes, and messages from any other channel. It sends a
 # press of a question's button to `answers`, which sends it on to that
 # question, and a stop to the conversation. The tokens are set at
-# /<project>/gromit/slack. It takes events only from its listener: `receive: []`, here and in the listener, refuses a send from any location.
-statechart: gromit
-description: The router of gromit on Slack.
+# /<project>/grouse/slack. It takes events only from its listener: `receive: []`, here and in the listener, refuses a send from any location.
+statechart: grouse
+description: The router of grouse on Slack.
 lifetime: singleton
 receive: []
 allow: [send:conversation, send:deploys, send:answers]

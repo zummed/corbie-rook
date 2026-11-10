@@ -7,4 +7,3 @@ stages:
     job:
       machine: .rook/gitlab/issues/notes/create.yaml
       input: { project: "${input.in.slice(0, input.in.lastIndexOf('#'))}", iid: "${Number(input.in.slice(input.in.lastIndexOf('#') + 1))}", body: "${input.text}" }
-output: ${stages.post.output}

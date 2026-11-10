@@ -1,6 +1,6 @@
 package test
 
-// The worked example, testdata/gromit, as a project: the bot gromit on Slack
+// The worked example, testdata/grouse, as a project: the bot grouse on Slack
 // and GitLab, the agent support with the toolkits orders and infra, the
 // project's own machines under infra/vms/, issue-log and deploys. Each test
 // submits it with the Slack and GitLab stand-ins, a hypervisor's and the
@@ -67,22 +67,22 @@ func (h *hypervisor) restarted() []string {
 	return slices.Clone(h.restarts)
 }
 
-// The people of gromit on Slack, by member ID, and on GitLab, by user ID.
+// The people of grouse on Slack, by member ID, and on GitLab, by user ID.
 var (
-	gromitSlack = map[string][2]string{
+	grouseSlack = map[string][2]string{
 		"UANA": {"Ana", "ana@acme.example"}, "UBO": {"Bo", "bo@acme.example"}, "UCY": {"Cy", "cy@acme.example"},
 		"UDI": {"Di", "di@acme.example"}, "UED": {"Ed", "ed@acme.example"},
 	}
-	gromitGitLab = map[int][2]string{5: {"ana", "ana@acme.example"}}
-	// gromit's Slack channels, by ID.
-	gromitChannels = map[string]string{"CSUP": "support", "CINF": "infra", "CORD": "orders-team", "CLOG": "orders-log", "CDEP": "deploys"}
+	grouseGitLab = map[int][2]string{5: {"ana", "ana@acme.example"}}
+	// grouse's Slack channels, by ID.
+	grouseChannels = map[string]string{"CSUP": "support", "CINF": "infra", "CORD": "orders-team", "CLOG": "orders-log", "CDEP": "deploys"}
 )
 
-// A gromit is testdata/gromit submitted at /project, with each secret and
+// A grouse is testdata/grouse submitted at /project, with each secret and
 // value set at the directory the example sets it, and the model answering
 // with a script: for each message a turn starts with, the replies of the
 // turn in order.
-type gromit struct {
+type grouse struct {
 	*world
 	dir    string
 	s      *slack
@@ -94,13 +94,13 @@ type gromit struct {
 	n      int // envelopes sent
 }
 
-// newGromit copies the example, runs init in it as a person does after
+// newGrouse copies the example, runs init in it as a person does after
 // updating Rook, points it at the stand-ins, and submits it. edit, when
 // given, changes the copy before it is submitted.
-func newGromit(t *testing.T, script map[string][]llmstandin.Reply, edit func(dir string)) *gromit {
+func newGrouse(t *testing.T, script map[string][]llmstandin.Reply, edit func(dir string)) *grouse {
 	t.Helper()
-	g := &gromit{world: newWorld(t), s: newSlack(t), gl: newGitLab(t), hv: newHypervisor(t), script: script}
-	g.dir = gromitCopy(t)
+	g := &grouse{world: newWorld(t), s: newSlack(t), gl: newGitLab(t), hv: newHypervisor(t), script: script}
+	g.dir = grouseCopy(t)
 	point(t, g.dir, "slack", g.s.Server, slackHosts...)
 	point(t, g.dir, "gitlab", g.gl.Server)
 	for _, name := range []string{"status", "restart"} {
@@ -110,22 +110,22 @@ func newGromit(t *testing.T, script map[string][]llmstandin.Reply, edit func(dir
 	model := httptest.NewServer(&llmstandin.Server{Key: "sk-anthropic", Answer: g.answer})
 	t.Cleanup(model.Close)
 	setSite(t, g.dir, "agents/support.yaml", "secret: ANTHROPIC_KEY }", "secret: ANTHROPIC_KEY, address: "+model.URL+" }")
-	g.secretAt(project+"/gromit/slack", "SLACK_TOKEN", "xoxb-bot")
-	g.secretAt(project+"/gromit/slack", "SLACK_APP_TOKEN", "xapp-app")
-	g.secretAt(project+"/gromit/gitlab", "GITLAB_TOKEN", "gl-token")
-	g.valueAt(project+"/gromit/gitlab", "GITLAB_SITE", strings.TrimPrefix(g.gl.URL, "http://"))
+	g.secretAt(project+"/grouse/slack", "SLACK_TOKEN", "xoxb-bot")
+	g.secretAt(project+"/grouse/slack", "SLACK_APP_TOKEN", "xapp-app")
+	g.secretAt(project+"/grouse/gitlab", "GITLAB_TOKEN", "gl-token")
+	g.valueAt(project+"/grouse/gitlab", "GITLAB_SITE", strings.TrimPrefix(g.gl.URL, "http://"))
 	g.secretAt(project+"/infra", "HYPERVISOR_KEY", "hv-key")
 	g.valueAt(project+"/infra", "HYPERVISOR", strings.TrimPrefix(g.hv.URL, "http://"))
 	g.secretAt(project+"/agents", "ANTHROPIC_KEY", "sk-anthropic")
 	g.s.mu.Lock()
-	for id, p := range gromitSlack {
+	for id, p := range grouseSlack {
 		g.s.users[id] = map[string]any{"id": id, "name": strings.ToLower(p[0]), "real_name": p[0], "profile": map[string]any{"email": p[1], "display_name": strings.ToLower(p[0]), "real_name": p[0]}}
 	}
-	g.s.channels = maps.Clone(gromitChannels)
+	g.s.channels = maps.Clone(grouseChannels)
 	g.s.held = map[string]chan struct{}{}
 	g.s.mu.Unlock()
 	g.gl.mu.Lock()
-	for id, p := range gromitGitLab {
+	for id, p := range grouseGitLab {
 		g.gl.users[id] = map[string]any{"id": id, "username": p[0], "name": strings.ToUpper(p[0][:1]) + p[0][1:], "public_email": p[1]}
 	}
 	g.gl.repo["group/orders@HEAD:config/app.yaml"] = "debug: false\n"
@@ -140,12 +140,12 @@ func newGromit(t *testing.T, script map[string][]llmstandin.Reply, edit func(dir
 	return g
 }
 
-// gromitCopy copies testdata/gromit to a directory named project, and runs
+// grouseCopy copies testdata/grouse to a directory named project, and runs
 // init in it, which writes .rook/.
-func gromitCopy(t *testing.T) string {
+func grouseCopy(t *testing.T) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "project")
-	if err := os.CopyFS(dir, os.DirFS("testdata/gromit")); err != nil {
+	if err := os.CopyFS(dir, os.DirFS("testdata/grouse")); err != nil {
 		t.Fatal(err)
 	}
 	if err := rook.Init(dir, bot, []string{"slack", "gitlab"}); err != nil {
@@ -157,7 +157,7 @@ func gromitCopy(t *testing.T) string {
 // answer is the model: the script's replies for the turn's first message, the
 // one after the tools the turn has used so far. A message the script has no
 // replies for is answered "I do not know."
-func (g *gromit) answer(c llmstandin.Call) llmstandin.Reply {
+func (g *grouse) answer(c llmstandin.Call) llmstandin.Reply {
 	g.mu.Lock()
 	g.sent = append(g.sent, c)
 	g.mu.Unlock()
@@ -189,7 +189,7 @@ func turnOfCall(c llmstandin.Call) (said string, used int) {
 
 // calls gives the calls to the model of the turns a person's message started,
 // in order.
-func (g *gromit) calls(name, text string) []llmstandin.Call {
+func (g *grouse) calls(name, text string) []llmstandin.Call {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	var out []llmstandin.Call
@@ -202,7 +202,7 @@ func (g *gromit) calls(name, text string) []llmstandin.Call {
 }
 
 // everything gives every call to the model, as one text.
-func (g *gromit) everything() string {
+func (g *grouse) everything() string {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	var b strings.Builder
@@ -266,7 +266,7 @@ func results(c llmstandin.Call) []string {
 // say sends what a person writes on Slack: in a channel, by its ID, or in
 // their own chat with the bot, D and their member ID, and in a thread when
 // thread is not empty.
-func (g *gromit) say(user, channel, ts, thread, text string) {
+func (g *grouse) say(user, channel, ts, thread, text string) {
 	g.t.Helper()
 	e := map[string]any{"type": "message", "channel": channel, "channel_type": "channel", "user": user, "ts": ts, "text": text}
 	if strings.HasPrefix(channel, "D") {
@@ -279,16 +279,16 @@ func (g *gromit) say(user, channel, ts, thread, text string) {
 	g.s.says(fmt.Sprint("e", g.n), e)
 }
 
-// press is a person pressing a choice's button of a question gromit posted.
-func (g *gromit) press(question map[string]any, user, choice string) {
+// press is a person pressing a choice's button of a question grouse posted.
+func (g *grouse) press(question map[string]any, user, choice string) {
 	g.t.Helper()
 	g.n++
 	g.s.press(fmt.Sprint("p", g.n), user, value(g.t, question, choice))
 }
 
-// question waits for the n-th question, from 1, gromit posted in a channel,
+// question waits for the n-th question, from 1, grouse posted in a channel,
 // until its run, which its buttons name, waits for a press, and gives it.
-func (g *gromit) question(channel string, n int) map[string]any {
+func (g *grouse) question(channel string, n int) map[string]any {
 	g.t.Helper()
 	var found map[string]any
 	g.until(fmt.Sprintf("question %d in %s", n, channel), func() bool {
@@ -307,9 +307,9 @@ func (g *gromit) question(channel string, n int) map[string]any {
 	return found
 }
 
-// replied waits until gromit posts a text in a channel, in a thread when
+// replied waits until grouse posts a text in a channel, in a thread when
 // thread is not empty.
-func (g *gromit) replied(channel, thread, text string) {
+func (g *grouse) replied(channel, thread, text string) {
 	g.t.Helper()
 	g.until(fmt.Sprintf("%q in %s %s", text, channel, thread), func() bool {
 		for _, p := range g.postsIn(channel, thread) {
@@ -321,9 +321,9 @@ func (g *gromit) replied(channel, thread, text string) {
 	})
 }
 
-// postsIn gives the texts gromit posted in a channel, in a thread when thread
+// postsIn gives the texts grouse posted in a channel, in a thread when thread
 // is not empty, questions left out.
-func (g *gromit) postsIn(channel, thread string) []map[string]any {
+func (g *grouse) postsIn(channel, thread string) []map[string]any {
 	var out []map[string]any
 	for _, p := range g.s.posted() {
 		if p["channel"] == channel && p["blocks"] == nil && (thread == "" || p["thread_ts"] == thread) {
@@ -334,7 +334,7 @@ func (g *gromit) postsIn(channel, thread string) []map[string]any {
 }
 
 // whispers gives what each person was told alone, as "<member ID>: <text>".
-func (g *gromit) whispers() []string {
+func (g *grouse) whispers() []string {
 	var out []string
 	for _, p := range g.s.whispered() {
 		out = append(out, fmt.Sprint(p["user"], ": ", p["text"]))
@@ -343,7 +343,7 @@ func (g *gromit) whispers() []string {
 }
 
 // pollUntil moves the clock past GitLab's polls until a condition holds.
-func (g *gromit) pollUntil(what string, cond func() bool) {
+func (g *grouse) pollUntil(what string, cond func() bool) {
 	g.t.Helper()
 	g.until(what, func() bool {
 		if cond() {
@@ -376,8 +376,8 @@ var restartOrders2 = map[string][]llmstandin.Reply{
 //  5. Bo presses yes, the question checks his scopes, and shows his answer in place of the buttons.
 //  6. infra/vms/restart runs at its own location, which sends the hypervisor its key.
 //  7. The reply is posted in the thread, and the status cleared.
-func TestGromitOneQuestionRunByRun(t *testing.T) {
-	g := newGromit(t, restartOrders2, nil)
+func TestGrouseOneQuestionRunByRun(t *testing.T) {
+	g := newGrouse(t, restartOrders2, nil)
 	g.say("UCY", "CSUP", "10.0", "", "<@UBOT> orders-2 is stuck, can you restart it?")
 	question := g.question("CINF", 1)
 	text := fmt.Sprint(question["text"])
@@ -433,7 +433,7 @@ func TestGromitOneQuestionRunByRun(t *testing.T) {
 			id = run.Parent
 		}
 	}
-	if want := []string{"chat-ask", "place", "approval", "support", "turn", "conversation", "gromit"}; !slices.Equal(chain, want) {
+	if want := []string{"chat-ask", "place", "approval", "support", "turn", "conversation", "grouse"}; !slices.Equal(chain, want) {
 		t.Errorf("from the question back, the runs are %v", chain)
 	}
 	if got := g.show(asks[0].ID).Output; fmt.Sprint(got) != "map[by:Bo choice:yes]" {
@@ -465,8 +465,8 @@ func TestGromitOneQuestionRunByRun(t *testing.T) {
 
 // A press by Ana, whose scopes lack infra:approve, is refused: she is told in
 // a message only she sees, and the buttons stay. Bo's press then counts.
-func TestGromitPressWithoutTheScopeIsRefused(t *testing.T) {
-	g := newGromit(t, restartOrders2, nil)
+func TestGrousePressWithoutTheScopeIsRefused(t *testing.T) {
+	g := newGrouse(t, restartOrders2, nil)
 	g.say("UCY", "CSUP", "10.0", "", "<@UBOT> orders-2 is stuck, can you restart it?")
 	question := g.question("CINF", 1)
 	g.press(question, "UANA", "yes")
@@ -488,8 +488,8 @@ func TestGromitPressWithoutTheScopeIsRefused(t *testing.T) {
 // Bo asks for a restart himself. His own press is refused, since the toolkit
 // passes the asker, and so is Di's, whose deploy:approve and orders:approve
 // count for other questions but not this one. Ed's counts.
-func TestGromitOwnRequestIsNotApprovedByTheAsker(t *testing.T) {
-	g := newGromit(t, map[string][]llmstandin.Reply{
+func TestGrouseOwnRequestIsNotApprovedByTheAsker(t *testing.T) {
+	g := newGrouse(t, map[string][]llmstandin.Reply{
 		"restart orders-1": {calls("open", `{"toolkit": "infra"}`), calls("restart", `{"name": "orders-1"}`), {Text: "Restarted orders-1."}},
 	}, nil)
 	g.say("UBO", "CSUP", "10.0", "", "<@UBOT> restart orders-1 please")
@@ -515,8 +515,8 @@ func TestGromitOwnRequestIsNotApprovedByTheAsker(t *testing.T) {
 // With no press within infra's hour, the question ends no, its buttons are
 // taken away, restart goes back to the model as denied, and nothing is
 // restarted.
-func TestGromitNoPressWithinIsNo(t *testing.T) {
-	g := newGromit(t, map[string][]llmstandin.Reply{
+func TestGrouseNoPressWithinIsNo(t *testing.T) {
+	g := newGrouse(t, map[string][]llmstandin.Reply{
 		"orders-2 is stuck": {calls("open", `{"toolkit": "infra"}`), calls("restart", `{"name": "orders-2"}`), {Text: "I could not restart orders-2."}},
 	}, nil)
 	g.say("UCY", "CSUP", "10.0", "", "<@UBOT> orders-2 is stuck, can you restart it?")
@@ -540,8 +540,8 @@ func TestGromitNoPressWithinIsNo(t *testing.T) {
 // and not change_file, and her model's call of change_file comes back as no
 // such tool. Ana, who holds both, is shown both. Neither is shown project,
 // which the toolkit fixes, and neither is offered infra.
-func TestGromitToolsFollowScopes(t *testing.T) {
-	g := newGromit(t, map[string][]llmstandin.Reply{
+func TestGrouseToolsFollowScopes(t *testing.T) {
+	g := newGrouse(t, map[string][]llmstandin.Reply{
 		"what is in config/app.yaml": {
 			calls("open", `{"toolkit": "orders"}`),
 			calls("change_file", `{"branch": "main", "message": "x", "actions": [{"action": "update", "file_path": "config/app.yaml", "content": "debug: true\n"}]}`),
@@ -585,11 +585,11 @@ func TestGromitToolsFollowScopes(t *testing.T) {
 // Ana writes there too. Ana's message is a run of its own, answered at once
 // with her own scopes, and shown none of Cy's tool results. Cy's two are
 // answered together, in one turn after the first.
-func TestGromitMessagesDuringATurn(t *testing.T) {
+func TestGrouseMessagesDuringATurn(t *testing.T) {
 	script := maps.Clone(restartOrders2)
 	script["orders-3 too"] = []llmstandin.Reply{{Text: "orders-3 and orders-4 are running."}}
 	script["what is in config/app.yaml"] = []llmstandin.Reply{calls("open", `{"toolkit": "orders"}`), calls("read_file", `{"path": "config/app.yaml"}`), {Text: "It sets debug to false."}}
-	g := newGromit(t, script, nil)
+	g := newGrouse(t, script, nil)
 	g.say("UCY", "CSUP", "10.0", "", "<@UBOT> orders-2 is stuck, can you restart it?")
 	question := g.question("CINF", 1)
 	g.say("UCY", "CSUP", "11.0", "10.0", "<@UBOT> orders-3 too")
@@ -632,8 +632,8 @@ func TestGromitMessagesDuringATurn(t *testing.T) {
 // bot's own note, heard as own, is not answered. Each label change goes to
 // issue-log, which posts it in #orders-log once; a change that comes while
 // the first is posted is kept, and posted after it.
-func TestGromitGitLab(t *testing.T) {
-	g := newGromit(t, map[string][]llmstandin.Reply{
+func TestGrouseGitLab(t *testing.T) {
+	g := newGrouse(t, map[string][]llmstandin.Reply{
 		"what is in config/app.yaml": {calls("open", `{"toolkit": "orders"}`), calls("read_file", `{"path": "config/app.yaml"}`), {Text: "It sets debug to false."}},
 	}, nil)
 	g.gl.comment("group/orders", 1, 5, "@bot what is in config/app.yaml?")
@@ -691,8 +691,8 @@ func TestGromitGitLab(t *testing.T) {
 // until Di, with deploy:approve, presses yes in the thread; the pipeline
 // starts, and "Pipeline started." is posted. Ana, who asked, cannot approve
 // it. "deploy x" ends its run, asking nothing.
-func TestGromitDeploys(t *testing.T) {
-	g := newGromit(t, nil, nil)
+func TestGrouseDeploys(t *testing.T) {
+	g := newGrouse(t, nil, nil)
 	g.say("UANA", "CDEP", "20.0", "", "<@UBOT> deploy orders")
 	question := g.question("CDEP", 1)
 	if question["thread_ts"] != "20.0" {
@@ -729,8 +729,8 @@ func TestGromitDeploys(t *testing.T) {
 // the question is asked on Slack in #orders-team, and Di's press there counts
 // for orders; Ana's own press there is refused, by her email. The commit is
 // made in group/orders, and Ana is answered on the issue.
-func TestGromitGitLabRequestApprovedOnSlack(t *testing.T) {
-	g := newGromit(t, map[string][]llmstandin.Reply{
+func TestGrouseGitLabRequestApprovedOnSlack(t *testing.T) {
+	g := newGrouse(t, map[string][]llmstandin.Reply{
 		"set debug to true": {
 			calls("open", `{"toolkit": "orders"}`),
 			calls("change_file", `{"branch": "main", "message": "Debug on", "actions": [{"action": "update", "file_path": "config/app.yaml", "content": "debug: true\n"}]}`),
@@ -768,7 +768,7 @@ func TestGromitGitLabRequestApprovedOnSlack(t *testing.T) {
 	}
 }
 
-// What nothing in or outside the tree can do to gromit:
+// What nothing in or outside the tree can do to grouse:
 //
 //   - a send from a location of the project to the conversation, deploys,
 //     issue-log or the Slack router is refused by their receive:;
@@ -780,17 +780,17 @@ func TestGromitGitLabRequestApprovedOnSlack(t *testing.T) {
 //   - the agent's own tool, at agents/support, cannot read the Slack token or the hypervisor's key;
 //   - another tree reaches nothing, whatever the files' receive: say;
 //   - a gateway's client is shown no input, output, title or record.
-func TestGromitSecurity(t *testing.T) {
+func TestGrouseSecurity(t *testing.T) {
 	script := maps.Clone(restartOrders2)
 	script["orders-2 is stuck"] = append([]llmstandin.Reply{calls("peek_slack", `{}`), calls("peek_infra", `{}`)}, script["orders-2 is stuck"]...)
-	g := newGromit(t, script, func(dir string) {
+	g := newGrouse(t, script, func(dir string) {
 		setSite(t, dir, "agents/support.yaml", "toolkits:\n", `tools:
   peek_slack:
     description: Reads the Slack token.
-    job: { script: ./peek.js, input: { name: SLACK_TOKEN }, allow: [net:example.com, "secret:SLACK_TOKEN@net:example.com"] }
+    job: { script: ./peek.js, input: { name: SLACK_TOKEN }, allow: ["secret:SLACK_TOKEN@net:example.com"] }
   peek_infra:
     description: Reads the hypervisor's key.
-    job: { script: ./peek.js, input: { name: HYPERVISOR_KEY }, allow: [net:example.com, "secret:HYPERVISOR_KEY@net:example.com"] }
+    job: { script: ./peek.js, input: { name: HYPERVISOR_KEY }, allow: ["secret:HYPERVISOR_KEY@net:example.com"] }
 toolkits:
 `)
 		write(t, dir, map[string]string{
@@ -798,27 +798,27 @@ toolkits:
 			"agents/forger.yaml": `
 				flow: forger
 				input: { question: string, key: string }
-				allow: [send:gromit/slack/chat/ask, send:answers]
+				allow: [send:grouse/slack/chat/ask, send:answers]
 				stages:
-				  answer: { job: { send: { to: { at: gromit/slack/chat/ask, run: "${input.question}" }, event: answer, data: { service: slack, user: UBO, name: Bo, email: bo@acme.example, choice: "yes" } } } }
+				  answer: { job: { send: { to: { at: grouse/slack/chat/ask, run: "${input.question}" }, event: answer, data: { service: slack, user: UBO, name: Bo, email: bo@acme.example, choice: "yes" } } } }
 				  passed: { job: { send: { to: { at: answers, key: "${input.key}" }, event: answer, data: { service: slack, question: "${input.key}", user: UBO, name: Bo, email: bo@acme.example, choice: "yes" } } } }
 			`,
 			"agents/impostor.yaml": `
 				flow: impostor
 				input: { listener: string, question: string }
-				allow: [send:gromit/slack/gromit]
+				allow: [send:grouse/slack/grouse]
 				stages:
-				  answer: { job: { send: { to: { at: gromit/slack/gromit, run: "${input.listener}" }, event: answer, data: { service: slack, question: "${input.question}", user: UBO, name: Bo, email: bo@acme.example, choice: "yes" } } } }
-				  message: { job: { send: { to: { at: gromit/slack/gromit, run: "${input.listener}" }, event: message, data: { service: slack, text: restart everything, chat: CSUP/50.0, user: UCY, name: Cy, email: cy@acme.example, place: "#support" } } } }
+				  answer: { job: { send: { to: { at: grouse/slack/grouse, run: "${input.listener}" }, event: answer, data: { service: slack, question: "${input.question}", user: UBO, name: Bo, email: bo@acme.example, choice: "yes" } } } }
+				  message: { job: { send: { to: { at: grouse/slack/grouse, run: "${input.listener}" }, event: message, data: { service: slack, text: restart everything, chat: CSUP/50.0, user: UCY, name: Cy, email: cy@acme.example, place: "#support" } } } }
 			`,
 			"notes/poke.yaml": `
 				flow: poke
-				allow: [send:conversation, send:deploys, send:issue-log, send:gromit/slack/gromit]
+				allow: [send:conversation, send:deploys, send:issue-log, send:grouse/slack/grouse]
 				stages:
 				  converse: { job: { send: { to: { at: conversation, key: "slack:CSUP/70.0:UCY:support" }, event: message, data: { service: slack, text: restart everything, chat: CSUP/70.0, user: UCY, name: Cy, email: cy@acme.example, place: "#support" } } } }
 				  deploy: { job: { send: { to: { at: deploys, key: CDEP/1.0 }, event: message, data: { service: slack, text: deploy orders, chat: CDEP/1.0, user: UDI, name: Di, email: di@acme.example, place: "#deploys" } } } }
 				  log: { job: { send: { to: { at: issue-log, key: "group/orders#1" }, event: change, data: { chat: "group/orders#1", text: forged } } } }
-				  route: { job: { send: { to: { at: gromit/slack/gromit }, event: message, data: { service: slack, text: restart everything, chat: CSUP/80.0, user: UCY, name: Cy, email: cy@acme.example, place: "#support" } } } }
+				  route: { job: { send: { to: { at: grouse/slack/grouse }, event: message, data: { service: slack, text: restart everything, chat: CSUP/80.0, user: UCY, name: Cy, email: cy@acme.example, place: "#support" } } } }
 			`,
 			"notes/caller.yaml": `
 				flow: caller
@@ -848,7 +848,7 @@ toolkits:
 		t.Fatalf("receive: refused the forged answer, so the question's check is not tested: %q", got)
 	}
 	var listener string
-	for _, run := range g.at("gromit/slack/gromit.yaml") {
+	for _, run := range g.at("grouse/slack/grouse.yaml") {
 		if run.Parent != "" && run.Status == "running" {
 			listener = run.ID
 		}
@@ -860,7 +860,7 @@ toolkits:
 		t.Errorf("the sends to the listener noted undelivered are %q", got)
 	}
 	for _, note := range got {
-		if !strings.Contains(note, "/project/gromit/slack/gromit does not receive") {
+		if !strings.Contains(note, "/project/grouse/slack/grouse does not receive") {
 			t.Errorf("a send to the listener was refused for another reason: %q", note)
 		}
 	}
@@ -963,9 +963,9 @@ toolkits:
 }
 
 // init on an empty directory, then on it again, lists .rook/ once in
-// .corbieignore. init on gromit changes none of its files, and names those
+// .corbieignore. init on grouse changes none of its files, and names those
 // that differ from the starting files: the ones the project changed.
-func TestGromitInitKeepsTheProject(t *testing.T) {
+func TestGrouseInitKeepsTheProject(t *testing.T) {
 	empty := filepath.Join(t.TempDir(), "empty")
 	for range 2 {
 		if err := rook.Init(empty, bot, []string{"slack", "gitlab"}); err != nil {
@@ -980,7 +980,7 @@ func TestGromitInitKeepsTheProject(t *testing.T) {
 		t.Errorf(".corbieignore lists .rook/ %d times:\n%s", n, text)
 	}
 
-	dir := gromitCopy(t)
+	dir := grouseCopy(t)
 	before := projectFiles(t, dir)
 	if err := rook.Init(dir, bot, []string{"slack", "gitlab"}); err != nil {
 		t.Fatal(err)
@@ -993,14 +993,14 @@ func TestGromitInitKeepsTheProject(t *testing.T) {
 			}
 		}
 	}
-	if original := projectFiles(t, "testdata/gromit"); !maps.Equal(original, after) {
+	if original := projectFiles(t, "testdata/grouse"); !maps.Equal(original, after) {
 		t.Errorf("init wrote other files than .rook/: %v", slices.Sorted(maps.Keys(after)))
 	}
 	differ, err := rook.Differ(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{".corbieignore", "conversation.yaml", "gromit/gitlab/gromit.yaml", "gromit/slack/chat/ask.yaml", "gromit/slack/gromit.yaml", "people/scopes.yaml"}
+	want := []string{".corbieignore", "conversation.yaml", "grouse/gitlab/grouse.yaml", "grouse/slack/chat/ask.yaml", "grouse/slack/grouse.yaml", "people/scopes.yaml"}
 	if !slices.Equal(differ, want) {
 		t.Errorf("Differ names %v", differ)
 	}
@@ -1032,16 +1032,16 @@ func projectFiles(t *testing.T, dir string) map[string]string {
 	return out
 }
 
-// A changed file, submitted while gromit works:
+// A changed file, submitted while grouse works:
 //
 //  1. A changed router starts again with its listener, and the conversation, its agent and question go on; a press through the new listener answers the question.
 //  2. A changed agent, here its included system text, answers the next message.
 //  3. A changed toolkit while an approval waits cancels nothing: the approval and the restart finish, and the next turn is given the new instructions.
-func TestGromitChangedFiles(t *testing.T) {
+func TestGrouseChangedFiles(t *testing.T) {
 	script := maps.Clone(restartOrders2)
 	script["orders-1 too"] = []llmstandin.Reply{calls("open", `{"toolkit": "infra"}`), calls("restart", `{"name": "orders-1"}`), {Text: "Restarted orders-1."}}
 	script["and orders-3"] = []llmstandin.Reply{calls("open", `{"toolkit": "infra"}`), {Text: "Opened."}}
-	g := newGromit(t, script, nil)
+	g := newGrouse(t, script, nil)
 	g.say("UCY", "CSUP", "10.0", "", "<@UBOT> orders-2 is stuck, can you restart it?")
 	question := g.question("CINF", 1)
 	conversation := g.kept("conversation.yaml")
@@ -1067,7 +1067,7 @@ func TestGromitChangedFiles(t *testing.T) {
 	g.press(question, "UBO", "yes")
 	g.replied("CSUP", "10.0", "Restarted orders-2.")
 
-	setSite(t, g.dir, "agents/support.md", "You are Gromit,", "You are Gromit, version two,")
+	setSite(t, g.dir, "agents/support.md", "You are Grouse,", "You are Grouse, version two,")
 	g.sync(g.dir)
 	g.say("UCY", "CSUP", "11.0", "10.0", "<@UBOT> orders-1 too")
 	second := g.question("CINF", 2)

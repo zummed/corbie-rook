@@ -29,7 +29,7 @@
 statechart: conversation
 description: Answers one person in one thread with the agent at agents/support.
 lifetime: keyed
-receive: { message: [gromit/*/gromit, later], stop: [gromit/*/gromit] }
+receive: { message: [grouse/*/grouse, later], stop: [grouse/*/grouse] }
 title: "${input.service} ${input.place}: ${String(input.text || '').split('\\n')[0]}"
 initial: idle
 states:
@@ -71,12 +71,12 @@ states:
         allow:
           - send:people/find
           - send:agents/support
-          - send:gromit/slack/files/get
-          - send:gromit/telegram/files/get
-          - send:gromit/gitlab/files/get
-          - send:gromit/jira/attachment/get
-          - send:gromit/slack/assistant/status
-          - send:gromit/telegram/chat/status
+          - send:grouse/slack/files/get
+          - send:grouse/telegram/files/get
+          - send:grouse/gitlab/files/get
+          - send:grouse/jira/attachment/get
+          - send:grouse/slack/assistant/status
+          - send:grouse/telegram/chat/status
         stages:
           asker:
             job:
@@ -91,14 +91,14 @@ states:
             job: { script: .rook/shared/format.js, input: { service: "${input.messages[0].service}" } }
           slack_status:
             when: "${input.messages[0].service === 'slack' && input.messages[0].chat.includes('/')}"
-            job: { call: { at: gromit/slack/assistant/status }, input: { in: "${input.messages[0].chat}", text: Working on it. } }
+            job: { call: { at: grouse/slack/assistant/status }, input: { in: "${input.messages[0].chat}", text: Working on it. } }
           telegram_status:
             when: "${input.messages[0].service === 'telegram'}"
-            job: { call: { at: gromit/telegram/chat/status }, input: { in: "${input.messages[0].chat}", text: Working on it. } }
+            job: { call: { at: grouse/telegram/chat/status }, input: { in: "${input.messages[0].chat}", text: Working on it. } }
           files:
             when: "${input.messages.some((m) => (m.attachments || []).length > 0)}"
             job:
-              call: { at: "${'gromit/' + input.messages[0].service + (input.messages[0].service === 'jira' ? '/attachment/get' : '/files/get')}" }
+              call: { at: "${'grouse/' + input.messages[0].service + (input.messages[0].service === 'jira' ? '/attachment/get' : '/files/get')}" }
               input: { attachments: "${input.messages.flatMap((m) => m.attachments || [])}" }
           # A filter, for messages the router sends marked unaddressed, is a
           # stage here such as
@@ -118,7 +118,7 @@ states:
                 format: "${stages.format.output}"
                 asker: "${stages.asker.output}"
                 conversation: "${input.conversation}"
-                post: "${'gromit/' + input.messages[0].service + '/chat/post'}"
+                post: "${'grouse/' + input.messages[0].service + '/chat/post'}"
                 back: { at: conversation, key: "${input.messages[0].service + ':' + input.messages[0].chat + ':' + input.messages[0].user + ':support'}" }
           # A redactor, which cleans the reply of what may not be posted outside
           # a direct message, is a stage here such as
@@ -150,23 +150,23 @@ states:
         flow: reply
         title: "${input.text.split('\\n')[0] || 'no reply'}"
         input: { service: string, in: string, answers: string, text: string, conversation: "any?" }
-        allow: ["send:gromit/*/chat/post", send:gromit/slack/assistant/status]
+        allow: ["send:grouse/*/chat/post", send:grouse/slack/assistant/status]
         stages:
           slack_status:
             when: "${input.service === 'slack' && input.in.includes('/')}"
-            job: { call: { at: gromit/slack/assistant/status }, input: { in: "${input.in}", text: "" } }
+            job: { call: { at: grouse/slack/assistant/status }, input: { in: "${input.in}", text: "" } }
           slack:
             when: "${input.service === 'slack' && input.text}"
-            job: { call: { at: gromit/slack/chat/post }, input: { in: "${input.in}", text: "${input.text}" } }
+            job: { call: { at: grouse/slack/chat/post }, input: { in: "${input.in}", text: "${input.text}" } }
           telegram:
             when: "${input.service === 'telegram' && input.text}"
-            job: { call: { at: gromit/telegram/chat/post }, input: { in: "${input.in}", text: "${input.text}", answers: "${input.answers}" } }
+            job: { call: { at: grouse/telegram/chat/post }, input: { in: "${input.in}", text: "${input.text}", answers: "${input.answers}" } }
           gitlab:
             when: "${input.service === 'gitlab' && input.text}"
-            job: { call: { at: gromit/gitlab/chat/post }, input: { in: "${input.in}", text: "${input.text}" } }
+            job: { call: { at: grouse/gitlab/chat/post }, input: { in: "${input.in}", text: "${input.text}" } }
           jira:
             when: "${input.service === 'jira' && input.text}"
-            job: { call: { at: gromit/jira/chat/post }, input: { in: "${input.in}", text: "${input.text}" } }
+            job: { call: { at: grouse/jira/chat/post }, input: { in: "${input.in}", text: "${input.text}" } }
         output:
           conversation: "${stages.slack.failed || stages.telegram.failed || stages.gitlab.failed || stages.jira.failed ? null : input.conversation}"
           post_failed: "${!!(stages.slack.failed || stages.telegram.failed || stages.gitlab.failed || stages.jira.failed)}"

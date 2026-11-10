@@ -14,7 +14,7 @@ Make a project, and read its page:
 
 ```sh
 corbie init --ceiling all
-corbie rook init my-bot --bot gromit --services slack
+corbie rook init my-bot --bot grouse --services slack
 corbie rook manual rook-project
 ```
 

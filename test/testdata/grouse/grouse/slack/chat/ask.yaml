@@ -7,6 +7,6 @@ include: .rook/chat/ask.yaml
 receive: [answers, agents/*, ballot, deploys]
 input:
   properties:
-    router: { const: gromit/slack/gromit, default: gromit/slack/gromit }
+    router: { const: grouse/slack/grouse, default: grouse/slack/grouse }
     lookup: { const: people/find, default: people/find }
-    show: { const: gromit/slack/chat/show, default: gromit/slack/chat/show }
+    show: { const: grouse/slack/chat/show, default: grouse/slack/chat/show }

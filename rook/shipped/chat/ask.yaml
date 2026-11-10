@@ -50,9 +50,7 @@ initial: keying
 states:
   # Makes the key, as this state's output.
   keying:
-    initial: made
-    states:
-      made: { end: done, output: "${Array.from({ length: 12 }, () => '0123456789abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 36)]).join('')}" }
+    output: "${Array.from({ length: 12 }, () => '0123456789abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 36)]).join('')}"
     on: { done: { go: asking, send: { to: { at: answers, key: "${states.keying.output}" }, event: open, data: { router: "${run.tree + '/' + input.router}", within: "${input.within || '7d'}" } } } }
   asking:
     defer: [answer]
@@ -96,9 +94,7 @@ states:
   over: { end: done, output: { choice: "${states.checking.output.choice}", by: "${states.checking.output.by}" } }
   # Keeps what the ballot's close gave, as this state's output.
   closed:
-    initial: kept
-    states:
-      kept: { end: done, output: "${event.data}" }
+    output: "${event.data}"
     on: { done: answered_elsewhere }
   answered_elsewhere:
     job: { call: { at: "${input.show}" }, input: { do: close, sent: "${states.asking.output.sent}", text: "${input.text}", said: "${states.closed.output.by + ' said ' + states.closed.output.choice + ' on ' + states.closed.output.where + '.'}" } }

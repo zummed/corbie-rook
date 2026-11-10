@@ -631,7 +631,7 @@ func TestTelegramHistoryIsLostWithTheListener(t *testing.T) {
 	tg.dm(1, "one")
 	w.sync(dir)
 	tg.waitFor(w, "1", "complete [] one")
-	setSite(t, dir, router("telegram"), "description: The router of gromit on Telegram.", "description: The router of gromit on Telegram, changed.")
+	setSite(t, dir, router("telegram"), "description: The router of grouse on Telegram.", "description: The router of grouse on Telegram, changed.")
 	w.sync(dir)
 	w.until("a new listener", func() bool {
 		return slices.ContainsFunc(listenerRuns(w, "telegram"), func(r *client.Run) bool { return r.HasEnded() })
@@ -781,7 +781,7 @@ const slackMessages = `
 	description: Messages to people on Slack.
 	instructions: Write to a person only when the asker asks you to.
 	tools:
-	  tell: { call: gromit/slack/chat/post, approve: true }
+	  tell: { call: grouse/slack/chat/post, approve: true }
 `
 
 // bob asks on Slack for a held tool. The approval asks in #approvals with
@@ -801,7 +801,7 @@ func TestSlackApprovalByButtonCanBeFollowed(t *testing.T) {
 	}
 	write(t, dir, map[string]string{
 		"toolkits/messages.yaml": slackMessages,
-		"agents/assistant.yaml":  strings.Replace(string(agent), `ask: [{ at: gromit/telegram/chat/ask, in: "1" }]`, `ask: [{ at: gromit/slack/chat/ask, in: "#approvals" }]`, 1),
+		"agents/assistant.yaml":  strings.Replace(string(agent), `ask: [{ at: grouse/telegram/chat/ask, in: "1" }]`, `ask: [{ at: grouse/slack/chat/ask, in: "#approvals" }]`, 1),
 	})
 	replies := []llmstandin.Reply{
 		{Calls: []llmstandin.ToolCall{{ID: "c1", Name: "open", Args: `{"toolkit": "messages"}`}}},
@@ -962,9 +962,9 @@ const slackApprovedToolkit = `
 	    description: Write a text to a person on Slack, by their member ID.
 	    args: { to: string, text: string }
 	    job:
-	      call: { at: gromit/slack/chat/post }
+	      call: { at: grouse/slack/chat/post }
 	      input: { in: "${args.to}", text: "${args.text}" }
-	      allow: [send:gromit/slack/chat/post]
+	      allow: [send:grouse/slack/chat/post]
 	      approve: true
 `
 
@@ -988,7 +988,7 @@ func TestGitLabRequestApprovedOnSlack(t *testing.T) {
 	write(t, dir, map[string]string{
 		// The agent's ask is a yes on Slack, in alice's direct message, from
 		// someone who holds messages:approve.
-		"agents/assistant.yaml": modelAgent("assistant", url, "ask:\n  machine: .rook/approval.yaml\n  input: { ask: [{ at: gromit/slack/chat/ask, in: U1 }], approvers: \"messages:approve\", request: \"${input.messages.map((m) => m.text).join('\\\\n')}\" }\ntoolkits:\n  slack: { include: toolkits/slack.yaml }\n"),
+		"agents/assistant.yaml": modelAgent("assistant", url, "ask:\n  machine: .rook/approval.yaml\n  input: { ask: [{ at: grouse/slack/chat/ask, in: U1 }], approvers: \"messages:approve\", request: \"${input.messages.map((m) => m.text).join('\\\\n')}\" }\ntoolkits:\n  slack: { include: toolkits/slack.yaml }\n"),
 		"toolkits/slack.yaml":   slackApprovedToolkit,
 	})
 	w.sync(dir)

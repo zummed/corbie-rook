@@ -4,11 +4,11 @@
 statechart: deploys
 description: Starts the orders pipeline when someone writes "deploy orders".
 lifetime: keyed
-receive: [gromit/slack/gromit]
-allow: [send:gromit/gitlab/pipeline/create, send:gromit/slack/chat/post]
+receive: [grouse/slack/grouse]
+allow: [send:grouse/gitlab/pipeline/create, send:grouse/slack/chat/post]
 ask:
   machine: .rook/approval.yaml
-  input: { ask: [{ at: gromit/slack/chat/ask, in: "${input.chat}" }], approvers: "deploy:approve", within: 1h, asker: "${input.email}", request: "${input.text}" }
+  input: { ask: [{ at: grouse/slack/chat/ask, in: "${input.chat}" }], approvers: "deploy:approve", within: 1h, asker: "${input.email}", request: "${input.text}" }
 initial: waiting
 states:
   waiting:
@@ -18,13 +18,13 @@ states:
         - over
   deploying:
     job:
-      call: { at: gromit/gitlab/pipeline/create }
+      call: { at: grouse/gitlab/pipeline/create }
       input: { project: group/orders, ref: main }
       approve: true
     on: { done: telling, failed: telling }
   telling:
     job:
-      call: { at: gromit/slack/chat/post }
+      call: { at: grouse/slack/chat/post }
       input: { in: "${input.chat}", text: "${event.name === 'done' ? 'Pipeline started.' : 'The pipeline did not start.'}" }
     on: { done: over, failed: over }
   over: { end: done }

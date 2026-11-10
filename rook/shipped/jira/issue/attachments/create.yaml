@@ -8,6 +8,5 @@ stages:
       script: .rook/jira/jira.js
       files: [.rook/jira/api.js]
       input: { do: send, issue: "${input.issue}", name: "${input.name}", file: "${input.file}", site: "${values.JIRA_SITE}", email: "${values.JIRA_EMAIL}" }
-      allow: ["net:${values.JIRA_SITE}", "secret:JIRA_TOKEN@net:${values.JIRA_SITE}"]
+      allow: ["secret:JIRA_TOKEN@net:${values.JIRA_SITE}"]
       timeout: 5m
-output: ${stages.send.output}

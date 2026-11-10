@@ -27,6 +27,5 @@ stages:
       script: .rook/gitlab/gitlab.js
       files: [.rook/gitlab/api.js]
       input: { do: commit, project: "${input.project}", branch: "${input.branch}", message: "${input.message}", actions: "${input.actions}", start_branch: "${input.start_branch || ''}", site: "${values.GITLAB_SITE}" }
-      allow: ["net:${values.GITLAB_SITE}", "secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
+      allow: ["secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
       timeout: 1m
-output: ${stages.commit.output}

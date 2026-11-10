@@ -4,7 +4,7 @@
 # Corbie gives it `asking` and `jobs`; the ask's input gives the rest:
 #
 #   ask        the places, each { at, in }: the question's location, such as
-#              gromit/slack/chat/ask, and where it is posted there: a channel,
+#              grouse/slack/chat/ask, and where it is posted there: a channel,
 #              a thread or a chat
 #   approvers  the scope a press needs to count
 #   within     how long it waits, by default 7d; no press in time is no

@@ -62,7 +62,7 @@ func traceHelper(address, system string) map[string]string {
 			system: ` + system + `
 			ask:
 			  machine: .rook/approval.yaml
-			  input: { ask: [{ at: gromit/telegram/chat/ask, in: "1" }], approvers: "messages:approve" }
+			  input: { ask: [{ at: grouse/telegram/chat/ask, in: "1" }], approvers: "messages:approve" }
 			toolkits:
 			  messages: { include: toolkits/messages.yaml }
 		`,
@@ -77,9 +77,9 @@ func traceHelper(address, system string) map[string]string {
 			    description: Write a text in a person's Telegram chat, by the chat's ID.
 			    args: { chat: string, text: string }
 			    job:
-			      call: { at: gromit/telegram/chat/post }
+			      call: { at: grouse/telegram/chat/post }
 			      input: { in: "${args.chat}", text: "${args.text}" }
-			      allow: [send:gromit/telegram/chat/post]
+			      allow: [send:grouse/telegram/chat/post]
 			      approve: true
 		`,
 		"toolkits/clock.js": `return { zone: input.zone, time: "12:00" }`,
@@ -357,13 +357,13 @@ func TestNoModelFlowAgentIsFollowed(t *testing.T) {
 		"agents/assistant.yaml": `
 			flow: desk
 			input: { messages: list, medium: string, format: "any?", asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
-			allow: [send:gromit/telegram/chat/post, send:gromit/telegram/chat/ask]
+			allow: [send:grouse/telegram/chat/post, send:grouse/telegram/chat/ask]
 			stages:
 			  ack:
-			    job: { call: { at: gromit/telegram/chat/post }, input: { in: "${input.messages[0].chat}", text: "asking alice about ${input.messages[0].text}" } }
+			    job: { call: { at: grouse/telegram/chat/post }, input: { in: "${input.messages[0].chat}", text: "asking alice about ${input.messages[0].text}" } }
 			  question:
 			    job:
-			      call: { at: gromit/telegram/chat/ask }
+			      call: { at: grouse/telegram/chat/ask }
 			      input: { in: "1", text: "${input.asker.name} asks: ${input.messages[0].text}. Allow?", choices: ["yes", "no"], approvers: "messages:approve" }
 			output: { reply: "alice said ${stages.question.output.choice}" }
 		`,
@@ -452,11 +452,11 @@ func TestDeletedAgentWhileQuestionWaits(t *testing.T) {
 		"agents/assistant.yaml": `
 			flow: desk
 			input: { messages: list, medium: string, format: "any?", asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
-			allow: [send:gromit/telegram/chat/ask]
+			allow: [send:grouse/telegram/chat/ask]
 			stages:
 			  question:
 			    job:
-			      call: { at: gromit/telegram/chat/ask }
+			      call: { at: grouse/telegram/chat/ask }
 			      input: { in: "1", text: "bob asks: ${input.messages[0].text}. Allow?", choices: ["yes", "no"], approvers: "messages:approve" }
 			output: { reply: "alice said ${stages.question.output.choice}" }
 		`,
@@ -607,7 +607,7 @@ func TestTrailWalksBackwardsFromTheQuestion(t *testing.T) {
 		}
 		id = next
 	}
-	want := []string{"chat-ask", "place", "approval", "assistant", "turn", "conversation", "gromit"}
+	want := []string{"chat-ask", "place", "approval", "assistant", "turn", "conversation", "grouse"}
 	if !slices.Equal(chain, want) {
 		t.Errorf("walking back from the question gives %v", chain)
 	}

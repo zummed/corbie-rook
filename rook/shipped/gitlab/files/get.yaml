@@ -8,6 +8,5 @@ stages:
       script: .rook/gitlab/gitlab.js
       files: [.rook/gitlab/api.js]
       input: { do: attachments, attachments: "${input.attachments}", most: 33554432, site: "${values.GITLAB_SITE}" }
-      allow: ["net:${values.GITLAB_SITE}", "secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
+      allow: ["secret:GITLAB_TOKEN@net:${values.GITLAB_SITE}"]
       timeout: 5m
-output: ${stages.download.output}
