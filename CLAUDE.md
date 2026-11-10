@@ -48,7 +48,7 @@ Words:
 - No metaphor and no soft verbs. Not "decides", "reaches", "touches", "meets", "holds on to", "is owed", "stands", "says so". Not "unless it says": write "by default".
 - One word for one thing, the same in the docs, the code and what is printed. A word with two meanings is a fault, and so is a second word for the same thing. A word is changed everywhere or not at all.
 - Corbie's words are Rook's words. These are settled:
-  - **machine**: a YAML definition of type flow, statechart or agent. Never a computer.
+  - **machine**: a YAML definition of type flow, statechart, agent or decision. Never a computer.
   - **job**: the `job:` block of a stage, a state, a tool or an ask. A job is a script, a machine, or a send. A machine is named by its file (`machine:`) or by its location (`call:`), and a send delivers an event and returns nothing. A runner executes a script; a machine named by its file runs as a child run, and one named by its location as a run of its own whose result is the job's output.
   - **run**: one execution of a machine, which a client starts, lists and shows.
   - **directory**, never "folder". **computer**, never "machine".
