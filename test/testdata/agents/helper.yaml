@@ -17,7 +17,7 @@ system: |
 ask:
   machine: .rook/approval.yaml
   input:
-    ask: [{ at: gromit/telegram/chat/ask, in: "1" }]
+    ask: [{ at: grouse/telegram/chat/ask, in: "1" }]
     approvers: messages:approve
     asker: "${input.asker.email}"
     request: "${input.messages.map((m) => (m.later != null ? '(a reminder the bot set) ' : '') + m.text).join('\\n')}"

@@ -7,7 +7,7 @@ Rook is ready-made Corbie machines: the listeners and calls of Telegram, Slack, 
 - `rook/pages/`: Rook's pages of the manual. `rook-design.txt` is the design, `rook-project.txt` how a person uses it, and `rook.txt` what a model is told when `corbie mcp` allows it `rook init`, which `init` also writes as `.rook/AGENTS.md`. `README.md` is the front page on GitHub.
 - `rook/shipped/`: what is written into a project's `.rook/`. `rook/starter/`: a project's first files, which hold no agent and no toolkit; `BOT` in a path or a text there is the bot's name, and `starter/BOT/<service>/` holds a service's router and placed calls.
 - `rook/rook.go`: what writes them. `cmd/corbie-rook/`: the program.
-- `test/`: the tests. `test/testdata/` holds the agents, toolkit and people the tests add to a project, and `testdata/gromit/`, the worked example as a whole project without `.rook/`, which `gromit_test.go` runs.
+- `test/`: the tests. `test/testdata/` holds the agents, toolkit and people the tests add to a project, and `testdata/grouse/`, the worked example as a whole project without `.rook/`, which `grouse_test.go` runs.
 
 ## What holds
 

@@ -10,6 +10,6 @@ include: .rook/chat/ask.yaml
 receive: [answers, agents/*, ballot]
 input:
   properties:
-    router: { const: gromit/gitlab/gromit, default: gromit/gitlab/gromit }
+    router: { const: grouse/gitlab/grouse, default: grouse/gitlab/grouse }
     lookup: { const: people/find, default: people/find }
-    show: { const: gromit/gitlab/chat/show, default: gromit/gitlab/chat/show }
+    show: { const: grouse/gitlab/chat/show, default: grouse/gitlab/chat/show }

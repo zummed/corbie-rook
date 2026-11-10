@@ -23,7 +23,7 @@ import (
 )
 
 // bot is the name of the bot in every test's project.
-const bot = "gromit"
+const bot = "grouse"
 
 // router gives the path of a service's router in a test's project.
 func router(service string) string { return bot + "/" + service + "/" + bot + ".yaml" }
@@ -58,13 +58,13 @@ const helperStub = `
 // exampleProject makes a project with a bot on the services given, as rook.Init
 // does, and puts testdata's files in it: the agents helper and team, the
 // toolkit messages, two people's scopes and a .corbieignore that lists
-// toolkits/. testdata/gromit, a project of its own, is left out.
+// toolkits/. testdata/grouse, a project of its own, is left out.
 func exampleProject(dir string, services []string) error {
 	if err := rook.Init(dir, bot, services); err != nil {
 		return err
 	}
 	return filepath.WalkDir("testdata", func(name string, d fs.DirEntry, err error) error {
-		if err == nil && d.IsDir() && name == "testdata/gromit" {
+		if err == nil && d.IsDir() && name == "testdata/grouse" {
 			return fs.SkipDir
 		}
 		if err != nil || d.IsDir() {
@@ -280,9 +280,9 @@ func (w *world) tap(question, user, choice string) {
 // agents/, whose machines the placed question takes calls from.
 const telegramAsker = `
 	flow: asker
-	allow: [send:gromit/telegram/chat/ask]
+	allow: [send:grouse/telegram/chat/ask]
 	stages:
-	  asking: { job: { call: { at: gromit/telegram/chat/ask }, input: { in: "2", text: "Well?", choices: ["yes", "no"], approvers: "house:approve" } } }
+	  asking: { job: { call: { at: grouse/telegram/chat/ask }, input: { in: "2", text: "Well?", choices: ["yes", "no"], approvers: "house:approve" } } }
 	output: ${stages.asking.output.choice}
 `
 
@@ -366,7 +366,7 @@ func TestProjectReads(t *testing.T) {
 		lifetimes[life] = append(lifetimes[life], m.Location)
 	}
 	want := map[string][]string{
-		"singleton": {"/project/gromit/gitlab/gromit", "/project/gromit/jira/gromit", "/project/gromit/slack/gromit", "/project/gromit/telegram/gromit"},
+		"singleton": {"/project/grouse/gitlab/grouse", "/project/grouse/jira/grouse", "/project/grouse/slack/grouse", "/project/grouse/telegram/grouse"},
 		"keyed":     {"/project/answers", "/project/ballot", "/project/conversation", "/project/placed/answers", "/project/placed/ballot"},
 	}
 	for life, locations := range want {
@@ -393,7 +393,7 @@ func TestProjectReads(t *testing.T) {
 // every service's machines.
 func TestInitWritesTheTree(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "project")
-	if err := rook.Init(dir, "gromit", []string{"slack", "gitlab"}); err != nil {
+	if err := rook.Init(dir, "grouse", []string{"slack", "gitlab"}); err != nil {
 		t.Fatal(err)
 	}
 	var got []string
@@ -414,15 +414,15 @@ func TestInitWritesTheTree(t *testing.T) {
 	}
 	want := []string{
 		".corbieignore", ".mcp.json", "AGENTS.md", "CLAUDE.md", "answers.yaml", "ballot.yaml", "conversation.yaml",
-		"gromit/gitlab/chat/ask.yaml", "gromit/gitlab/chat/post.yaml", "gromit/gitlab/chat/show.yaml", "gromit/gitlab/files/get.yaml", "gromit/gitlab/gromit.yaml",
-		"gromit/slack/assistant/status.yaml", "gromit/slack/chat/ask.yaml", "gromit/slack/chat/post.yaml", "gromit/slack/chat/show.yaml", "gromit/slack/files/get.yaml", "gromit/slack/gromit.yaml",
+		"grouse/gitlab/chat/ask.yaml", "grouse/gitlab/chat/post.yaml", "grouse/gitlab/chat/show.yaml", "grouse/gitlab/files/get.yaml", "grouse/gitlab/grouse.yaml",
+		"grouse/slack/assistant/status.yaml", "grouse/slack/chat/ask.yaml", "grouse/slack/chat/post.yaml", "grouse/slack/chat/show.yaml", "grouse/slack/files/get.yaml", "grouse/slack/grouse.yaml",
 		"later.yaml", "people/find.yaml", "people/scopes.yaml",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("init wrote %q", got)
 	}
-	for _, name := range []string{"conversation.yaml", "gromit/slack/gromit.yaml", "gromit/slack/chat/ask.yaml"} {
-		if text, _ := os.ReadFile(filepath.Join(dir, name)); strings.Contains(string(text), "BOT") || !strings.Contains(string(text), "gromit") {
+	for _, name := range []string{"conversation.yaml", "grouse/slack/grouse.yaml", "grouse/slack/chat/ask.yaml"} {
+		if text, _ := os.ReadFile(filepath.Join(dir, name)); strings.Contains(string(text), "BOT") || !strings.Contains(string(text), "grouse") {
 			t.Errorf("%s does not name the bot:\n%s", name, text)
 		}
 	}
@@ -466,32 +466,32 @@ func TestNoModelInWhatRookWrites(t *testing.T) {
 // changes nothing else of the person's.
 func TestInitAgainKeepsThePersonsFiles(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "project")
-	if err := rook.Init(dir, "gromit", []string{"slack"}); err != nil {
+	if err := rook.Init(dir, "grouse", []string{"slack"}); err != nil {
 		t.Fatal(err)
 	}
 	mine := "bo@example.com: { name: Bo, scopes: [ops] }\n"
 	stale := filepath.Join(dir, ".rook/stale.yaml")
-	for name, text := range map[string]string{"people/scopes.yaml": mine, "gromit/slack/gromit.yaml": "# mine\n", ".corbieignore": "build/", ".rook/slack/listen.yaml": "changed", ".rook/stale.yaml": "old"} {
+	for name, text := range map[string]string{"people/scopes.yaml": mine, "grouse/slack/grouse.yaml": "# mine\n", ".corbieignore": "build/", ".rook/slack/listen.yaml": "changed", ".rook/stale.yaml": "old"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(text), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, name := range []string{"AGENTS.md", "later.yaml", "gromit/slack/chat/post.yaml"} {
+	for _, name := range []string{"AGENTS.md", "later.yaml", "grouse/slack/chat/post.yaml"} {
 		if err := os.Remove(filepath.Join(dir, name)); err != nil {
 			t.Fatal(err)
 		}
 	}
 	for range 2 {
-		if err := rook.Init(dir, "gromit", []string{"slack"}); err != nil {
+		if err := rook.Init(dir, "grouse", []string{"slack"}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for name, want := range map[string]string{"people/scopes.yaml": mine, "gromit/slack/gromit.yaml": "# mine\n", ".corbieignore": "build/\n.rook/\npeople/scopes.yaml\n"} {
+	for name, want := range map[string]string{"people/scopes.yaml": mine, "grouse/slack/grouse.yaml": "# mine\n", ".corbieignore": "build/\n.rook/\npeople/scopes.yaml\n"} {
 		if got, _ := os.ReadFile(filepath.Join(dir, name)); string(got) != want {
 			t.Errorf("%s is now %q", name, got)
 		}
 	}
-	for _, name := range []string{"AGENTS.md", "later.yaml", "gromit/slack/chat/post.yaml"} {
+	for _, name := range []string{"AGENTS.md", "later.yaml", "grouse/slack/chat/post.yaml"} {
 		if _, err := os.Stat(filepath.Join(dir, name)); err != nil {
 			t.Errorf("%s, which init writes when it is not there, was not written", name)
 		}
@@ -499,7 +499,7 @@ func TestInitAgainKeepsThePersonsFiles(t *testing.T) {
 	if got, _ := os.ReadFile(filepath.Join(dir, ".rook/AGENTS.md")); !strings.HasPrefix(string(got), "Rook: ") {
 		t.Errorf(".rook/AGENTS.md is %q, and not the page rook", got)
 	}
-	if differ, err := rook.Differ(dir); err != nil || !reflect.DeepEqual(differ, []string{".corbieignore", "gromit/slack/gromit.yaml", "people/scopes.yaml"}) {
+	if differ, err := rook.Differ(dir); err != nil || !reflect.DeepEqual(differ, []string{".corbieignore", "grouse/slack/grouse.yaml", "people/scopes.yaml"}) {
 		t.Errorf("the files not as Rook starts them are %v, %v", differ, err)
 	}
 	if text := rook.Pages()[3].Text; !strings.Contains(text, "\nconversation.yaml\n-----------------\n\n    # ") || !strings.Contains(text, "\n<bot>/jira/<bot>.yaml\n") {
@@ -513,7 +513,7 @@ func TestInitAgainKeepsThePersonsFiles(t *testing.T) {
 	}
 	// A starting file that is not one of Named stays removed, and so does a
 	// service's file when init does not name the service.
-	removed := []string{"people/scopes.yaml", "people/find.yaml", "CLAUDE.md", ".mcp.json", "conversation.yaml", "gromit/slack/chat/ask.yaml"}
+	removed := []string{"people/scopes.yaml", "people/find.yaml", "CLAUDE.md", ".mcp.json", "conversation.yaml", "grouse/slack/chat/ask.yaml"}
 	for _, name := range removed {
 		if err := os.Remove(filepath.Join(dir, name)); err != nil {
 			t.Fatal(err)
@@ -537,7 +537,7 @@ func TestInitRefusesWhatIsNot(t *testing.T) {
 		services []string
 		want     string
 	}{
-		{"gromit", []string{"carrier-pigeon"}, `there is no service "carrier-pigeon"`},
+		{"grouse", []string{"carrier-pigeon"}, `there is no service "carrier-pigeon"`},
 		{"", []string{"slack"}, "a service needs a bot"},
 		{"my bot", []string{"slack"}, `"my bot" is not a bot's name`},
 		{"../up", nil, `"../up" is not a bot's name`},

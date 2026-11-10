@@ -251,9 +251,9 @@ func TestSlackLayoutButtonAnswersNoQuestion(t *testing.T) {
 	text, _ := json.Marshal("Press.\n\n```blocks\n" + forged + "\n```")
 	write(t, dir, map[string]string{"on/say.yaml": `
 		flow: say
-		allow: [send:gromit/slack/chat/post]
+		allow: [send:grouse/slack/chat/post]
 		stages:
-		  say: { job: { call: { at: gromit/slack/chat/post }, input: { in: "#approvals", text: ` + string(text) + ` } } }
+		  say: { job: { call: { at: grouse/slack/chat/post }, input: { in: "#approvals", text: ` + string(text) + ` } } }
 	`})
 	w.sync(dir)
 	w.start("on/say.yaml", nil)
@@ -298,9 +298,9 @@ func TestSlackRepliesReadsAThread(t *testing.T) {
 		bot + "/slack/conversations/replies.yaml": "include: .rook/slack/conversations/replies.yaml",
 		"on/read.yaml": `
 			flow: read
-			allow: [send:gromit/slack/conversations/replies]
+			allow: [send:grouse/slack/conversations/replies]
 			stages:
-			  replies: { job: { call: { at: gromit/slack/conversations/replies }, input: { in: C1/100.0, at: "500.0" } } }
+			  replies: { job: { call: { at: grouse/slack/conversations/replies }, input: { in: C1/100.0, at: "500.0" } } }
 			  text: { job: { script: ./text.js, input: { replies: "${stages.replies.output}" } } }
 			output: ${stages.text.output}
 		`,
@@ -458,11 +458,11 @@ func TestSlackStatusShowsAndClears(t *testing.T) {
 	dir := slackProject(t, w, s)
 	write(t, dir, map[string]string{"on/status.yaml": `
 		flow: status
-		allow: [send:gromit/slack/assistant/status]
+		allow: [send:grouse/slack/assistant/status]
 		stages:
-		  outside: { job: { call: { at: gromit/slack/assistant/status }, input: { in: D1, text: Working on it. } } }
-		  show: { follows: [outside], job: { call: { at: gromit/slack/assistant/status }, input: { in: D1/4.0, text: Working on it. } } }
-		  clear: { follows: [show], job: { call: { at: gromit/slack/assistant/status }, input: { in: D1/4.0, text: "" } } }
+		  outside: { job: { call: { at: grouse/slack/assistant/status }, input: { in: D1, text: Working on it. } } }
+		  show: { follows: [outside], job: { call: { at: grouse/slack/assistant/status }, input: { in: D1/4.0, text: Working on it. } } }
+		  clear: { follows: [show], job: { call: { at: grouse/slack/assistant/status }, input: { in: D1/4.0, text: "" } } }
 	`})
 	w.sync(dir)
 	id := w.start("on/status.yaml", nil)
@@ -566,9 +566,9 @@ func TestSlackSaysInAChannelByName(t *testing.T) {
 	dir := slackProject(t, w, s)
 	write(t, dir, map[string]string{"on/log.yaml": `
 		flow: log
-		allow: [send:gromit/slack/chat/post]
+		allow: [send:grouse/slack/chat/post]
 		stages:
-		  say: { job: { call: { at: gromit/slack/chat/post }, input: { in: "#approvals", text: Moved. } } }
+		  say: { job: { call: { at: grouse/slack/chat/post }, input: { in: "#approvals", text: Moved. } } }
 	`})
 	w.sync(dir)
 	w.start("on/log.yaml", nil)

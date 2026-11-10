@@ -16,8 +16,8 @@ ask:
     asker: "${input.asker.email}"
     request: "${input.messages.map((m) => (m.later != null ? '(a reminder the bot set) ' : '') + m.text).join('\\n')}"
     by:
-      orders: { ask: [{ at: gromit/slack/chat/ask, in: "#orders-team" }], approvers: "orders:approve", within: 1d }
-      infra: { ask: [{ at: gromit/slack/chat/ask, in: "#infra" }], approvers: "infra:approve", within: 1h }
+      orders: { ask: [{ at: grouse/slack/chat/ask, in: "#orders-team" }], approvers: "orders:approve", within: 1d }
+      infra: { ask: [{ at: grouse/slack/chat/ask, in: "#infra" }], approvers: "infra:approve", within: 1h }
 toolkits:
   orders: { include: toolkits/orders.yaml, when: "${input.asker.scopes.includes('orders:read')}" }
   infra: { include: toolkits/infra.yaml, when: "${input.asker.scopes.includes('infra:read')}" }

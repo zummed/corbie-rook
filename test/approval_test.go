@@ -285,9 +285,9 @@ func TestApproverIsShownNoForgedLine(t *testing.T) {
 func asker(service, input string) string {
 	return `
 		flow: asker
-		allow: [send:gromit/` + service + `/chat/ask]
+		allow: [send:grouse/` + service + `/chat/ask]
 		stages:
-		  asking: { job: { call: { at: gromit/` + service + `/chat/ask }, input: ` + input + ` } }
+		  asking: { job: { call: { at: grouse/` + service + `/chat/ask }, input: ` + input + ` } }
 		output: ${stages.asking.output}
 	`
 }
@@ -296,7 +296,7 @@ func asker(service, input string) string {
 // location, beside answers, the agents and the ballot.
 func receiveFrom(t *testing.T, dir, service, from string) {
 	t.Helper()
-	setSite(t, dir, "gromit/"+service+"/chat/ask.yaml", "receive: [answers, agents/*, ballot]", "receive: [answers, agents/*, ballot, "+from+"]")
+	setSite(t, dir, "grouse/"+service+"/chat/ask.yaml", "receive: [answers, agents/*, ballot]", "receive: [answers, agents/*, ballot, "+from+"]")
 }
 
 // With no press that counts within `within`, the question closes saying no one
@@ -409,7 +409,7 @@ func TestStatechartAsksForApproval(t *testing.T) {
 			allow: [send:ops/pipeline]
 			ask:
 			  machine: .rook/approval.yaml
-			  input: { ask: [{ at: gromit/telegram/chat/ask, in: "1" }], approvers: "messages:approve", within: 1h, asker: "${input.email}", request: "${input.text}" }
+			  input: { ask: [{ at: grouse/telegram/chat/ask, in: "1" }], approvers: "messages:approve", within: 1h, asker: "${input.email}", request: "${input.text}" }
 			initial: waiting
 			states:
 			  waiting:

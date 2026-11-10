@@ -355,10 +355,10 @@ func TestAgentPostsAsItWorksAndGivesNoReply(t *testing.T) {
 			conversationProject(t, w, `
 				flow: assistant
 				input: { messages: list, medium: string, format: "any?", asker: map, thread: "any?", attachments: "any?", conversation: "any?" }
-				allow: [send:gromit/telegram/chat/post]
+				allow: [send:grouse/telegram/chat/post]
 				stages:
 				  progress:
-				    job: { call: { at: gromit/telegram/chat/post }, input: { in: "${input.messages[0].chat}", text: "on ${input.messages[0].text}" } }
+				    job: { call: { at: grouse/telegram/chat/post }, input: { in: "${input.messages[0].chat}", text: "on ${input.messages[0].text}" } }
 			`+"\n"+output, nil)
 			for _, text := range []string{"one", "two"} {
 				w.sendTo("conversation.yaml", key("1", "1"), "message", said("1", "1", text))

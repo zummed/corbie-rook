@@ -4,9 +4,9 @@
 description: The orders app. How it is deployed, its settings, and changing them.
 instructions: { include: ./orders.md }
 tools:
-  read_file: { call: gromit/gitlab/repository/files/read, input: { project: group/orders } }
+  read_file: { call: grouse/gitlab/repository/files/read, input: { project: group/orders } }
   change_file:
-    call: gromit/gitlab/repository/commits/create
+    call: grouse/gitlab/repository/commits/create
     input: { project: group/orders }
     approve: true
     when: "${input.asker.scopes.includes('orders:write')}"

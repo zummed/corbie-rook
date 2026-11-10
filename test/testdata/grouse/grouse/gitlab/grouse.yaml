@@ -1,14 +1,14 @@
-# The router of gromit on GitLab. It runs Rook's GitLab listener as a child,
+# The router of grouse on GitLab. It runs Rook's GitLab listener as a child,
 # reading group/orders. It sends each change to an issue to issue-log, keyed by
 # the issue, and each comment and opened issue that names the bot to the
 # conversation, keyed by the issue, the person and the agent support. It drops
 # the bot's own comments. It sends an answer to a question to `answers`, which
 # sends it on to that question. The host is the value GITLAB_SITE and the token
-# the secret GITLAB_TOKEN, set at /<project>/gromit/gitlab. It takes events
+# the secret GITLAB_TOKEN, set at /<project>/grouse/gitlab. It takes events
 # only from its listener: `receive: []`, here and in the listener, refuses a
 # send from any location.
-statechart: gromit
-description: The router of gromit on GitLab.
+statechart: grouse
+description: The router of grouse on GitLab.
 lifetime: singleton
 receive: []
 allow: [send:conversation, send:issue-log, send:answers]
