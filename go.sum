@@ -16,8 +16,8 @@ github.com/google/pprof v0.0.0-20230207041349-798e818bf904 h1:4/hN5RUoecvl+RmJRE
 github.com/google/pprof v0.0.0-20230207041349-798e818bf904/go.mod h1:uglQLonpP8qtYCYyzA+8c/9qtqgA3qsXGYqCPKARAFg=
 github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 h1:KRzFb2m7YtdldCEkzs6KqmJw4nqEVZGK7IN2kJkjTuQ=
 github.com/santhosh-tekuri/jsonschema/v6 v6.0.2/go.mod h1:JXeL+ps8p7/KNMjDQk3TCwPpBy0wYklyWTfbkIzdIFU=
-github.com/zummed/corbie v0.21.0 h1:K8c5bOOHDcIf8OmcW0zQcamDVUB2R8YCEN0zU9NpUVY=
-github.com/zummed/corbie v0.21.0/go.mod h1:+5/UCGWKu1sGYLBLWEK1hQhun2QT9SuxZA82mmGjwcc=
+github.com/zummed/corbie v0.22.1-0.20261110082459-60170085bb3d h1:eGLndguNCNt7Bkyww0BbJnkkgNKubDvZozoG6RrJazI=
+github.com/zummed/corbie v0.22.1-0.20261110082459-60170085bb3d/go.mod h1:+5/UCGWKu1sGYLBLWEK1hQhun2QT9SuxZA82mmGjwcc=
 go.yaml.in/yaml/v3 v3.0.5 h1:N6y/pJk8buWs9NY5ERU2HSMfm+IuD/OtfdAnq6kESPw=
 go.yaml.in/yaml/v3 v3.0.5/go.mod h1:HVTZu1O7/Vkt2N+BFy8Zza+lnLsABggaTM2ZpNIGuKg=
 golang.org/x/crypto v0.57.0 h1:3ZVCjf8Ggz7zneR/EHRVx68Ctf+2pmIMP2UFhh9cC6M=

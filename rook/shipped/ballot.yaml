@@ -26,10 +26,7 @@ states:
       over: over
   # Keeps the first settled's sender and data, as this state's output.
   settling:
-    defer: [opened]
-    initial: kept
-    states:
-      kept: { end: done, output: { from: "${event.from}", answer: "${event.data}" } }
+    output: { from: "${event.from}", answer: "${event.data}" }
     on: { done: closing }
   closing:
     timers: { quiet: 1d }
